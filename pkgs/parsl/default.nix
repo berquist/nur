@@ -40,7 +40,6 @@
 
   # tests (test-requirements.txt)
   pytestCheckHook,
-  pytest-cov,
   pytest-random-order,
 }:
 
@@ -57,6 +56,13 @@ buildPythonPackage rec {
     url = "https://files.pythonhosted.org/packages/16/94/32047135b76f8c2c56dc87cc2e53e41aa7848659e0d6f82f23f984d54552/parsl-${version}.tar.gz";
     hash = "sha256-ox4ynnCLBb6oN9zd+WR+k3iFFPByR20+mvb0C+BNbH4=";
   };
+
+  # parsl/tests/conftest.py still declares pytest_ignore_collect with the
+  # py.path.local signature that pytest removed in 9.x, so pluggy refuses to
+  # register the conftest and the whole run dies before collection.
+  # https://github.com/Parsl/parsl/issues/4051 — still open upstream, so this
+  # stays until they rework it.
+  patches = [ ./conftest.patch ];
 
   build-system = [ setuptools ];
 
@@ -78,53 +84,48 @@ buildPythonPackage rec {
     typing-extensions
   ];
 
-  optional-dependencies = rec {
-    monitoring = [ sqlalchemy ];
-    visualization = [
-      pydot
-      networkx
-      flask
-      flask-sqlalchemy
-      pandas
-      plotly
-      python-daemon
-    ];
-    aws = [ boto3 ];
-    kubernetes = [ kubernetes ];
-    google_cloud = [
-      google-auth
-      google-api-python-client
-    ];
-    gssapi = [ gssapi ];
-    flux = [
-      pyyaml
-      cffi
-      jsonschema
-    ];
-    globus_transfer = [ globus-sdk ];
+  # Not `rec`: attribute names like `kubernetes` and `gssapi` collide with the
+  # function arguments of the same name, and under `rec` the attribute wins,
+  # giving a list that contains itself.
+  optional-dependencies =
+    let
+      extras = {
+        monitoring = [ sqlalchemy ];
+        visualization = [
+          pydot
+          networkx
+          flask
+          flask-sqlalchemy
+          pandas
+          plotly
+          python-daemon
+        ];
+        aws = [ boto3 ];
+        kubernetes = [ kubernetes ];
+        google_cloud = [
+          google-auth
+          google-api-python-client
+        ];
+        gssapi = [ gssapi ];
+        flux = [
+          pyyaml
+          cffi
+          jsonschema
+        ];
+        globus_transfer = [ globus-sdk ];
 
-    # Extras deliberately omitted because their dependencies are not in
-    # nixpkgs (or are docs-only): docs, azure, workqueue (work_queue /
-    # cctools), proxystore, radical-pilot, globus_compute.
-    all = lib.flatten [
-      monitoring
-      visualization
-      aws
-      kubernetes
-      google_cloud
-      gssapi
-      flux
-      globus_transfer
-    ];
-  };
+        # Extras deliberately omitted because their dependencies are not in
+        # nixpkgs (or are docs-only): docs, azure, workqueue (work_queue /
+        # cctools), proxystore, radical-pilot, globus_compute.
+      };
+    in
+    extras // { all = lib.concatLists (lib.attrValues extras); };
 
   nativeCheckInputs = [
     pytestCheckHook
-    pytest-cov
     pytest-random-order
-    pandas
-    sqlalchemy
-  ];
+  ]
+  ++ optional-dependencies.all;
 
   # Only the unit tests are run. The rest of parsl/tests/ launches executors,
   # binds sockets, shells out to schedulers and in places reaches the network,
@@ -132,6 +133,7 @@ buildPythonPackage rec {
   # parsl/tests/conftest.py.
   pytestFlags = [
     "parsl/tests/unit"
+    "--random-order"
     "--config"
     "local"
   ];
@@ -140,6 +142,17 @@ buildPythonPackage rec {
   #   # needs a working MPI runtime (test-requirements.txt pulls in mpi4py)
   #   "parsl/tests/test_mpi_apps"
   # ];
+
+  disabledTests = [
+    # Globus Compute package not being picked up?
+    "test_gc_executor_resets_uep_after_submit"
+    "test_gc_executor_label"
+    "test_gc_executor_resets_spec_after_submit"
+    "test_gc_executor_shuts_down_asynchronously"
+    "test_gc_executor_label_default"
+    "test_gc_executor_happy_path"
+    "test_gc_executor_mock_spec"
+  ];
 
   pythonImportsCheck = [
     "parsl"
