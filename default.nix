@@ -25,6 +25,7 @@ in
   overlays = import ./overlays; # nixpkgs overlays
 
   example-package = pkgs.callPackage ./pkgs/example-package { };
+  parsl = pypkgs.callPackage ./pkgs/parsl { };
   qcarchivetesting = pypkgs.callPackage ./pkgs/qcarchivetesting { };
   qcfractal = pypkgs.callPackage ./pkgs/qcfractal { };
   qcfractalcompute = pypkgs.callPackage ./pkgs/qcfractalcompute { };
