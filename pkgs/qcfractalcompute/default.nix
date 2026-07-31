@@ -11,6 +11,8 @@
   pydantic-settings,
   pyyaml,
   numpy,
+  # pytestCheckHook,
+  # qcarchivetesting,
 }:
 
 buildPythonPackage rec {
@@ -20,13 +22,7 @@ buildPythonPackage rec {
 
   src = fetchPypi {
     inherit pname version;
-    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-    # Replace with the real hash:
-    #   nix store prefetch-file --json \
-    #     "$(nix-instantiate --eval -E \
-    #       'with import <nixpkgs> {}; fetchPypi { pname = "qcfractalcompute"; version = "0.65"; }' \
-    #       | tr -d '"')"
-    # or simply set hash = lib.fakeHash; build once, and paste the error output.
+    hash = "sha256-QxAvT7GEBogE8LQa5nIp6//p37qvOX3aTfjOJVVxu/I=";
   };
 
   build-system = [
@@ -43,6 +39,11 @@ buildPythonPackage rec {
     pyyaml
     numpy
   ];
+
+  # nativeCheckInputs = [
+  #   pytestCheckHook
+  #   qcarchivetesting
+  # ];
 
   pythonImportsCheck = [ "qcfractalcompute" ];
 
