@@ -8,16 +8,6 @@
 # Run one test:
 #   nix-build tests -A server-defaults
 #   nix-build tests -A assertion-user-mismatch
-#
-# How it works
-# ------------
-# We use nixos/lib/eval-config.nix to evaluate modules against the full NixOS
-# option set.  This gives us systemd.*, networking.*, users.*, services.*,
-# and assertions all defined correctly, without needing to boot a VM.
-#
-# Assertions are enforced by the NixOS assertions module: when an assertion
-# fails, accessing config.system.build (or any other fully-evaluated attribute)
-# throws.  We use builtins.tryEval to catch that for the "should fail" tests.
 
 {
   pkgs ? import <nixpkgs> { },
@@ -27,37 +17,39 @@ let
   lib = pkgs.lib;
 
   # ---------------------------------------------------------------------------
-  # Full NixOS eval.  Loads the complete NixOS module set so that systemd.*,
-  # networking.*, users.*, services.postgresql.*, and assertions are all defined.
-  #
-  # We stub out the package options (qcfractal, qcfractalcompute) with empty
-  # derivations so evalModules doesn't try to build anything real.
+  # Stub packages injected via nixpkgs.overlays — the only safe extension point
+  # when using eval-config.nix, which already sets nixpkgs.pkgs internally.
+  # We only need to stub the two packages referenced by mkPackageOption.
   # ---------------------------------------------------------------------------
-  fakeDrv = name: pkgs.runCommand name { } "mkdir -p $out/bin && touch $out/bin/${name}";
+  stubOverlay = final: prev: {
+    qcfractal =
+      pkgs.runCommand "qcfractal-stub" { }
+        "mkdir -p $out/bin && touch $out/bin/qcfractal-server";
+    qcfractalcompute =
+      pkgs.runCommand "qcfractalcompute-stub" { }
+        "mkdir -p $out/bin && touch $out/bin/qcfractal-compute-manager";
+  };
 
-  baseModules = [
-    # Provide the full NixOS option set (systemd, users, networking, etc.)
-    # without this, options like systemd.services.* don't exist.
-    { nixpkgs.hostPlatform = "x86_64-linux"; }
-  ];
-
+  # ---------------------------------------------------------------------------
+  # Full NixOS evaluation via eval-config.nix.
+  # This loads all NixOS base modules (systemd, networking, users, assertions,
+  # postgresql, …) so every option our modules write to already exists.
+  # ---------------------------------------------------------------------------
   nixosEval =
     modules:
     import "${pkgs.path}/nixos/lib/eval-config.nix" {
-      inherit pkgs lib;
-      system = null; # hostPlatform is set via the module above
-      modules = baseModules ++ modules;
+      inherit lib;
+      system = "x86_64-linux";
+      modules = [
+        { nixpkgs.overlays = [ stubOverlay ]; }
+      ]
+      ++ modules;
     };
 
   evalServer =
     extraConfig:
     (nixosEval [
       ../nixos-modules/qcfractal-server.nix
-      {
-        nixpkgs.pkgs = pkgs // {
-          qcfractal = fakeDrv "qcfractal-server";
-        };
-      }
       extraConfig
     ]).config;
 
@@ -65,11 +57,6 @@ let
     extraConfig:
     (nixosEval [
       ../nixos-modules/qcfractal-compute.nix
-      {
-        nixpkgs.pkgs = pkgs // {
-          qcfractalcompute = fakeDrv "qcfractal-compute-manager";
-        };
-      }
       extraConfig
     ]).config;
 
@@ -83,14 +70,14 @@ let
     );
 
   # ---------------------------------------------------------------------------
-  # assertFails: verifies that forcing a config attribute throws.
-  # NixOS assertions are checked when config.system.build is forced.
-  # builtins.tryEval catches the resulting evaluation error.
+  # assertFails: verifies that a given nixosEval call throws when its
+  # assertions are checked.  Forcing system.build.toplevel triggers the
+  # NixOS assertions module, which throws on any failed assertion.
   # ---------------------------------------------------------------------------
   assertFails =
-    name: getCfg:
+    name: evalCall:
     let
-      result = builtins.tryEval (builtins.seq (getCfg).system.build.toplevel true);
+      result = builtins.tryEval (builtins.seq evalCall.config.system.build.toplevel true);
     in
     check name (!result.success);
 
@@ -216,11 +203,6 @@ rec {
   assertion-user-mismatch = assertFails "assertion-user-mismatch" (nixosEval [
     ../nixos-modules/qcfractal-server.nix
     {
-      nixpkgs.pkgs = pkgs // {
-        qcfractal = fakeDrv "qcfractal-server";
-      };
-    }
-    {
       services.qcfractal = {
         enable = true;
         user = "qcfractal";
@@ -233,11 +215,6 @@ rec {
   # createLocally = false but socket path: should be rejected.
   assertion-socket-without-local = assertFails "assertion-socket-without-local" (nixosEval [
     ../nixos-modules/qcfractal-server.nix
-    {
-      nixpkgs.pkgs = pkgs // {
-        qcfractal = fakeDrv "qcfractal-server";
-      };
-    }
     {
       services.qcfractal = {
         enable = true;
@@ -283,7 +260,7 @@ rec {
   # Programs listed in executor.programs appear on the service's PATH.
   compute-programs-in-path = check "compute-programs-in-path" (
     let
-      fakePsi4 = fakeDrv "psi4";
+      fakePsi4 = pkgs.runCommand "psi4-stub" { } "mkdir -p $out/bin && touch $out/bin/psi4";
       cfg = evalCompute {
         services.qcfractalCompute = {
           enable = true;
