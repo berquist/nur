@@ -77,5 +77,41 @@
           (import ./overlays).qcfractal
         ];
       };
+
+      # -----------------------------------------------------------------------
+      # Checks
+      #
+      # Evaluation tests (fast, no VM, no real packages):
+      #   nix build .#checks.x86_64-linux.eval
+      #
+      # VM integration tests (require KVM and real packages):
+      #   nix build .#checks.x86_64-linux.vm-server-local-db
+      #   nix build .#checks.x86_64-linux.vm-server-open-firewall
+      #   nix build .#checks.x86_64-linux.vm-server-remote-db
+      #   nix build .#checks.x86_64-linux.vm-compute-connects
+      #
+      # All at once:
+      #   nix flake check
+      # -----------------------------------------------------------------------
+      checks = forAllSystems (
+        system:
+        let
+          pkgs' = import nixpkgs {
+            inherit system;
+            overlays = [ self.overlays.qcfractal ];
+          };
+          vmTests = import ./tests/vm.nix { pkgs = pkgs'; };
+        in
+        {
+          # Evaluation tests — always fast, no real packages needed.
+          eval = (import ./tests { pkgs = pkgs'; }).all;
+
+          # VM tests — prefixed "vm-" for easy selection.
+          vm-server-local-db = vmTests.server-local-db;
+          vm-server-open-firewall = vmTests.server-open-firewall;
+          vm-server-remote-db = vmTests.server-remote-db;
+          vm-compute-connects = vmTests.compute-connects;
+        }
+      );
     };
 }
