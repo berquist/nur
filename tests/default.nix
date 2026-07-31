@@ -30,6 +30,11 @@ let
         "mkdir -p $out/bin && touch $out/bin/qcfractal-compute-manager";
   };
 
+  # Silence the stateVersion warning that fires on every eval-config.nix call.
+  noStateVersionWarning = {
+    system.stateVersion = lib.mkDefault "26.11";
+  };
+
   # ---------------------------------------------------------------------------
   # Full NixOS evaluation via eval-config.nix.
   # This loads all NixOS base modules (systemd, networking, users, assertions,
@@ -42,6 +47,7 @@ let
       system = "x86_64-linux";
       modules = [
         { nixpkgs.overlays = [ stubOverlay ]; }
+        noStateVersionWarning
       ]
       ++ modules;
     };
@@ -61,12 +67,14 @@ let
     ]).config;
 
   # ---------------------------------------------------------------------------
-  # check: turns a boolean Nix expression into a build-time test derivation.
+  # check: boolean expression → pass/fail derivation.
+  # $out must be a directory because symlinkJoin requires all paths to be
+  # directories — it creates symlinks for each file found inside them.
   # ---------------------------------------------------------------------------
   check =
     name: assertion:
     pkgs.runCommand "test-${name}" { } (
-      if assertion then "echo 'PASS: ${name}' && touch $out" else "echo 'FAIL: ${name}' >&2 && exit 1"
+      if assertion then "echo 'PASS: ${name}' && mkdir $out" else "echo 'FAIL: ${name}' >&2 && exit 1"
     );
 
   # ---------------------------------------------------------------------------
