@@ -2,27 +2,22 @@
 #
 # Evaluation tests for the QCFractal NixOS modules.
 #
-# These tests verify that the modules evaluate correctly — options typecheck,
-# assertions fire when they should, and the generated systemd/postgresql config
-# looks right — without booting a VM.
-#
 # Run all tests:
-#   nix-build tests
+#   nix-build tests -A all
 #
-# Run a specific test:
+# Run one test:
 #   nix-build tests -A server-defaults
 #   nix-build tests -A assertion-user-mismatch
 #
 # How it works
 # ------------
-# lib.evalModules runs the NixOS module system on a list of modules and returns
-# the evaluated config.  We do NOT need a real pkgs for this: the module uses
-# pkgs for mkPackageOption and lib.getExe, so we stub those with a minimal fake.
-# The stub only needs to satisfy what the module actually calls; it does not need
-# to be a full nixpkgs.
+# We use nixos/lib/eval-config.nix to evaluate modules against the full NixOS
+# option set.  This gives us systemd.*, networking.*, users.*, services.*,
+# and assertions all defined correctly, without needing to boot a VM.
 #
-# The test derivations themselves are built with pkgs (from the argument), but
-# only to get access to lib and runCommandNoCC for driving the assertions.
+# Assertions are enforced by the NixOS assertions module: when an assertion
+# fails, accessing config.system.build (or any other fully-evaluated attribute)
+# throws.  We use builtins.tryEval to catch that for the "should fail" tests.
 
 {
   pkgs ? import <nixpkgs> { },
@@ -32,73 +27,80 @@ let
   lib = pkgs.lib;
 
   # ---------------------------------------------------------------------------
-  # Minimal pkgs stub for evalModules.
-  # mkPackageOption references pkgs.<name>, and the generated ExecStart scripts
-  # call lib.getExe cfg.package, so we provide a fake derivation.
+  # Full NixOS eval.  Loads the complete NixOS module set so that systemd.*,
+  # networking.*, users.*, services.postgresql.*, and assertions are all defined.
+  #
+  # We stub out the package options (qcfractal, qcfractalcompute) with empty
+  # derivations so evalModules doesn't try to build anything real.
   # ---------------------------------------------------------------------------
-  fakeDrv = name: pkgs.runCommandNoCC name { } "mkdir -p $out/bin && touch $out/bin/${name}";
+  fakeDrv = name: pkgs.runCommand name { } "mkdir -p $out/bin && touch $out/bin/${name}";
 
-  fakePkgs = {
-    inherit lib;
-    qcfractal = fakeDrv "qcfractal-server";
-    qcfractalcompute = fakeDrv "qcfractal-compute-manager";
-    writeText = pkgs.writeText;
-    writeShellScript = pkgs.writeShellScript;
-    # tmpfiles rules use builtins only — no pkgs needed there.
-  };
+  baseModules = [
+    # Provide the full NixOS option set (systemd, users, networking, etc.)
+    # without this, options like systemd.services.* don't exist.
+    { nixpkgs.hostPlatform = "x86_64-linux"; }
+  ];
 
-  # ---------------------------------------------------------------------------
-  # evalModules wrapper: evaluates one or both modules with the given config.
-  # Returns config.assertions, config.services.*, config.systemd.*, etc.
-  # ---------------------------------------------------------------------------
+  nixosEval =
+    modules:
+    import "${pkgs.path}/nixos/lib/eval-config.nix" {
+      inherit pkgs lib;
+      system = null; # hostPlatform is set via the module above
+      modules = baseModules ++ modules;
+    };
+
   evalServer =
     extraConfig:
-    (lib.evalModules {
-      modules = [
-        ../nixos-modules/qcfractal-server.nix
-        { _module.args.pkgs = fakePkgs; }
-        extraConfig
-      ];
-    }).config;
+    (nixosEval [
+      ../nixos-modules/qcfractal-server.nix
+      {
+        nixpkgs.pkgs = pkgs // {
+          qcfractal = fakeDrv "qcfractal-server";
+        };
+      }
+      extraConfig
+    ]).config;
 
   evalCompute =
     extraConfig:
-    (lib.evalModules {
-      modules = [
-        ../nixos-modules/qcfractal-compute.nix
-        { _module.args.pkgs = fakePkgs; }
-        extraConfig
-      ];
-    }).config;
+    (nixosEval [
+      ../nixos-modules/qcfractal-compute.nix
+      {
+        nixpkgs.pkgs = pkgs // {
+          qcfractalcompute = fakeDrv "qcfractal-compute-manager";
+        };
+      }
+      extraConfig
+    ]).config;
 
   # ---------------------------------------------------------------------------
-  # Test helper: build a derivation that runs an expression and fails if it
-  # returns false or throws.
+  # check: turns a boolean Nix expression into a build-time test derivation.
   # ---------------------------------------------------------------------------
   check =
     name: assertion:
-    pkgs.runCommandNoCC "test-${name}" { } (
+    pkgs.runCommand "test-${name}" { } (
       if assertion then "echo 'PASS: ${name}' && touch $out" else "echo 'FAIL: ${name}' >&2 && exit 1"
     );
 
   # ---------------------------------------------------------------------------
-  # assertFails: verify that evalModules throws (for assertion-violation tests).
-  # builtins.tryEval catches most evaluation errors.
+  # assertFails: verifies that forcing a config attribute throws.
+  # NixOS assertions are checked when config.system.build is forced.
+  # builtins.tryEval catches the resulting evaluation error.
   # ---------------------------------------------------------------------------
   assertFails =
-    name: thunk:
+    name: getCfg:
     let
-      result = builtins.tryEval (builtins.seq thunk true);
+      result = builtins.tryEval (builtins.seq (getCfg).system.build.toplevel true);
     in
     check name (!result.success);
 
 in
 rec {
   # ==========================================================================
-  # Server module — evaluation with defaults
+  # Server module — correct configurations
   # ==========================================================================
 
-  # Disabled module should produce no systemd services.
+  # Disabled: no services should be created.
   server-disabled = check "server-disabled" (
     let
       cfg = evalServer { };
@@ -106,7 +108,7 @@ rec {
     !(cfg.systemd.services ? qcfractal) && !(cfg.systemd.services ? qcfractal-init-db)
   );
 
-  # Enabled module should produce both services and enable postgresql.
+  # Enabled with defaults: both services present, postgresql wired up.
   server-defaults = check "server-defaults" (
     let
       cfg = evalServer {
@@ -119,7 +121,7 @@ rec {
     && cfg.services.postgresql.ensureDatabases == [ "qcfractal" ]
   );
 
-  # With createLocally = false, postgresql must not be touched.
+  # createLocally = false: postgresql must not be touched.
   server-remote-db = check "server-remote-db" (
     let
       cfg = evalServer {
@@ -133,7 +135,7 @@ rec {
     cfg.services.postgresql.enable == false
   );
 
-  # openFirewall should add the port.
+  # openFirewall = true: port appears in allowedTCPPorts.
   server-open-firewall = check "server-open-firewall" (
     let
       cfg = evalServer {
@@ -147,7 +149,7 @@ rec {
     builtins.elem 7777 cfg.networking.firewall.allowedTCPPorts
   );
 
-  # openFirewall = false (default) must not add anything.
+  # openFirewall = false (default): port must not appear.
   server-no-firewall = check "server-no-firewall" (
     let
       cfg = evalServer {
@@ -171,7 +173,7 @@ rec {
     builtins.elem 8888 cfg.networking.firewall.allowedTCPPorts
   );
 
-  # The generated systemd unit for the server should reference the state dir.
+  # WorkingDirectory matches stateDir.
   server-state-dir = check "server-state-dir" (
     let
       cfg = evalServer {
@@ -194,7 +196,7 @@ rec {
     cfg.systemd.services.qcfractal.serviceConfig.WorkingDirectory == "/srv/qcfractal"
   );
 
-  # User and group are created with the right attributes when using defaults.
+  # System user and group are created.
   server-user-created = check "server-user-created" (
     let
       cfg = evalServer {
@@ -207,41 +209,46 @@ rec {
   );
 
   # ==========================================================================
-  # Server module — assertion violations (these must throw)
+  # Server module — assertion violations (must throw during evaluation)
   # ==========================================================================
 
-  # Mismatched user / database.user with createLocally = true should fail.
-  assertion-user-mismatch = assertFails "assertion-user-mismatch" (
-    let
-      cfg = evalServer {
-        services.qcfractal = {
-          enable = true;
-          user = "qcfractal";
-          database.createLocally = true;
-          database.user = "different-user";
-        };
+  # user != database.user with createLocally should be rejected.
+  assertion-user-mismatch = assertFails "assertion-user-mismatch" (nixosEval [
+    ../nixos-modules/qcfractal-server.nix
+    {
+      nixpkgs.pkgs = pkgs // {
+        qcfractal = fakeDrv "qcfractal-server";
       };
-    in
-    # Force evaluation of the assertions.
-    builtins.seq cfg.assertions true
-  );
+    }
+    {
+      services.qcfractal = {
+        enable = true;
+        user = "qcfractal";
+        database.createLocally = true;
+        database.user = "different-user";
+      };
+    }
+  ]);
 
-  # createLocally = false but host still set to socket path should fail.
-  assertion-socket-without-local = assertFails "assertion-socket-without-local" (
-    let
-      cfg = evalServer {
-        services.qcfractal = {
-          enable = true;
-          database.createLocally = false;
-          database.host = "/run/postgresql";
-        };
+  # createLocally = false but socket path: should be rejected.
+  assertion-socket-without-local = assertFails "assertion-socket-without-local" (nixosEval [
+    ../nixos-modules/qcfractal-server.nix
+    {
+      nixpkgs.pkgs = pkgs // {
+        qcfractal = fakeDrv "qcfractal-server";
       };
-    in
-    builtins.seq cfg.assertions true
-  );
+    }
+    {
+      services.qcfractal = {
+        enable = true;
+        database.createLocally = false;
+        database.host = "/run/postgresql";
+      };
+    }
+  ]);
 
   # ==========================================================================
-  # Compute module — evaluation with defaults
+  # Compute module — correct configurations
   # ==========================================================================
 
   compute-disabled = check "compute-disabled" (
@@ -273,7 +280,7 @@ rec {
     && cfg.users.groups ? qcfractalcompute
   );
 
-  # Programs added to executor.programs appear in the service's path.
+  # Programs listed in executor.programs appear on the service's PATH.
   compute-programs-in-path = check "compute-programs-in-path" (
     let
       fakePsi4 = fakeDrv "psi4";
@@ -288,7 +295,7 @@ rec {
   );
 
   # ==========================================================================
-  # Convenience target: build all tests at once
+  # Convenience target: build all tests at once.
   # ==========================================================================
   all = pkgs.symlinkJoin {
     name = "qcfractal-module-tests";
