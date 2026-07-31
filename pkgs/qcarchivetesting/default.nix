@@ -1,4 +1,4 @@
-# qcarchivetesting – pytest harnesses and fixtures for testing QCArchive
+# qcarchivetesting - pytest harnesses and fixtures for testing QCArchive
 # components.  Not needed for production; only used when running the
 # QCFractal test suite or writing integration tests.
 {

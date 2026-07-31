@@ -1,11 +1,11 @@
-# qcfractal – the QCFractal server (web API + database layer).
+# qcfractal - the QCFractal server (web API + database layer).
 # Provides the `qcfractal-server` CLI entry point.
 #
 # Optional extras (not included in the default build):
-#   services  – geometric, basis_set_exchange (for server-side optimisation services)
-#   geoip     – geoip2 (access-log geo-tagging)
-#   snowflake – temporary in-process server for testing
-#   s3        – boto3 (S3 result storage)
+#   services  - geometric, basis_set_exchange (for server-side optimisation services)
+#   geoip     - geoip2 (access-log geo-tagging)
+#   snowflake - temporary in-process server for testing
+#   s3        - boto3 (S3 result storage)
 
 {
   lib,
@@ -74,7 +74,7 @@ buildPythonPackage rec {
   pythonImportsCheck = [ "qcfractal" ];
 
   meta = with lib; {
-    description = "QCFractal server – distributed quantum chemistry compute & database";
+    description = "QCFractal server - distributed quantum chemistry compute & database";
     homepage = "https://github.com/MolSSI/QCFractal";
     license = lib.licenses.bsd3;
     maintainers = with maintainers; [ berquist ];

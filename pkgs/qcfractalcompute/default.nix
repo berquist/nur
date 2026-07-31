@@ -47,7 +47,7 @@ buildPythonPackage rec {
   pythonImportsCheck = [ "qcfractalcompute" ];
 
   meta = with lib; {
-    description = "QCFractalCompute – compute manager / worker for QCFractal";
+    description = "QCFractalCompute - compute manager / worker for QCFractal";
     homepage = "https://github.com/MolSSI/QCFractal";
     license = lib.licenses.bsd3;
     maintainers = with maintainers; [ berquist ];

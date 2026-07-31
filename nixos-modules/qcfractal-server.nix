@@ -287,7 +287,7 @@ in
     # RemainAfterExit keeps it "active" so qcfractal.service can depend on it
     # and won't restart migrations on every server restart.
     systemd.services.qcfractal-init-db = {
-      description = "QCFractal – initialise or migrate the database schema";
+      description = "QCFractal - initialise or migrate the database schema";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ] ++ lib.optional localDB "postgresql.target";
       requires = lib.optional localDB "postgresql.target";
