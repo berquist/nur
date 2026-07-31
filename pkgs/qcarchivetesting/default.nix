@@ -1,29 +1,16 @@
-# pkgs/qcarchivetesting.nix
-#
 # qcarchivetesting – pytest harnesses and fixtures for testing QCArchive
-# components.  This package is NOT needed for production deployments; it is
-# only useful if you want to run the QCFractal test suite or write integration
-# tests against a live (or snowflake) server.
-#
-# Dependencies:
-#   qcportal, qcfractal, qcfractalcompute (same version)
-#   pytest
-
+# components.  Not needed for production; only used when running the
+# QCFractal test suite or writing integration tests.
 {
   lib,
   buildPythonPackage,
   fetchPypi,
   setuptools,
   versioningit,
-  flask,
-  flask-jwt-extended,
-  flask-cors,
-  waitress,
-  bcrypt,
-  sqlalchemy,
-  alembic,
-  psycopg2,
   qcportal,
+  qcfractal,
+  qcfractalcompute,
+  pytest,
 }:
 
 buildPythonPackage rec {
@@ -42,28 +29,13 @@ buildPythonPackage rec {
   ];
 
   dependencies = [
-    flask
-    flask-jwt-extended
-    flask-cors
-    waitress
-    bcrypt
-    sqlalchemy
-    alembic
-    psycopg2
     qcportal
+    qcfractal
+    qcfractalcompute
+    pytest
   ];
 
-  # propagatedBuildInputs = [
-  #   qcportal
-  #   qcfractal
-  #   qcfractalcompute
-  #   pytest
-  # ];
-
-  # dontBuild = true;
-
-  # Don't run the test suite as part of the package build – that would require
-  # a running PostgreSQL instance.
+  # Tests require a live PostgreSQL instance; skip at build time.
   doCheck = false;
 
   pythonImportsCheck = [ "qcarchivetesting" ];

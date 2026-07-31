@@ -33,7 +33,9 @@
     in
     {
       # -----------------------------------------------------------------------
-      # Legacy packages (NUR convention: all top-level derivations, flat)
+      # Legacy packages (NUR convention: all top-level derivations, flat).
+      # Driven by default.nix, which applies our overlays internally so that
+      # the derivations here are identical to what python3.withPackages returns.
       # -----------------------------------------------------------------------
       legacyPackages = forAllSystems (
         system:
@@ -42,7 +44,7 @@
         }
       );
 
-      # Flake-style packages (derivations only, filtered)
+      # Flake-style packages (derivations only, filtered).
       packages = forAllSystems (
         system: nixpkgs.lib.filterAttrs (_: v: nixpkgs.lib.isDerivation v) self.legacyPackages.${system}
       );
@@ -50,32 +52,29 @@
       # -----------------------------------------------------------------------
       # NixOS modules
       #
-      # Exposed as:
+      # Import into your system flake as:
       #   inputs.nur-berquist.nixosModules.qcfractal-server
       #   inputs.nur-berquist.nixosModules.qcfractal-compute
-      #
-      # Import either or both into your nixosSystem modules list.
       # -----------------------------------------------------------------------
       nixosModules = import ./nixos-modules;
 
       # -----------------------------------------------------------------------
       # Overlays
       #
-      # The QCFractal Python packages overlay (pkgs.qcfractal, etc.):
+      # Our Python packages (pkgs.python3Packages.qcfractal, etc.):
       #   inputs.nur-berquist.overlays.qcfractal
       #
-      # The NixOS-QChem overlay re-exported for convenience (pkgs.qchem.*):
+      # NixOS-QChem re-exported for convenience (pkgs.qchem.*):
       #   inputs.nur-berquist.overlays.qchem
       #
-      # A combined overlay applying both at once:
+      # Both at once:
       #   inputs.nur-berquist.overlays.default
       # -----------------------------------------------------------------------
-      overlays = {
-        qcfractal = import ./pkgs/qcfractal-python;
+      overlays = (import ./overlays) // {
         qchem = nixos-qchem.overlays.qchem;
         default = nixpkgs.lib.composeManyExtensions [
-          self.overlays.qchem
-          self.overlays.qcfractal
+          nixos-qchem.overlays.qchem
+          (import ./overlays).qcfractal
         ];
       };
     };

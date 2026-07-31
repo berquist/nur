@@ -1,33 +1,41 @@
-# This file describes your repository contents.
-# It should return a set of nix derivations
-# and optionally the special attributes `lib`, `overlays`,
-# `nixosModules`, `homeModules`, `darwinModules` and `flakeModules`.
-# It should NOT import <nixpkgs>. Instead, you should take pkgs as an argument.
-# Having pkgs default to <nixpkgs> is fine though, and it lets you use short
-# commands such as:
-#     nix-build -A mypackage
+# default.nix
+#
+# NUR entry point. Applies our overlays to a local pkgs' so that:
+#   nix-build -A qcportal              works
+#   nix-build -A qcfractal             works
+#   python3.withPackages (p: [...])    works (same store paths, no duplication)
+#
+# overlay.nix (the NUR template file) derives itself from this file by
+# filtering reserved names, so it continues to work unchanged.
 
 {
   pkgs ? import <nixpkgs> { },
 }:
 
 let
-  pypkgs = pkgs.python3Packages;
+  overlays = import ./overlays;
+
+  # Compose all overlays in overlays/ into one and apply it.
+  pkgs' = pkgs.extend (pkgs.lib.composeManyExtensions (builtins.attrValues overlays));
+
+  py = pkgs'.python3Packages;
 in
 {
-  # The `lib`, `overlays`, `nixosModules`, `homeModules`,
-  # `darwinModules` and `flakeModules` names are special
-  lib = import ./lib { inherit pkgs; }; # functions
-  nixosModules = import ./nixos-modules; # NixOS modules
-  # homeModules = { }; # Home Manager modules
-  # darwinModules = { }; # nix-darwin modules
-  # flakeModules = { }; # flake-parts modules
-  overlays = import ./overlays; # nixpkgs overlays
+  # Reserved keys — not lifted into the nixpkgs overlay by overlay.nix.
+  lib = import ./lib { pkgs = pkgs'; };
+  nixosModules = import ./nixos-modules;
+  overlays = overlays;
 
-  example-package = pkgs.callPackage ./pkgs/example-package { };
-  parsl = pypkgs.callPackage ./pkgs/parsl { };
-  qcarchivetesting = pypkgs.callPackage ./pkgs/qcarchivetesting { };
-  qcfractal = pypkgs.callPackage ./pkgs/qcfractal { };
-  qcfractalcompute = pypkgs.callPackage ./pkgs/qcfractalcompute { };
-  qcportal = pypkgs.callPackage ./pkgs/qcportal { };
+  # Non-Python packages.
+  example-package = pkgs'.callPackage ./pkgs/example-package { };
+
+  # Python packages, reached through the extended python3Packages so that
+  # these derivations are identical to what python3.withPackages returns.
+  inherit (py)
+    parsl
+    qcportal
+    qcfractal
+    qcfractalcompute
+    qcarchivetesting
+    ;
 }
