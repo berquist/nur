@@ -11,6 +11,9 @@
   pkgs ? import <nixpkgs> { },
 }:
 
+let
+  pypkgs = pkgs.python3Packages;
+in
 {
   # The `lib`, `overlays`, `nixosModules`, `homeModules`,
   # `darwinModules` and `flakeModules` names are special
@@ -22,8 +25,8 @@
   overlays = import ./overlays; # nixpkgs overlays
 
   example-package = pkgs.callPackage ./pkgs/example-package { };
-  qcarchivetesting = pkgs.callPackage ./pkgs/qcarchivetesting { };
-  qcfractal = pkgs.callPackage ./pkgs/qcfractal { };
-  qcfractalcompute = pkgs.callPackage ./pkgs/qcfractalcompute { };
-  qcportal = pkgs.callPackage ./pkgs/qcportal { };
+  qcarchivetesting = pypkgs.callPackage ./pkgs/qcarchivetesting { };
+  qcfractal = pypkgs.callPackage ./pkgs/qcfractal { };
+  qcfractalcompute = pypkgs.callPackage ./pkgs/qcfractalcompute { };
+  qcportal = pypkgs.callPackage ./pkgs/qcportal { };
 }

@@ -13,19 +13,15 @@
   fetchPypi,
   setuptools,
   versioningit,
-  # qcportal, # our local package
-  # sqlalchemy,
-  # alembic,
-  # psycopg2,
-  # pydantic,
-  # pydantic-settings,
-  # pyyaml,
-  # bcrypt,
-  # cryptography,
-  # flask,
-  # flask-jwt-extended,
-  # waitress,
-  # numpy,
+  flask,
+  flask-jwt-extended,
+  flask-cors,
+  waitress,
+  bcrypt,
+  sqlalchemy,
+  alembic,
+  psycopg2,
+  qcportal,
 }:
 
 buildPythonPackage rec {
@@ -41,6 +37,18 @@ buildPythonPackage rec {
   build-system = [
     setuptools
     versioningit
+  ];
+
+  dependencies = [
+    flask
+    flask-jwt-extended
+    flask-cors
+    waitress
+    bcrypt
+    sqlalchemy
+    alembic
+    psycopg2
+    qcportal
   ];
 
   # propagatedBuildInputs = [
