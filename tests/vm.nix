@@ -31,6 +31,15 @@
 let
   inherit (pkgs) lib;
 
+  # The overlay that adds qcfractal and qcfractalcompute to python3Packages.
+  # Must be injected into every VM node so mkPackageOption can find them.
+  qcfractalOverlay = (import ../overlays).qcfractal;
+
+  # Applied to every node in every test to make our packages available.
+  withOverlay = {
+    nixpkgs.overlays = [ qcfractalOverlay ];
+  };
+
   # Common module included in every test VM: cuts boot time significantly.
   minimalVM = {
     # No bootloader needed in a VM test.
@@ -55,7 +64,7 @@ in
   #   - PostgreSQL role and database exist
   #   - The HTTP API responds on port 7777
   # ==========================================================================
-  server-local-db = pkgs.nixosTest {
+  server-local-db = pkgs.testers.nixosTest {
     name = "qcfractal-server-local-db";
 
     nodes.machine =
@@ -64,6 +73,7 @@ in
         imports = [
           minimalVM
           serverModule
+          withOverlay
         ];
 
         services.qcfractal = {
@@ -109,7 +119,7 @@ in
   # Verifies that the firewall rule is applied and the port is reachable from
   # a second VM acting as a remote client.
   # ==========================================================================
-  server-open-firewall = pkgs.nixosTest {
+  server-open-firewall = pkgs.testers.nixosTest {
     name = "qcfractal-server-open-firewall";
 
     nodes = {
@@ -119,6 +129,7 @@ in
           imports = [
             minimalVM
             serverModule
+            withOverlay
           ];
           services.qcfractal = {
             enable = true;
@@ -156,7 +167,7 @@ in
   # Verifies that createLocally = false works: the server connects to
   # PostgreSQL over TCP rather than via the Unix socket.
   # ==========================================================================
-  server-remote-db = pkgs.nixosTest {
+  server-remote-db = pkgs.testers.nixosTest {
     name = "qcfractal-server-remote-db";
 
     nodes = {
@@ -185,6 +196,7 @@ in
           imports = [
             minimalVM
             serverModule
+            withOverlay
           ];
           services.qcfractal = {
             enable = true;
@@ -219,7 +231,7 @@ in
   # with the QCFractal server.  No QC programs are installed; we just check
   # that the worker comes up and the server acknowledges it.
   # ==========================================================================
-  compute-connects = pkgs.nixosTest {
+  compute-connects = pkgs.testers.nixosTest {
     name = "qcfractal-compute-connects";
 
     nodes.machine =
@@ -229,6 +241,7 @@ in
           minimalVM
           serverModule
           computeModule
+          withOverlay
         ];
 
         # Give the VM a bit more memory: running both services simultaneously.
