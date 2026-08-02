@@ -1,5 +1,25 @@
 {
   "nodes": {
+    "nixos-qchem": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1781788737,
+        "narHash": "sha256-7qSJ3xEJfdvwMm026XGhM3rRIvOXProqAOcKI3AaVoA=",
+        "owner": "Nix-QChem",
+        "repo": "NixOS-QChem",
+        "rev": "faad404d8612268b0f341eaab916d35829b290a5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Nix-QChem",
+        "repo": "NixOS-QChem",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1776949667,
@@ -18,6 +38,7 @@
     },
     "root": {
       "inputs": {
+        "nixos-qchem": "nixos-qchem",
         "nixpkgs": "nixpkgs"
       }
     }

@@ -23,8 +23,11 @@ let
   localDB = cfg.enable && cfg.database.createLocally && cfg.database.host == "/run/postgresql";
 
   # Generate the qcf_config.yaml that qcfractal-server reads at startup.
-  # Password is intentionally absent; it is injected at runtime via PGPASSWORD
-  # (read from passwordFile) so it never appears in the Nix store.
+  #
+  # FractalConfig requires three fields that are secrets and therefore must not
+  # be rendered into the world-readable Nix store: database.password,
+  # api.secret_key and api.jwt_secret_key.  They are supplied from the
+  # environment instead -- see runtimeSecrets below.
   serverConfig = lib.generators.toYAML { } (
     {
       name = cfg.serverName;
@@ -50,6 +53,61 @@ let
   );
 
   serverConfigFile = pkgs.writeText "qcf_config.yaml" serverConfig;
+
+  # qcfractal reads its configuration through pydantic-settings, which maps
+  # QCF_<SECTION>__<FIELD> onto <section>.<field> (env_prefix "QCF_",
+  # env_nested_delimiter "__", case-insensitive).  FractalConfig lists
+  # env_settings ahead of init_settings in settings_customise_sources, so the
+  # environment overrides qcf_config.yaml -- hence anything the user pinned
+  # through extraConfig is left alone below.
+  extraApi = cfg.extraConfig.api or { };
+  extraDatabase = cfg.extraConfig.database or { };
+
+  # Flask/JWT signing keys.  Upstream's `qcfractal-server init-config`
+  # generates these randomly; do the same, once, into a 0600 file under
+  # stateDir so they survive restarts without ever entering the store.
+  secretsFile = "${cfg.stateDir}/secrets.env";
+
+  generatedSecrets =
+    lib.optional (!(extraApi ? secret_key)) "QCF_API__SECRET_KEY"
+    ++ lib.optional (!(extraApi ? jwt_secret_key)) "QCF_API__JWT_SECRET_KEY";
+
+  randomSecret = "${pkgs.coreutils}/bin/head -c 32 /dev/urandom | ${pkgs.coreutils}/bin/base64 -w 0";
+
+  apiSecretsSetup = lib.optionalString (generatedSecrets != [ ]) ''
+    if [ ! -f '${secretsFile}' ]; then
+      ( umask 077
+        {
+          ${lib.concatStringsSep "\n      " (
+            map (v: "printf '${v}=%s\\n' \"$(${randomSecret})\"") generatedSecrets
+          )}
+        } > '${secretsFile}'
+      )
+    fi
+    set -a
+    . '${secretsFile}'
+    set +a
+  '';
+
+  # database.password is required by FractalConfig even when it is meaningless.
+  dbPasswordSetup =
+    if extraDatabase ? password then
+      ""
+    else if cfg.database.passwordFile != null then
+      ''
+        QCF_DATABASE__PASSWORD="$(< '${cfg.database.passwordFile}')"
+        export QCF_DATABASE__PASSWORD
+        export PGPASSWORD="$QCF_DATABASE__PASSWORD"
+      ''
+    else
+      ''
+        # Peer authentication over the local Unix socket ignores the password,
+        # but the field still has to validate as a string.
+        export QCF_DATABASE__PASSWORD=""
+      '';
+
+  # Shared preamble for both units; they load the same configuration.
+  runtimeSecrets = apiSecretsSetup + dbPasswordSetup;
 
 in
 {
@@ -212,9 +270,11 @@ in
         example = "/run/credentials/qcfractal.service/db-password";
         description = ''
           Path to a file containing the PostgreSQL password.
-          Read at service start; supplied to libpq via PGPASSWORD so it
-          never appears in the Nix store.
-          Not needed when using local Unix-socket peer authentication.
+          Read at service start and exported as QCF_DATABASE__PASSWORD (and
+          PGPASSWORD), so it never appears in the Nix store.
+          Not needed when using local Unix-socket peer authentication: the
+          password is then set to the empty string, which QCFractal requires
+          to be present but peer authentication ignores.
         '';
       };
     };
@@ -307,9 +367,7 @@ in
           if [ ! -f "$CFG" ]; then
             install -m 0640 '${serverConfigFile}' "$CFG"
           fi
-          ${lib.optionalString (cfg.database.passwordFile != null) ''
-            export PGPASSWORD="$(< '${cfg.database.passwordFile}')"
-          ''}
+          ${runtimeSecrets}
           exec ${lib.getExe cfg.package} --config="$CFG" init-db
         '';
       };
@@ -335,9 +393,7 @@ in
 
         ExecStart = pkgs.writeShellScript "qcfractal-start" ''
           set -euo pipefail
-          ${lib.optionalString (cfg.database.passwordFile != null) ''
-            export PGPASSWORD="$(< '${cfg.database.passwordFile}')"
-          ''}
+          ${runtimeSecrets}
           exec ${lib.getExe cfg.package} \
             --config='${cfg.stateDir}/qcf_config.yaml' \
             start

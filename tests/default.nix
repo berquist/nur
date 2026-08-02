@@ -161,6 +161,80 @@ rec {
     cfg.services.postgresql.enable == false
   );
 
+  # FractalConfig requires database.password, api.secret_key and
+  # api.jwt_secret_key, none of which may be rendered into the store.  Both
+  # units must therefore supply all three from the environment; omitting any
+  # one of them makes qcfractal-server die during config validation before it
+  # ever touches the database.
+  server-required-secrets = check "server-required-secrets" (
+    let
+      cfg = evalServer {
+        services.qcfractal.enable = true;
+      };
+      scriptOf = unit: cfg.systemd.services.${unit}.serviceConfig.ExecStart.text;
+      exportsAll =
+        unit:
+        let
+          s = scriptOf unit;
+        in
+        lib.hasInfix "QCF_API__SECRET_KEY" s
+        && lib.hasInfix "QCF_API__JWT_SECRET_KEY" s
+        && lib.hasInfix "QCF_DATABASE__PASSWORD" s;
+    in
+    exportsAll "qcfractal-init-db" && exportsAll "qcfractal"
+  );
+
+  # Generated signing keys must land outside the store, in stateDir.
+  server-secrets-outside-store = check "server-secrets-outside-store" (
+    let
+      cfg = evalServer {
+        services.qcfractal = {
+          enable = true;
+          stateDir = "/srv/qcfractal";
+        };
+      };
+      s = cfg.systemd.services.qcfractal-init-db.serviceConfig.ExecStart.text;
+    in
+    lib.hasInfix "/srv/qcfractal/secrets.env" s && lib.hasInfix "umask 077" s
+  );
+
+  # extraConfig wins: pydantic-settings puts env_settings ahead of the config
+  # file, so the module must not export values the user pinned by hand.
+  server-secrets-extraconfig-wins = check "server-secrets-extraconfig-wins" (
+    let
+      cfg = evalServer {
+        services.qcfractal = {
+          enable = true;
+          extraConfig.api = {
+            host = "127.0.0.1";
+            port = 7777;
+            secret_key = "pinned";
+            jwt_secret_key = "pinned-jwt";
+          };
+        };
+      };
+      s = cfg.systemd.services.qcfractal.serviceConfig.ExecStart.text;
+    in
+    !(lib.hasInfix "QCF_API__SECRET_KEY" s) && !(lib.hasInfix "QCF_API__JWT_SECRET_KEY" s)
+  );
+
+  # database.passwordFile is read at start time and never inlined.
+  server-password-file = check "server-password-file" (
+    let
+      cfg = evalServer {
+        services.qcfractal = {
+          enable = true;
+          database.createLocally = false;
+          database.host = "db.example.com";
+          database.passwordFile = "/run/secrets/qcfractal-db";
+        };
+      };
+      s = cfg.systemd.services.qcfractal.serviceConfig.ExecStart.text;
+    in
+    lib.hasInfix ''QCF_DATABASE__PASSWORD="$(< '/run/secrets/qcfractal-db')"'' s
+    && lib.hasInfix "PGPASSWORD" s
+  );
+
   # openFirewall = true: port appears in allowedTCPPorts.
   server-open-firewall = check "server-open-firewall" (
     let
@@ -321,6 +395,10 @@ rec {
       server-disabled
       server-defaults
       server-remote-db
+      server-required-secrets
+      server-secrets-outside-store
+      server-secrets-extraconfig-wins
+      server-password-file
       server-open-firewall
       server-no-firewall
       server-custom-port

@@ -181,9 +181,15 @@ in
           services.postgresql = {
             enable = true;
             enableTCPIP = true;
+            # The test framework gives each node both an IPv4 and an IPv6
+            # address on vlan1 and puts both in /etc/hosts, and getaddrinfo
+            # prefers the IPv6 one — so "db" resolves to 2001:db8:1::1 and the
+            # server connects from 2001:db8:1::2.  An IPv4-only pg_hba is
+            # therefore never matched.
             authentication = lib.mkForce ''
-              local all all              trust
+              local all all             trust
               host  all all 0.0.0.0/0   trust
+              host  all all ::/0        trust
             '';
             initialScript = pkgs.writeText "qcfractal-db-init.sql" ''
               CREATE USER qcfractal;
