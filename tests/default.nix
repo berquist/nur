@@ -89,8 +89,39 @@ let
     in
     check name (!result.success);
 
+  # Real (unstubbed) package set, used only by the overlay contract tests
+  # below.  Applied here rather than relying on the caller so that
+  # `nix-build tests -A all` works with a plain <nixpkgs>.
+  overlaidPkgs = pkgs.extend (import ../overlays).qcfractal;
+
 in
 rec {
+  # ==========================================================================
+  # Overlay contract
+  #
+  # The rest of this file stubs pkgs.qcfractal / pkgs.qcfractalcompute, so it
+  # cannot notice if the overlay stops providing them.  That is exactly the
+  # gap that let the VM tests break while these tests stayed green, hence
+  # these two.  Evaluation only — nothing is built.
+  # ==========================================================================
+
+  # mkPackageOption in both modules resolves against the *top level* of pkgs,
+  # not python3Packages.
+  overlay-toplevel-packages = check "overlay-toplevel-packages" (
+    overlaidPkgs ? qcfractal
+    && overlaidPkgs ? qcfractalcompute
+    && overlaidPkgs.qcfractal == overlaidPkgs.python3Packages.qcfractal
+    && overlaidPkgs.qcfractalcompute == overlaidPkgs.python3Packages.qcfractalcompute
+  );
+
+  # Both modules invoke the package via lib.getExe, which falls back to the
+  # package *name* when meta.mainProgram is unset — and neither console script
+  # is named after its package.
+  overlay-main-programs = check "overlay-main-programs" (
+    lib.hasSuffix "/bin/qcfractal-server" (lib.getExe overlaidPkgs.qcfractal)
+    && lib.hasSuffix "/bin/qcfractal-compute-manager" (lib.getExe overlaidPkgs.qcfractalcompute)
+  );
+
   # ==========================================================================
   # Server module — correct configurations
   # ==========================================================================
@@ -285,6 +316,8 @@ rec {
   all = pkgs.symlinkJoin {
     name = "qcfractal-module-tests";
     paths = [
+      overlay-toplevel-packages
+      overlay-main-programs
       server-disabled
       server-defaults
       server-remote-db

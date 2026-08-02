@@ -96,6 +96,9 @@
       checks = forAllSystems (
         system:
         let
+          # pkgs' has our overlay applied — required by both the eval tests
+          # (for runCommand) and the VM tests (testers.nixosTest uses pkgs
+          # directly as the node package set).
           pkgs' = import nixpkgs {
             inherit system;
             overlays = [ self.overlays.qcfractal ];

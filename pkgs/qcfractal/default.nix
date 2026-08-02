@@ -76,6 +76,10 @@ buildPythonPackage rec {
   meta = with lib; {
     description = "QCFractal server - distributed quantum chemistry compute & database";
     homepage = "https://github.com/MolSSI/QCFractal";
+    # The console script is qcfractal-server, not qcfractal; without this
+    # lib.getExe (used by nixos-modules/qcfractal-server.nix) silently falls
+    # back to $out/bin/qcfractal, which does not exist.
+    mainProgram = "qcfractal-server";
     license = lib.licenses.bsd3;
     maintainers = with maintainers; [ berquist ];
   };

@@ -50,6 +50,9 @@ buildPythonPackage rec {
   meta = with lib; {
     description = "QCFractalCompute - compute manager / worker for QCFractal";
     homepage = "https://github.com/MolSSI/QCFractal";
+    # The console script is qcfractal-compute-manager, not qcfractalcompute;
+    # see the note in ../qcfractal/default.nix.
+    mainProgram = "qcfractal-compute-manager";
     license = lib.licenses.bsd3;
     maintainers = with maintainers; [ berquist ];
   };

@@ -20,33 +20,41 @@
 # Run a specific test:
 #   nix-build tests/vm.nix -A server-local-db
 #
-# To interactively debug a failing test, set the QEMU_OPTS / nixos-test
-# driver into interactive mode:
+# All tests via the flake:
+#   nix build .#checks.x86_64-linux.vm-server-local-db
+#
+# Interactive debugging:
 #   $(nix-build tests/vm.nix -A server-local-db.driver)/bin/nixos-test-driver
 
+# pkgs must already have the qcfractal overlay applied, because
+# testers.nixosTest uses the pkgs argument directly as the package set for
+# VM nodes — nixpkgs.overlays inside a node module is evaluated too late to
+# affect the pkgs instance the test framework has already constructed.
+#
+# From the command line:
+#   nix-build tests/vm.nix \
+#     --arg pkgs 'import <nixpkgs> { overlays = [ (import ./overlays).qcfractal ]; }'
+#
+# From the flake, pkgs' is already overlaid before being passed here.
 {
-  pkgs ? import <nixpkgs> { },
+  pkgs ? import <nixpkgs> {
+    overlays = [ (import ../overlays).qcfractal ];
+  },
 }:
 
 let
   inherit (pkgs) lib;
 
-  # The overlay that adds qcfractal and qcfractalcompute to python3Packages.
-  # Must be injected into every VM node so mkPackageOption can find them.
-  qcfractalOverlay = (import ../overlays).qcfractal;
-
-  # Applied to every node in every test to make our packages available.
-  withOverlay = {
-    nixpkgs.overlays = [ qcfractalOverlay ];
-  };
-
-  # Common module included in every test VM: cuts boot time significantly.
+  # Common settings for every test VM.  mkDefault so that individual nodes can
+  # raise the limits (compute-connects needs more RAM) without a conflicting
+  # definition error.
   minimalVM = {
     # No bootloader needed in a VM test.
     boot.loader.grub.enable = false;
-    # Smaller disk image.
-    virtualisation.diskSize = 1024; # MiB
-    virtualisation.memorySize = 512; # MiB
+    virtualisation.diskSize = lib.mkDefault 1024; # MiB
+    # 512 MiB is not enough once PostgreSQL and a Python server that pulls in
+    # numpy/pandas are both resident; 1024 matches the nixos-test default.
+    virtualisation.memorySize = lib.mkDefault 1024; # MiB
   };
 
   # Import our NixOS modules.
@@ -68,12 +76,11 @@ in
     name = "qcfractal-server-local-db";
 
     nodes.machine =
-      { config, pkgs, ... }:
+      { ... }:
       {
         imports = [
           minimalVM
           serverModule
-          withOverlay
         ];
 
         services.qcfractal = {
@@ -114,22 +121,18 @@ in
   };
 
   # ==========================================================================
-  # Test 2: server with openFirewall = true.
-  #
-  # Verifies that the firewall rule is applied and the port is reachable from
-  # a second VM acting as a remote client.
+  # Test 2: openFirewall = true — port reachable from a second VM.
   # ==========================================================================
   server-open-firewall = pkgs.testers.nixosTest {
     name = "qcfractal-server-open-firewall";
 
     nodes = {
       server =
-        { config, pkgs, ... }:
+        { ... }:
         {
           imports = [
             minimalVM
             serverModule
-            withOverlay
           ];
           services.qcfractal = {
             enable = true;
@@ -172,7 +175,7 @@ in
 
     nodes = {
       db =
-        { config, pkgs, ... }:
+        { ... }:
         {
           imports = [ minimalVM ];
           services.postgresql = {
@@ -191,12 +194,11 @@ in
         };
 
       server =
-        { config, pkgs, ... }:
+        { ... }:
         {
           imports = [
             minimalVM
             serverModule
-            withOverlay
           ];
           services.qcfractal = {
             enable = true;
@@ -211,12 +213,17 @@ in
         };
     };
 
+    # The database must be accepting connections before the server boots:
+    # qcfractal-init-db is a oneshot and systemd forbids Restart= on
+    # Type=oneshot, so a failed migration is permanent and takes
+    # qcfractal.service (which requires it) down with it.  There is no
+    # cross-node ordering in the test framework, so serialise it here.
     testScript = ''
       db.start()
-      server.start()
-
       db.wait_for_unit("postgresql.service")
-      # Give the server time to connect and initialise the schema.
+      db.wait_for_open_port(5432)
+
+      server.start()
       server.wait_for_unit("qcfractal-init-db.service")
       server.wait_for_unit("qcfractal.service")
       server.wait_for_open_port(7777)
@@ -235,17 +242,15 @@ in
     name = "qcfractal-compute-connects";
 
     nodes.machine =
-      { config, pkgs, ... }:
+      { ... }:
       {
         imports = [
           minimalVM
           serverModule
           computeModule
-          withOverlay
         ];
-
-        # Give the VM a bit more memory: running both services simultaneously.
-        virtualisation.memorySize = 768;
+        # Server + PostgreSQL + a Parsl worker pool all on one node.
+        virtualisation.memorySize = 2048;
 
         services.qcfractal = {
           enable = true;
@@ -258,26 +263,34 @@ in
           server.fractalUri = "http://localhost:7777";
           # username / passwordFile omitted: security is disabled on the server.
           executor.maxWorkers = 1;
+          # Default is 4 GiB, which this VM does not have.
+          executor.memoryPerWorker = 1.0;
         };
       };
 
+    # Registration is asynchronous: the manager heartbeats to the server after
+    # Parsl has finished spinning up its executor, which takes appreciably
+    # longer than a fixed sleep can be relied on.  Poll instead.
     testScript = ''
       machine.start()
       machine.wait_for_unit("qcfractal.service")
       machine.wait_for_open_port(7777)
       machine.wait_for_unit("qcfractalcompute.service")
 
-      # Give the manager a moment to register with the server.
-      machine.sleep(5)
-
-      # The server's managers endpoint should list our worker.
-      response = machine.succeed(
-          "curl -sf http://localhost:7777/api/v1/managers"
-      )
       import json
-      managers = json.loads(response)
-      assert len(managers) > 0, f"no managers registered: {managers}"
-      print(f"Registered managers: {managers}")
+
+      def managers_registered(_):
+          status, output = machine.execute(
+              "curl -sf http://localhost:7777/api/v1/managers"
+          )
+          if status != 0:
+              return False
+          return len(json.loads(output)) > 0
+
+      with machine.nested("waiting for the compute manager to register"):
+          retry(managers_registered, timeout_seconds = 180)
+
+      print(machine.succeed("curl -sf http://localhost:7777/api/v1/managers"))
     '';
   };
 }

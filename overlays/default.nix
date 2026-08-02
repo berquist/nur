@@ -24,5 +24,21 @@
         qcarchivetesting = pself.callPackage ../pkgs/qcarchivetesting { };
       })
     ];
+
+    # Top-level aliases. These are the *same* derivations as the entries in
+    # python3Packages above (not rebuilds), and they are what
+    # lib.mkPackageOption pkgs "qcfractal" in the NixOS modules resolves
+    # against — without them, `services.qcfractal.package` fails with
+    # "qcfractal cannot be found in pkgs" the moment a VM node or a real
+    # system evaluates the module.
+    #
+    # Keep this list in sync with the `inherit (py)` list in ../default.nix.
+    inherit (final.python3Packages)
+      parsl
+      qcportal
+      qcfractal
+      qcfractalcompute
+      qcarchivetesting
+      ;
   };
 }
