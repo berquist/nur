@@ -40,6 +40,24 @@
   pkgs ? import <nixpkgs> {
     overlays = [ (import ../overlays).qcfractal ];
   },
+
+  # A real QC program for the compute-worker tests.  qcfractalcompute refuses
+  # to start an executor with no discoverable programs, so these tests cannot
+  # run with an empty PATH.
+  #
+  # Psi4 comes from the nixos-qchem overlay, which is a *flake input* —
+  # ../overlays cannot provide it, so the default argument above has no
+  # pkgs.qchem.  The psi4-backed tests are therefore reachable only through
+  # the flake (which passes overlays.default), or by supplying this argument
+  # explicitly.  Everything else in this file works either way.
+  psi4 ?
+    pkgs.qchem.psi4 or (throw ''
+      tests/vm.nix: the compute tests need pkgs.qchem.psi4, which comes from
+      the nixos-qchem overlay.  Use the flake:
+        nix build .#checks.x86_64-linux.vm-compute-connects
+      or pass one in:
+        nix-build tests/vm.nix -A compute-connects --arg psi4 '<derivation>'
+    ''),
 }:
 
 let
@@ -260,11 +278,18 @@ in
   };
 
   # ==========================================================================
-  # Test 4: compute worker connects to the server.
+  # Test 4: compute worker installs a QC program and registers.
   #
-  # Verifies that qcfractalcompute starts and successfully registers itself
-  # with the QCFractal server.  No QC programs are installed; we just check
-  # that the worker comes up and the server acknowledges it.
+  # Verifies that qcfractalcompute starts, discovers Psi4 on the PATH the
+  # module builds from executor.programs, and registers itself with the
+  # server advertising that program.  It deliberately stops there: no
+  # calculation is submitted, so this stays the fast check that the
+  # module's program wiring works.  See compute-singlepoint for the
+  # end-to-end version.
+  #
+  # A program is not optional here — qcfractalcompute raises
+  # "Executor <label> has no available programs" and exits if an executor
+  # discovers none, so an empty executor.programs cannot be tested.
   # ==========================================================================
   compute-connects = pkgs.testers.nixosTest {
     name = "qcfractal-compute-connects";
@@ -293,6 +318,9 @@ in
           executor.maxWorkers = 1;
           # Default is 4 GiB, which this VM does not have.
           executor.memoryPerWorker = 1.0;
+          # QCEngine finds programs by probing PATH; the module builds that
+          # PATH from this list.
+          executor.programs = [ psi4 ];
         };
       };
 
@@ -325,7 +353,136 @@ in
       with machine.nested("waiting for the compute manager to register"):
           retry(managers_registered, timeout_seconds = 180)
 
-      print(machine.succeed(query_managers))
+      # The manager reports what QCEngine found on its PATH.  Psi4 showing up
+      # here is what proves executor.programs actually reached the worker,
+      # rather than the worker merely having started.
+      managers = json.loads(machine.succeed(query_managers))
+      print(managers)
+      programs = set()
+      for m in managers:
+          programs.update(m["programs"].keys())
+      assert "psi4" in programs, f"psi4 not advertised; manager programs: {programs}"
     '';
+  };
+
+  # ==========================================================================
+  # Test 5: end-to-end — submit a calculation and check the stored result.
+  #
+  # The full round trip: a client submits a singlepoint through qcportal, the
+  # server queues it, the worker claims and runs it in Psi4, and the result
+  # comes back through the API with a physically sensible energy.
+  #
+  # This is deliberately separate from compute-connects.  That test answers
+  # "is the module's program wiring right?" and fails fast; this one answers
+  # "does a calculation actually run and get stored?" and is much slower,
+  # since it waits on a real Psi4 execution.
+  # ==========================================================================
+  compute-singlepoint = pkgs.testers.nixosTest {
+    name = "qcfractal-compute-singlepoint";
+
+    nodes.machine =
+      { ... }:
+      {
+        imports = [
+          minimalVM
+          serverModule
+          computeModule
+        ];
+        # Server, PostgreSQL, a Parsl worker pool and Psi4 all on one node.
+        virtualisation.memorySize = 4096;
+        virtualisation.diskSize = 8192;
+
+        services.qcfractal = {
+          enable = true;
+          api.host = "0.0.0.0";
+          enableSecurity = false; # the client below connects unauthenticated
+        };
+
+        services.qcfractalCompute = {
+          enable = true;
+          server.fractalUri = "http://localhost:7777";
+          executor.maxWorkers = 1;
+          executor.memoryPerWorker = 1.0;
+          executor.programs = [ psi4 ];
+        };
+
+        # qcportal for the submitting client.  This is the same derivation the
+        # server uses, reached through the overlay's python package set.
+        environment.systemPackages = [
+          (pkgs.python3.withPackages (p: [ p.qcportal ]))
+        ];
+      };
+
+    testScript =
+      let
+        # H2 at 1.4 bohr, HF/STO-3G: small enough that Psi4 finishes in
+        # seconds, and a well-known reference value (about -1.117 Eh) to
+        # check the stored result against.
+        submitScript = pkgs.writeText "submit.py" ''
+          import sys
+          from qcportal import PortalClient
+          from qcportal.molecules import Molecule
+
+          client = PortalClient("http://localhost:7777")
+
+          # Geometry is in bohr, which is qcelemental's default.
+          h2 = Molecule(symbols=["H", "H"], geometry=[0.0, 0.0, 0.0, 0.0, 0.0, 1.4])
+
+          meta, ids = client.add_singlepoints([h2], "psi4", "energy", "hf", "sto-3g")
+          if not meta.success:
+              sys.exit(f"submission failed: {meta}")
+          print(ids[0])
+        '';
+
+        collectScript = pkgs.writeText "collect.py" ''
+          import sys
+          from qcportal import PortalClient
+
+          record_id = int(sys.argv[1])
+          client = PortalClient("http://localhost:7777")
+          record = client.get_singlepoints(record_id)
+
+          if record.status != "complete":
+              # Not done yet, or failed.  Surface the error if there is one so
+              # the test log shows why rather than just timing out.
+              if record.status == "error":
+                  sys.exit(f"record errored: {record.error}")
+              sys.exit(f"status={record.status}")
+
+          print(record.return_result)
+        '';
+      in
+      ''
+        machine.start()
+        machine.wait_for_unit("qcfractal.service")
+        machine.wait_for_open_port(7777)
+        machine.wait_for_unit("qcfractalcompute.service")
+
+        # Submit one singlepoint and remember the record id.
+        record_id = machine.succeed(
+            "python3 ${submitScript}"
+        ).strip()
+        print(f"submitted record {record_id}")
+
+        # The worker has to claim the task, run Psi4 and post the result back.
+        def record_complete(_):
+            status, _output = machine.execute(
+                f"python3 ${collectScript} {record_id}"
+            )
+            return status == 0
+
+        with machine.nested("waiting for the calculation to complete"):
+            retry(record_complete, timeout_seconds = 600)
+
+        energy = float(
+            machine.succeed(f"python3 ${collectScript} {record_id}").strip()
+        )
+        print(f"HF/STO-3G energy for H2: {energy} Eh")
+
+        # Bracket the known reference (about -1.117 Eh) loosely enough to
+        # tolerate convergence details, tightly enough that a wrong molecule,
+        # method or unit would fail.
+        assert -1.3 < energy < -0.9, f"energy out of range: {energy}"
+      '';
   };
 }

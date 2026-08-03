@@ -89,6 +89,7 @@
       #   nix build .#checks.x86_64-linux.vm-server-open-firewall
       #   nix build .#checks.x86_64-linux.vm-server-remote-db
       #   nix build .#checks.x86_64-linux.vm-compute-connects
+      #   nix build .#checks.x86_64-linux.vm-compute-singlepoint
       #
       # All at once:
       #   nix flake check
@@ -103,7 +104,26 @@
             inherit system;
             overlays = [ self.overlays.qcfractal ];
           };
-          vmTests = import ./tests/vm.nix { pkgs = pkgs'; };
+
+          # Psi4 for the compute tests, taken from a *separate* instantiation
+          # rather than by folding overlays.qchem into pkgs' above.
+          #
+          # The nixos-qchem overlay extends python3's packageOverrides, so
+          # applying it to the node package set would rebuild qcfractal,
+          # qcportal and their whole dependency closure against a different
+          # Python package set — a large rebuild that would also change the
+          # tests that do not involve Psi4 at all.  A QC program only has to
+          # be an executable on the worker's PATH, so it is fine for it to
+          # come from its own package set.
+          qchemPkgs = import nixpkgs {
+            inherit system;
+            overlays = [ self.overlays.qchem ];
+          };
+
+          vmTests = import ./tests/vm.nix {
+            pkgs = pkgs';
+            psi4 = qchemPkgs.qchem.psi4;
+          };
         in
         {
           # Evaluation tests — always fast, no real packages needed.
@@ -114,6 +134,7 @@
           vm-server-open-firewall = vmTests.server-open-firewall;
           vm-server-remote-db = vmTests.server-remote-db;
           vm-compute-connects = vmTests.compute-connects;
+          vm-compute-singlepoint = vmTests.compute-singlepoint;
         }
       );
     };
