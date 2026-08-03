@@ -8,6 +8,10 @@
 #
 # Everything here needs a working nix-daemon.  For the eval-only subset that
 # runs without one, see scripts/no-daemon-check.sh (`just check-no-daemon`).
+#
+# These recipes work under both CppNix and Lix.  Nothing here parses the output
+# of `nix --version`, which is the one thing that reliably breaks across the
+# two — see the note on ci-build.
 
 nixpkgs_url := "https://github.com/NixOS/nixpkgs/archive/refs/heads"
 default_channel := "nixpkgs-unstable"
@@ -43,9 +47,24 @@ ci-eval:
       -I nixpkgs=$(nix-instantiate --find-file nixpkgs) \
       -I $PWD
 
+# Deliberately NOT nix-build-uncached, which the NUR template used here.  That
+# tool shells out to `nix --version` and parses the result with the literal
+# format `nix (Nix) %d.%d.%d`; Lix answers `nix (Lix, like Nix) 2.x.y`, which
+# cannot match, so it aborts with "Failed to get nix version" before doing any
+# work.  That is a property of the tool, not of the environment — switching CI
+# to Lix would break it there too.
+#
+# It bought us nothing anyway while the cachix step is disabled by the
+# <YOUR_CACHIX_NAME> placeholder: its whole point is skipping paths already in
+# *your* cache.  Worth revisiting if cachix is ever turned on, by which time
+# upstream may parse Lix's version string.
+#
+# `nix build` rather than `nix-build` because only the new CLI accepts -L, and
+# it handles ci.nix's list-valued attribute fine.
+
 # Build everything ci.nix reports as buildable and cacheable.
 ci-build:
-    nix shell -f '<nixpkgs>' nix-build-uncached -c nix-build-uncached ci.nix -A cacheOutputs
+    nix build -L --no-link -f ci.nix cacheOutputs
 
 # Full CI sequence against one channel, e.g. `just ci nixos-26.05`.
 ci channel=default_channel:
@@ -64,9 +83,14 @@ ci-matrix:
 # Tests
 # ---------------------------------------------------------------------------
 
+# -L keeps the full builder output rather than the last few lines, so the whole
+# run can be redirected to a file.  Classic nix-build does not accept -L (it
+# errors with "unrecognised flag"), but it streams build output by default, so
+# the nix-build recipes below need nothing extra.
+
 # Everything: eval tests, all six VM tests, and the pre-commit hooks.
 check:
-    nix flake check
+    nix flake check -L
 
 # Evaluation tests only — fast, no VM, stubbed packages.
 eval-tests:
@@ -74,7 +98,7 @@ eval-tests:
 
 # One VM integration test, e.g. `just vm-test server-local-db`. Needs KVM.
 vm-test name:
-    nix build --no-link .#checks.$(nix eval --impure --raw --expr builtins.currentSystem).vm-{{ name }}
+    nix build -L --no-link .#checks.$(nix eval --impure --raw --expr builtins.currentSystem).vm-{{ name }}
 
 # Drop into the interactive driver for one VM test.
 vm-test-interactive name:

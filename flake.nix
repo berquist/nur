@@ -230,7 +230,6 @@
               pkgs.statix
               pkgs.deadnix
               pkgs.prek
-              pkgs.nix-build-uncached
               pkgs.jq
             ];
           };
