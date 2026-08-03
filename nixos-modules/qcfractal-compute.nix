@@ -30,7 +30,7 @@ let
         fractal_uri = cfg.server.fractalUri;
       }
       // lib.optionalAttrs (cfg.server.username != null) {
-        username = cfg.server.username;
+        inherit (cfg.server) username;
       };
 
       executors.local_executor = {
@@ -223,7 +223,7 @@ in
     users.users = lib.mkIf (cfg.user == "qcfractalcompute") {
       qcfractalcompute = {
         isSystemUser = true;
-        group = cfg.group;
+        inherit (cfg) group;
         home = cfg.stateDir;
         description = "QCFractalCompute worker daemon";
       };

@@ -90,7 +90,7 @@
         # Both at once:
         #   inputs.nur-berquist.overlays.default
         overlays = (import ./overlays) // {
-          qchem = inputs.nixos-qchem.overlays.qchem;
+          inherit (inputs.nixos-qchem.overlays) qchem;
           default = inputs.nixpkgs.lib.composeManyExtensions [
             inputs.nixos-qchem.overlays.qchem
             (import ./overlays).qcfractal

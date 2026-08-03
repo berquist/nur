@@ -14,14 +14,14 @@
 }:
 
 let
-  lib = pkgs.lib;
+  inherit (pkgs) lib;
 
   # ---------------------------------------------------------------------------
   # Stub packages injected via nixpkgs.overlays — the only safe extension point
   # when using eval-config.nix, which already sets nixpkgs.pkgs internally.
   # We only need to stub the two packages referenced by mkPackageOption.
   # ---------------------------------------------------------------------------
-  stubOverlay = final: prev: {
+  stubOverlay = _final: _prev: {
     qcfractal =
       pkgs.runCommand "qcfractal-stub" { }
         "mkdir -p $out/bin && touch $out/bin/qcfractal-server";
@@ -160,7 +160,7 @@ rec {
     in
     cfg.systemd.services ? qcfractal
     && cfg.systemd.services ? qcfractal-init-db
-    && cfg.services.postgresql.enable == true
+    && cfg.services.postgresql.enable
     && (
       let
         users = cfg.services.postgresql.ensureUsers;
@@ -168,7 +168,7 @@ rec {
       builtins.length users == 1
       && (builtins.head users).name == "qcfractal"
       # init-db issues the CREATE DATABASE itself, so the role needs CREATEDB.
-      && (builtins.head users).ensureClauses.createdb == true
+      && (builtins.head users).ensureClauses.createdb
     )
   );
 
@@ -245,7 +245,7 @@ rec {
         };
       };
     in
-    cfg.services.postgresql.enable == false
+    !cfg.services.postgresql.enable
   );
 
   # FractalConfig requires database.password, api.secret_key and
@@ -391,7 +391,7 @@ rec {
       };
     in
     cfg.users.users ? qcfractal
-    && cfg.users.users.qcfractal.isSystemUser == true
+    && cfg.users.users.qcfractal.isSystemUser
     && cfg.users.groups ? qcfractal
   );
 
@@ -453,7 +453,7 @@ rec {
       };
     in
     cfg.users.users ? qcfractalcompute
-    && cfg.users.users.qcfractalcompute.isSystemUser == true
+    && cfg.users.users.qcfractalcompute.isSystemUser
     && cfg.users.groups ? qcfractalcompute
   );
 

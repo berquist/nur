@@ -34,7 +34,7 @@ in
   # Reserved keys — not lifted into the nixpkgs overlay by overlay.nix.
   lib = import ./lib { pkgs = pkgs'; };
   nixosModules = import ./nixos-modules;
-  overlays = overlays;
+  inherit overlays;
 
   # Non-Python packages.
   example-package = pkgs'.callPackage ./pkgs/example-package { };

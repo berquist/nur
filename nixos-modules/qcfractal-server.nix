@@ -36,14 +36,12 @@ let
       allow_unauthenticated_read = cfg.allowUnauthenticatedRead;
 
       api = {
-        host = cfg.api.host;
-        port = cfg.api.port;
+        inherit (cfg.api) host port;
       };
 
       database = {
         own = false;
-        host = cfg.database.host;
-        port = cfg.database.port;
+        inherit (cfg.database) host port;
         database_name = cfg.database.name;
         username = cfg.database.user;
       };
@@ -339,7 +337,7 @@ in
     users.users = lib.mkIf (cfg.user == "qcfractal") {
       qcfractal = {
         isSystemUser = true;
-        group = cfg.group;
+        inherit (cfg) group;
         home = cfg.stateDir;
         description = "QCFractal server daemon";
       };

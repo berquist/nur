@@ -19,6 +19,9 @@
 
   outputs =
     {
+      # Unused in this excerpt, but kept because a real system flake almost
+      # always binds it — this file is meant to be copied, not evaluated.
+      # deadnix: skip
       self,
       nixpkgs,
       nur-berquist,
