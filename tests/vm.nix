@@ -191,9 +191,13 @@ in
               host  all all 0.0.0.0/0   trust
               host  all all ::/0        trust
             '';
+            # Only the role: `init-db` creates the database itself, and it
+            # only creates the schema on the branch where it creates the
+            # database.  Pre-creating it here leaves an empty, unstamped
+            # database and the server then loops on "Database needs
+            # migration".
             initialScript = pkgs.writeText "qcfractal-db-init.sql" ''
-              CREATE USER qcfractal;
-              CREATE DATABASE qcfractal OWNER qcfractal;
+              CREATE USER qcfractal CREATEDB;
             '';
           };
           networking.firewall.allowedTCPPorts = [ 5432 ];

@@ -144,7 +144,27 @@ rec {
     cfg.systemd.services ? qcfractal
     && cfg.systemd.services ? qcfractal-init-db
     && cfg.services.postgresql.enable == true
-    && cfg.services.postgresql.ensureDatabases == [ "qcfractal" ]
+    && (
+      let
+        users = cfg.services.postgresql.ensureUsers;
+      in
+      builtins.length users == 1
+      && (builtins.head users).name == "qcfractal"
+      # init-db issues the CREATE DATABASE itself, so the role needs CREATEDB.
+      && (builtins.head users).ensureClauses.createdb == true
+    )
+  );
+
+  # The database must NOT be pre-created: qcfractal-server init-db only
+  # bootstraps the schema on the code path where it creates the database
+  # itself, and there is no alembic path from an empty database.
+  server-db-not-precreated = check "server-db-not-precreated" (
+    let
+      cfg = evalServer {
+        services.qcfractal.enable = true;
+      };
+    in
+    cfg.services.postgresql.ensureDatabases == [ ]
   );
 
   # createLocally = false: postgresql must not be touched.
@@ -394,6 +414,7 @@ rec {
       overlay-main-programs
       server-disabled
       server-defaults
+      server-db-not-precreated
       server-remote-db
       server-required-secrets
       server-secrets-outside-store

@@ -323,13 +323,26 @@ in
       qcfractal = { };
     };
 
+    # Create the role but deliberately NOT the database.
+    #
+    # `qcfractal-server init-db` bootstraps the schema in PostgresHarness.
+    # create_database, and that only happens on the branch that creates the
+    # database itself -- if the database already exists it logs "already
+    # exists, so I am leaving it alone" and returns without creating any
+    # tables or stamping an alembic revision.  `start` then fails its
+    # check_db_revision with "Database needs migration", forever.
+    #
+    # `upgrade-db` cannot repair that either: the alembic history's root
+    # revision alters existing tables rather than creating the schema, so
+    # there is no migration path from an empty database.  Letting init-db
+    # own creation is the only bootstrap route, which is also what the
+    # upstream setup guide assumes.
     services.postgresql = lib.mkIf localDB {
       enable = lib.mkDefault true;
-      ensureDatabases = [ cfg.database.name ];
       ensureUsers = [
         {
           name = cfg.database.user;
-          ensureDBOwnership = true;
+          ensureClauses.createdb = true;
         }
       ];
     };
@@ -382,6 +395,14 @@ in
       ]
       ++ lib.optional localDB "postgresql.target";
       requires = [ "qcfractal-init-db.service" ] ++ lib.optional localDB "postgresql.target";
+
+      # Bound the restart loop.  systemd's default start limit (5 failures in
+      # 10s) can never trigger with RestartSec=15s, so a permanently broken
+      # configuration would otherwise restart every 15 seconds forever, never
+      # reaching "failed" and never surfacing as an error.  Ten attempts over
+      # ten minutes still rides out a transient database restart.
+      startLimitIntervalSec = 600;
+      startLimitBurst = 10;
 
       serviceConfig = {
         Type = "simple";
