@@ -93,6 +93,9 @@ in
           # outright unless this is set.  Enabling it here also gives the
           # option end-to-end coverage.
           allowUnauthenticatedRead = true;
+          # Distinctive value so the assertion below proves the generated
+          # qcf_config.yaml is what the server actually loaded.
+          serverName = "nixos-vm-test-server";
           # Defaults: createLocally = true, peer auth via Unix socket.
         };
       };
@@ -120,7 +123,9 @@ in
       response = machine.succeed("curl -sf http://localhost:7777/api/v1/information")
       import json
       info = json.loads(response)
-      assert "server_name" in info, f"unexpected response: {info}"
+      # get_public_server_information returns the configured server name
+      # under "name" (not "server_name"), sourced from qcf_config.yaml.
+      assert info["name"] == "nixos-vm-test-server", f"unexpected response: {info}"
       print(f"Server info: {info}")
     '';
   };
