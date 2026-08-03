@@ -4,6 +4,14 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    systems.url = "github:nix-systems/default";
+
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # NixOS-QChem provides Psi4, CFOUR, NWChem, and many other QC codes.
     # Packages live under pkgs.qchem.* once the overlay is applied.
     #
@@ -41,6 +49,11 @@
 
   # Binary cache for NixOS-QChem (Psi4 and CFOUR are large; fetch binaries
   # rather than compiling from source).
+  #
+  # Note that Nix ignores extra-substituters unless the invoking user is in
+  # trusted-users.  Without that, `nix flake check` silently builds Psi4 from
+  # source no matter how correct the pinning above is — look for "warning:
+  # ignoring untrusted flake configuration setting" before blaming the hashes.
   nixConfig = {
     extra-substituters = [ "https://nix-qchem.cachix.org" ];
     extra-trusted-public-keys = [
@@ -49,92 +62,62 @@
   };
 
   outputs =
-    {
-      self,
-      nixpkgs,
-      nixpkgs-qchem,
-      nixos-qchem,
-      ...
-    }:
-    let
-      forAllSystems = nixpkgs.lib.genAttrs nixpkgs.lib.systems.flakeExposed;
-    in
-    {
-      # -----------------------------------------------------------------------
-      # Legacy packages (NUR convention: all top-level derivations, flat).
-      # Driven by default.nix, which applies our overlays internally so that
-      # the derivations here are identical to what python3.withPackages returns.
-      # -----------------------------------------------------------------------
-      legacyPackages = forAllSystems (
-        system:
-        import ./default.nix {
-          pkgs = import nixpkgs { inherit system; };
-        }
-      );
+    inputs@{ flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = import inputs.systems;
 
-      # Flake-style packages (derivations only, filtered).
-      packages = forAllSystems (
-        system: nixpkgs.lib.filterAttrs (_: v: nixpkgs.lib.isDerivation v) self.legacyPackages.${system}
-      );
+      imports = [ inputs.git-hooks.flakeModule ];
 
       # -----------------------------------------------------------------------
-      # NixOS modules
-      #
-      # Import into your system flake as:
-      #   inputs.nur-berquist.nixosModules.qcfractal-server
-      #   inputs.nur-berquist.nixosModules.qcfractal-compute
+      # System-agnostic outputs
       # -----------------------------------------------------------------------
-      nixosModules = import ./nixos-modules;
+      flake = {
+        # NixOS modules
+        #
+        # Import into your system flake as:
+        #   inputs.nur-berquist.nixosModules.qcfractal-server
+        #   inputs.nur-berquist.nixosModules.qcfractal-compute
+        nixosModules = import ./nixos-modules;
 
-      # -----------------------------------------------------------------------
-      # Overlays
-      #
-      # Our Python packages (pkgs.python3Packages.qcfractal, etc.):
-      #   inputs.nur-berquist.overlays.qcfractal
-      #
-      # NixOS-QChem re-exported for convenience (pkgs.qchem.*):
-      #   inputs.nur-berquist.overlays.qchem
-      #
-      # Both at once:
-      #   inputs.nur-berquist.overlays.default
-      # -----------------------------------------------------------------------
-      overlays = (import ./overlays) // {
-        qchem = nixos-qchem.overlays.qchem;
-        default = nixpkgs.lib.composeManyExtensions [
-          nixos-qchem.overlays.qchem
-          (import ./overlays).qcfractal
-        ];
+        # Overlays
+        #
+        # Our Python packages (pkgs.python313Packages.qcfractal, etc.):
+        #   inputs.nur-berquist.overlays.qcfractal
+        #
+        # NixOS-QChem re-exported for convenience (pkgs.qchem.*):
+        #   inputs.nur-berquist.overlays.qchem
+        #
+        # Both at once:
+        #   inputs.nur-berquist.overlays.default
+        overlays = (import ./overlays) // {
+          qchem = inputs.nixos-qchem.overlays.qchem;
+          default = inputs.nixpkgs.lib.composeManyExtensions [
+            inputs.nixos-qchem.overlays.qchem
+            (import ./overlays).qcfractal
+          ];
+        };
       };
 
-      # -----------------------------------------------------------------------
-      # Checks
-      #
-      # Evaluation tests (fast, no VM, no real packages):
-      #   nix build .#checks.x86_64-linux.eval
-      #
-      # VM integration tests (require KVM and real packages):
-      #   nix build .#checks.x86_64-linux.vm-server-local-db
-      #   nix build .#checks.x86_64-linux.vm-server-open-firewall
-      #   nix build .#checks.x86_64-linux.vm-server-remote-db
-      #
-      # The two compute checks additionally need Psi4, so they are defined only
-      # on x86_64-linux (the sole system NixOS-QChem's flake has outputs for):
-      #   nix build .#checks.x86_64-linux.vm-compute-connects
-      #   nix build .#checks.x86_64-linux.vm-compute-authenticated
-      #   nix build .#checks.x86_64-linux.vm-compute-singlepoint
-      #
-      # All at once:
-      #   nix flake check
-      # -----------------------------------------------------------------------
-      checks = forAllSystems (
-        system:
+      perSystem =
+        {
+          config,
+          pkgs,
+          system,
+          ...
+        }:
         let
+          inherit (inputs.nixpkgs) lib;
+
           # pkgs' has our overlay applied — required by both the eval tests
           # (for runCommand) and the VM tests (testers.nixosTest uses pkgs
           # directly as the node package set).
-          pkgs' = import nixpkgs {
+          #
+          # Distinct from the `pkgs` argument above, which flake-parts hands us
+          # unmodified: legacyPackages below must stay un-overlaid, because
+          # default.nix applies the overlays itself.
+          pkgs' = import inputs.nixpkgs {
             inherit system;
-            overlays = [ self.overlays.qcfractal ];
+            overlays = [ (import ./overlays).qcfractal ];
           };
 
           # Psi4 for the compute tests.
@@ -160,20 +143,20 @@
           # qcportal and their whole dependency closure against a different
           # Python package set, changing even the tests that never touch Psi4.
           # A QC program only has to be an executable on the worker's PATH.
-          qchemPkgs = import nixpkgs-qchem {
+          qchemPkgs = import inputs.nixpkgs-qchem {
             inherit system;
-            overlays = [ nixos-qchem.overlays.qchem ];
+            overlays = [ inputs.nixos-qchem.overlays.qchem ];
             config.allowUnfree = true;
             # Matches the arguments NixOS-QChem's flake passes; allowEnv = false
             # keeps NIXQC_* environment variables from perturbing the hash.
-            config.qchem-config = import "${nixos-qchem}/cfg.nix" {
+            config.qchem-config = import "${inputs.nixos-qchem}/cfg.nix" {
               allowEnv = false;
               optAVX = true;
             };
           };
 
           # NixOS-QChem targets x86_64-linux only (its flake hardcodes that
-          # system, and optAVX implies an x86 -march), so the two checks that
+          # system, and optAVX implies an x86 -march), so the three checks that
           # need Psi4 are defined only there.  They need KVM anyway.
           psi4 = if system == "x86_64-linux" then qchemPkgs.qchem.psi4 else null;
 
@@ -181,21 +164,113 @@
             pkgs = pkgs';
             inherit psi4;
           };
+
+          nurAttrs = import ./default.nix { inherit pkgs; };
         in
         {
-          # Evaluation tests — always fast, no real packages needed.
-          eval = (import ./tests { pkgs = pkgs'; }).all;
+          # -------------------------------------------------------------------
+          # Legacy packages (NUR convention: all top-level derivations, flat).
+          # Driven by default.nix, which applies our overlays internally so that
+          # the derivations here are identical to what python313.withPackages
+          # returns.
+          # -------------------------------------------------------------------
+          legacyPackages = nurAttrs;
 
-          # VM tests — prefixed "vm-" for easy selection.
-          vm-server-local-db = vmTests.server-local-db;
-          vm-server-open-firewall = vmTests.server-open-firewall;
-          vm-server-remote-db = vmTests.server-remote-db;
-        }
-        // nixpkgs.lib.optionalAttrs (psi4 != null) {
-          vm-compute-connects = vmTests.compute-connects;
-          vm-compute-authenticated = vmTests.compute-authenticated;
-          vm-compute-singlepoint = vmTests.compute-singlepoint;
-        }
-      );
+          # Flake-style packages (derivations only, filtered).
+          packages = lib.filterAttrs (_: v: lib.isDerivation v) nurAttrs;
+
+          # -------------------------------------------------------------------
+          # Formatting and linting, wired up as git hooks.
+          #
+          # The generated .pre-commit-config.yaml is written by the devShell's
+          # shellHook and is gitignored — this block is the source of truth.
+          # Run them by hand with `just hooks`.
+          # -------------------------------------------------------------------
+          pre-commit.settings = {
+            # prek rather than the default pre-commit: git-hooks.nix supports
+            # it directly (`usingPrek = cfg.package.pname == "prek"`), so the
+            # generated .pre-commit-config.yaml, the installed git hook and
+            # `just hooks` all go through the same runner.
+            package = pkgs.prek;
+
+            hooks = {
+              # Nix-scoped: these three carry their own `files` filters.
+              #
+              # nixfmt-rfc-style, not nixfmt: the latter is git-hooks.nix's
+              # deprecated alias for nixfmt-classic.  Both names resolve to the
+              # same nixfmt 1.3.1 derivation on the nixpkgs side.
+              nixfmt-rfc-style.enable = true;
+              statix.enable = true;
+              deadnix.enable = true;
+
+              # Whole-tree: no `files` filter, so these run against every
+              # tracked file — YAML workflows, the Justfile, docs and shell
+              # scripts included, not just Nix.
+              check-merge-conflicts.enable = true;
+              trim-trailing-whitespace = {
+                enable = true;
+                # Trailing whitespace is *significant* in a unified diff: a
+                # blank context line is a single space, and stripping it makes
+                # the hunk fail to apply.  Stripping pkgs/parsl/conftest.patch
+                # breaks the parsl build.
+                excludes = [ "\\.patch$" ];
+              };
+            };
+          };
+
+          devShells.default = pkgs.mkShell {
+            # installationScript rather than config.pre-commit.devShell: it
+            # writes .pre-commit-config.yaml and installs the git hook, which is
+            # all we want from the module — the tools themselves are listed
+            # explicitly below.
+            shellHook = config.pre-commit.installationScript;
+            packages = [
+              pkgs.just
+              pkgs.nixfmt
+              pkgs.statix
+              pkgs.deadnix
+              pkgs.prek
+              pkgs.nix-build-uncached
+              pkgs.jq
+            ];
+          };
+
+          # -------------------------------------------------------------------
+          # Checks
+          #
+          # Evaluation tests (fast, no VM, no real packages):
+          #   nix build .#checks.x86_64-linux.eval
+          #
+          # VM integration tests (require KVM and real packages):
+          #   nix build .#checks.x86_64-linux.vm-server-local-db
+          #   nix build .#checks.x86_64-linux.vm-server-open-firewall
+          #   nix build .#checks.x86_64-linux.vm-server-remote-db
+          #
+          # The three compute checks additionally need Psi4, so they are defined
+          # only on x86_64-linux (the sole system NixOS-QChem's flake has
+          # outputs for):
+          #   nix build .#checks.x86_64-linux.vm-compute-connects
+          #   nix build .#checks.x86_64-linux.vm-compute-authenticated
+          #   nix build .#checks.x86_64-linux.vm-compute-singlepoint
+          #
+          # All at once (adds the pre-commit check the git-hooks module
+          # contributes):
+          #   nix flake check
+          # -------------------------------------------------------------------
+          checks = {
+            # Evaluation tests — always fast, no real packages needed.
+            eval = (import ./tests { pkgs = pkgs'; }).all;
+
+            # VM tests — prefixed "vm-" for easy selection.
+            vm-server-local-db = vmTests.server-local-db;
+            vm-server-open-firewall = vmTests.server-open-firewall;
+            vm-server-remote-db = vmTests.server-remote-db;
+          }
+          // lib.optionalAttrs (psi4 != null) {
+            vm-compute-connects = vmTests.compute-connects;
+            vm-compute-authenticated = vmTests.compute-authenticated;
+            vm-compute-singlepoint = vmTests.compute-singlepoint;
+          };
+        };
     };
 }

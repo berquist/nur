@@ -80,9 +80,11 @@ vm-test name:
 vm-test-interactive name:
     $(nix-build tests/vm.nix -A {{ name }}.driver)/bin/nixos-test-driver
 
-# The checks that do not need a nix-daemon: eval tests, VM test instantiation,
-# and a parse of every Nix file. This is the whole of what runs inside the
-# Claude Code sandbox.
+# Eval tests, VM test instantiation and a parse of every Nix file — the whole
+# of what can be checked without a nix-daemon, and so the whole of what runs
+# inside the Claude Code sandbox.
+
+# Every check that works without a nix-daemon.
 check-no-daemon:
     ./scripts/no-daemon-check.sh
 
@@ -94,13 +96,15 @@ check-no-daemon:
 build pkg:
     nix-build -A {{ pkg }} --no-out-link
 
-# Reproduce the Python 3.14 failure from gh_log: qcportal built against a
-# channel's *default* interpreter rather than the python313 the repo pins.
+# Builds qcportal against a channel's *default* interpreter rather than the
+# python313 the repo pins.
 #
 # With the pin and the meta.broken marking in place this now stops at "Package
 # is marked as broken". Set NIXPKGS_ALLOW_BROKEN=1 to push past that and see
 # the original "TypeError: type 'Array' is not subscriptable" out of
 # pythonImportsCheck — see pkgs/qcportal/default.nix for why.
+
+# Reproduce the Python 3.14 build failure from gh_log.
 repro-gh channel=default_channel:
     NIX_PATH=nixpkgs={{ nixpkgs_url }}/{{ channel }}.tar.gz \
       nix-build --no-out-link --show-trace \
