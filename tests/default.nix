@@ -25,15 +25,12 @@ let
     qcfractal =
       pkgs.runCommand "qcfractal-stub" { }
         "mkdir -p $out/bin && touch $out/bin/qcfractal-server";
-    qcfractalcompute =
-      pkgs.runCommand "qcfractalcompute-stub"
-        {
-          # The compute module builds a python env from cfg.package.pythonModule
-          # for QCEngine's out-of-process program discovery, and withPackages
-          # only accepts packages carrying this attribute.
-          passthru.pythonModule = pkgs.python3;
-        }
-        "mkdir -p $out/bin && touch $out/bin/qcfractal-compute-manager";
+    qcfractalcompute = pkgs.runCommand "qcfractalcompute-stub" {
+      # The compute module builds a python env from cfg.package.pythonModule
+      # for QCEngine's out-of-process program discovery, and withPackages
+      # only accepts packages carrying this attribute.
+      passthru.pythonModule = pkgs.python3;
+    } "mkdir -p $out/bin && touch $out/bin/qcfractal-compute-manager";
   };
 
   # Silence the stateVersion warning that fires on every eval-config.nix call.
@@ -432,8 +429,7 @@ rec {
     in
     # python3.withPackages yields a "…-env" derivation; it must come first so
     # that its python3 wins over the bare one the package wrapper prepends.
-    lib.hasSuffix "-env" (builtins.head path).name
-    && builtins.elem fakePsi4 path
+    lib.hasSuffix "-env" (builtins.head path).name && builtins.elem fakePsi4 path
   );
 
   # ==========================================================================
