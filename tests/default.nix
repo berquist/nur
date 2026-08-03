@@ -26,7 +26,13 @@ let
       pkgs.runCommand "qcfractal-stub" { }
         "mkdir -p $out/bin && touch $out/bin/qcfractal-server";
     qcfractalcompute =
-      pkgs.runCommand "qcfractalcompute-stub" { }
+      pkgs.runCommand "qcfractalcompute-stub"
+        {
+          # The compute module builds a python env from cfg.package.pythonModule
+          # for QCEngine's out-of-process program discovery, and withPackages
+          # only accepts packages carrying this attribute.
+          passthru.pythonModule = pkgs.python3;
+        }
         "mkdir -p $out/bin && touch $out/bin/qcfractal-compute-manager";
   };
 
@@ -404,6 +410,32 @@ rec {
     builtins.elem fakePsi4 cfg.systemd.services.qcfractalcompute.path
   );
 
+  # Regression guard.  QCEngine program discovery is *not* in-process: the
+  # manager shells out to `python3 qcengine_list.py`, resolving python3 from
+  # PATH, and that script turns a failed `import qcengine` into an empty
+  # program list rather than an error.  Without an interpreter that can import
+  # qcengine ahead of everything else on PATH, every executor discovers zero
+  # programs and the manager exits with "has no available programs" — with no
+  # indication that PATH is the problem.
+  compute-python-env-first-in-path = check "compute-python-env-first-in-path" (
+    let
+      fakePsi4 = pkgs.runCommand "psi4-stub" { } "mkdir -p $out/bin && touch $out/bin/psi4";
+      cfg = evalCompute {
+        services.qcfractalCompute = {
+          enable = true;
+          executor.programs = [ fakePsi4 ];
+        };
+      };
+      # The systemd module appends coreutils, findutils, gnugrep, gnused and
+      # systemd to whatever the service sets, so only the head is ours to fix.
+      path = cfg.systemd.services.qcfractalcompute.path;
+    in
+    # python3.withPackages yields a "…-env" derivation; it must come first so
+    # that its python3 wins over the bare one the package wrapper prepends.
+    lib.hasSuffix "-env" (builtins.head path).name
+    && builtins.elem fakePsi4 path
+  );
+
   # ==========================================================================
   # Convenience target: build all tests at once.
   # ==========================================================================
@@ -432,6 +464,7 @@ rec {
       compute-defaults
       compute-user-created
       compute-programs-in-path
+      compute-python-env-first-in-path
     ];
   };
 }

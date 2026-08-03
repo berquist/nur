@@ -6,10 +6,37 @@
 
     # NixOS-QChem provides Psi4, CFOUR, NWChem, and many other QC codes.
     # Packages live under pkgs.qchem.* once the overlay is applied.
+    #
+    # We use only pure values from this input — overlays.qchem (a plain
+    # final: prev: function) and cfg.nix (a file read through its outPath) —
+    # never its instantiated `packages` output.  Nothing we touch depends on
+    # which nixpkgs it resolves to, so following ours is free and keeps
+    # flake.lock a node smaller.  See nixpkgs-qchem below for the reason its
+    # own outputs are avoided.
     nixos-qchem = {
       url = "github:Nix-QChem/NixOS-QChem";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # The nixpkgs revision NixOS-QChem's own flake.lock pins, duplicated here
+    # explicitly.
+    #
+    # nix-qchem.cachix.org is populated by NixOS-QChem's Hydra, which builds
+    # against *that* revision with *its* nixpkgs config.  Reproducing both is
+    # the only way our Psi4 derivation hashes match what the cache holds;
+    # anything else means compiling Psi4's whole closure (CheMPS2, adcc,
+    # libint, …) from source.
+    #
+    # This must be bumped in lockstep with the nixos-qchem input above.  Read
+    # the target revision out of the input's own lock:
+    #
+    #   nix flake metadata github:Nix-QChem/NixOS-QChem --json \
+    #     | jq -r '.locks.nodes.nixpkgs.locked.rev'
+    #
+    # Pinning it by hand rather than reading nixos-qchem's lock at eval time is
+    # deliberate: flakes offer no supported way to reach a transitive input's
+    # locked revision, and `follows` cannot express "match the dependency".
+    nixpkgs-qchem.url = "github:NixOS/nixpkgs/3e41b24abd260e8f71dbe2f5737d24122f972158";
   };
 
   # Binary cache for NixOS-QChem (Psi4 and CFOUR are large; fetch binaries
@@ -25,6 +52,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-qchem,
       nixos-qchem,
       ...
     }:
@@ -88,6 +116,9 @@
       #   nix build .#checks.x86_64-linux.vm-server-local-db
       #   nix build .#checks.x86_64-linux.vm-server-open-firewall
       #   nix build .#checks.x86_64-linux.vm-server-remote-db
+      #
+      # The two compute checks additionally need Psi4, so they are defined only
+      # on x86_64-linux (the sole system NixOS-QChem's flake has outputs for):
       #   nix build .#checks.x86_64-linux.vm-compute-connects
       #   nix build .#checks.x86_64-linux.vm-compute-singlepoint
       #
@@ -105,24 +136,49 @@
             overlays = [ self.overlays.qcfractal ];
           };
 
-          # Psi4 for the compute tests, taken from a *separate* instantiation
-          # rather than by folding overlays.qchem into pkgs' above.
+          # Psi4 for the compute tests.
           #
-          # The nixos-qchem overlay extends python3's packageOverrides, so
-          # applying it to the node package set would rebuild qcfractal,
+          # This reproduces NixOS-QChem's own instantiation exactly — its pinned
+          # nixpkgs, its overlay, and the config its flake sets — because that
+          # is what nix-qchem.cachix.org was populated from.  Any deviation
+          # (our nixpkgs, or a missing config.qchem-config) changes the
+          # derivation hash and sends Psi4's closure to a from-source build.
+          #
+          # Do NOT simplify this to `nixos-qchem.packages.${system}.psi4`.  That
+          # output is a filterAttrs over the *entire* qchem set, so selecting a
+          # single package forces the predicate for every other one — and the
+          # predicate's `builtins.tryEval` guard only catches `throw` and
+          # `assert`, not signature drift like "called with unexpected arguments
+          # 'blas', 'lapack' and 'scalapack'".  One broken package anywhere in
+          # NixOS-QChem then takes down our whole `checks` output.  Selecting
+          # qchem.psi4 from our own instantiation forces only Psi4.
+          #
+          # Taking Psi4 from a different package set than the VM nodes is fine —
+          # and in fact preferable.  The nixos-qchem overlay extends python3's
+          # packageOverrides, so folding it into pkgs' would rebuild qcfractal,
           # qcportal and their whole dependency closure against a different
-          # Python package set — a large rebuild that would also change the
-          # tests that do not involve Psi4 at all.  A QC program only has to
-          # be an executable on the worker's PATH, so it is fine for it to
-          # come from its own package set.
-          qchemPkgs = import nixpkgs {
+          # Python package set, changing even the tests that never touch Psi4.
+          # A QC program only has to be an executable on the worker's PATH.
+          qchemPkgs = import nixpkgs-qchem {
             inherit system;
-            overlays = [ self.overlays.qchem ];
+            overlays = [ nixos-qchem.overlays.qchem ];
+            config.allowUnfree = true;
+            # Matches the arguments NixOS-QChem's flake passes; allowEnv = false
+            # keeps NIXQC_* environment variables from perturbing the hash.
+            config.qchem-config = import "${nixos-qchem}/cfg.nix" {
+              allowEnv = false;
+              optAVX = true;
+            };
           };
+
+          # NixOS-QChem targets x86_64-linux only (its flake hardcodes that
+          # system, and optAVX implies an x86 -march), so the two checks that
+          # need Psi4 are defined only there.  They need KVM anyway.
+          psi4 = if system == "x86_64-linux" then qchemPkgs.qchem.psi4 else null;
 
           vmTests = import ./tests/vm.nix {
             pkgs = pkgs';
-            psi4 = qchemPkgs.qchem.psi4;
+            inherit psi4;
           };
         in
         {
@@ -133,6 +189,8 @@
           vm-server-local-db = vmTests.server-local-db;
           vm-server-open-firewall = vmTests.server-open-firewall;
           vm-server-remote-db = vmTests.server-remote-db;
+        }
+        // nixpkgs.lib.optionalAttrs (psi4 != null) {
           vm-compute-connects = vmTests.compute-connects;
           vm-compute-singlepoint = vmTests.compute-singlepoint;
         }

@@ -45,15 +45,21 @@
   # to start an executor with no discoverable programs, so these tests cannot
   # run with an empty PATH.
   #
-  # Psi4 comes from the nixos-qchem overlay, which is a *flake input* —
-  # ../overlays cannot provide it, so the default argument above has no
-  # pkgs.qchem.  The psi4-backed tests are therefore reachable only through
-  # the flake (which passes overlays.default), or by supplying this argument
-  # explicitly.  Everything else in this file works either way.
+  # Psi4 comes from NixOS-QChem, which is a *flake input* — ../overlays cannot
+  # provide it, so the default argument above has no pkgs.qchem.  The
+  # psi4-backed tests are therefore reachable only through the flake, or by
+  # supplying this argument explicitly.  Everything else in this file works
+  # either way.
+  #
+  # The flake passes nixos-qchem.packages.<system>.psi4 rather than
+  # pkgs.qchem.psi4 from a locally-overlaid nixpkgs: only the former matches
+  # what nix-qchem.cachix.org holds.  See the comment in flake.nix.  Falling
+  # back to pkgs.qchem.psi4 here still works if the caller happens to have the
+  # overlay applied, it just will not hit that cache.
   psi4 ?
     pkgs.qchem.psi4 or (throw ''
-      tests/vm.nix: the compute tests need pkgs.qchem.psi4, which comes from
-      the nixos-qchem overlay.  Use the flake:
+      tests/vm.nix: the compute tests need Psi4, which comes from the
+      nixos-qchem flake input.  Use the flake:
         nix build .#checks.x86_64-linux.vm-compute-connects
       or pass one in:
         nix-build tests/vm.nix -A compute-connects --arg psi4 '<derivation>'

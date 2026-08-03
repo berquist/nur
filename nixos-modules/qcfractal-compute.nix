@@ -51,6 +51,11 @@ let
 
   computeConfigFile = pkgs.writeText "qcf_compute_config.yaml" computeConfig;
 
+  # An interpreter that can `import qcengine`.  This has to be on the unit's
+  # PATH or no QC program is ever discovered; see the comment on
+  # systemd.services.qcfractalcompute.path below for why.
+  pythonEnv = cfg.package.pythonModule.withPackages (_: [ cfg.package ]);
+
 in
 {
   options.services.qcfractalCompute = {
@@ -243,8 +248,30 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
 
-      # QCEngine probes PATH at startup to find available QC programs.
-      path = cfg.executor.programs;
+      # QCEngine probes PATH at startup to find available QC programs, so the
+      # program packages go here.
+      #
+      # pythonEnv must come first, and is not optional.  Discovery does not run
+      # in-process: AppManager.discover_programs_conda shells out with
+      #
+      #   subprocess.check_output(["python3", <qcengine_list.py>])
+      #
+      # taking python3 from PATH rather than sys.executable.  The wrapper
+      # nixpkgs generates around qcfractal-compute-manager prepends a *bare*
+      # interpreter to PATH and injects the package's dependencies with
+      # site.addsitedir() inside the wrapped script — which does not carry into
+      # a child process.  That child therefore cannot import qcengine, and
+      # qcengine_list.py swallows the ImportError and prints "{}":
+      #
+      #   except ImportError:
+      #       progs = {}
+      #       procs = {}
+      #
+      # so discovery silently yields zero programs and the manager exits with
+      # "Executor <label> has no available programs" regardless of what
+      # executor.programs contains.  Putting an environment that can import
+      # qcengine ahead of that bare interpreter is what makes discovery work.
+      path = [ pythonEnv ] ++ cfg.executor.programs;
 
       serviceConfig = {
         Type = "simple";
