@@ -88,6 +88,11 @@ in
           # Bind to all interfaces so the test script can curl it.
           api.host = "0.0.0.0";
           api.port = 7777;
+          # /api/v1/information is behind check_permissions("information",
+          # "read"), and check_global_permission rejects the anonymous role
+          # outright unless this is set.  Enabling it here also gives the
+          # option end-to-end coverage.
+          allowUnauthenticatedRead = true;
           # Defaults: createLocally = true, peer auth via Unix socket.
         };
       };
@@ -108,9 +113,9 @@ in
           "sudo -u postgres psql -c '\\l' | grep qcfractal"
       )
 
-      # The API must respond on port 7777.
-      # /api/v1/information is an unauthenticated endpoint that returns
-      # server metadata as JSON.
+      # The API must respond on port 7777.  /api/v1/information returns
+      # server metadata as JSON; it is readable without logging in only
+      # because allowUnauthenticatedRead is set on this node.
       machine.wait_for_open_port(7777)
       response = machine.succeed("curl -sf http://localhost:7777/api/v1/information")
       import json
@@ -157,10 +162,15 @@ in
       server.wait_for_open_port(7777)
 
       # Client must be able to reach the server across the virtual network.
+      # This node keeps the module's secure defaults (enableSecurity = true,
+      # allowUnauthenticatedRead = false), so use /api/v1/ping: it is the
+      # health-check route carrying @no_permission_required(), whereas
+      # /api/v1/information would answer 401 to an anonymous client.
+      # What is under test here is reachability, not authorization.
       client.wait_for_unit("network.target")
-      client.succeed(
-          "curl -sf http://server:7777/api/v1/information"
-      )
+      import json
+      pong = json.loads(client.succeed("curl -sf http://server:7777/api/v1/ping"))
+      assert pong["success"], f"unexpected response: {pong}"
     '';
   };
 
@@ -237,7 +247,10 @@ in
       server.wait_for_unit("qcfractal-init-db.service")
       server.wait_for_unit("qcfractal.service")
       server.wait_for_open_port(7777)
-      server.succeed("curl -sf http://localhost:7777/api/v1/information")
+      # Secure defaults are in force on this node, so /api/v1/information
+      # would 401; /api/v1/ping needs no permissions.  What matters here is
+      # that the server came up against the remote database at all.
+      server.succeed("curl -sf http://localhost:7777/api/v1/ping")
     '';
   };
 
@@ -289,10 +302,17 @@ in
 
       import json
 
+      # There is no GET /api/v1/managers route; managers are listed through
+      # POST /api/v1/managers/query, whose body is a ManagerQueryFilters
+      # model with every field optional, so {} means "no filter".  Responses
+      # default to JSON when Accept does not ask for msgpack.
+      query_managers = (
+          "curl -sf -X POST http://localhost:7777/api/v1/managers/query "
+          "-H 'Content-Type: application/json' -d '{}'"
+      )
+
       def managers_registered(_):
-          status, output = machine.execute(
-              "curl -sf http://localhost:7777/api/v1/managers"
-          )
+          status, output = machine.execute(query_managers)
           if status != 0:
               return False
           return len(json.loads(output)) > 0
@@ -300,7 +320,7 @@ in
       with machine.nested("waiting for the compute manager to register"):
           retry(managers_registered, timeout_seconds = 180)
 
-      print(machine.succeed("curl -sf http://localhost:7777/api/v1/managers"))
+      print(machine.succeed(query_managers))
     '';
   };
 }
