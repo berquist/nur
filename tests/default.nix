@@ -408,28 +408,22 @@ rec {
   );
 
   # Regression guard.  QCEngine program discovery is *not* in-process: the
-  # manager shells out to `python3 qcengine_list.py`, resolving python3 from
-  # PATH, and that script turns a failed `import qcengine` into an empty
-  # program list rather than an error.  Without an interpreter that can import
-  # qcengine ahead of everything else on PATH, every executor discovers zero
-  # programs and the manager exits with "has no available programs" — with no
-  # indication that PATH is the problem.
-  compute-python-env-first-in-path = check "compute-python-env-first-in-path" (
+  # manager shells out to `python3 qcengine_list.py`, and that script turns a
+  # failed `import qcengine` into an empty program list rather than an error.
+  # Without PYTHONPATH the child is a bare interpreter, every executor
+  # discovers zero programs, and the manager exits with "has no available
+  # programs" — with nothing pointing at the real cause.
+  #
+  # PATH deliberately does NOT carry the python env: the wrapper around
+  # qcfractal-compute-manager prepends its own bare interpreter and would win.
+  compute-python-path-for-discovery = check "compute-python-path-for-discovery" (
     let
-      fakePsi4 = pkgs.runCommand "psi4-stub" { } "mkdir -p $out/bin && touch $out/bin/psi4";
       cfg = evalCompute {
-        services.qcfractalCompute = {
-          enable = true;
-          executor.programs = [ fakePsi4 ];
-        };
+        services.qcfractalCompute.enable = true;
       };
-      # The systemd module appends coreutils, findutils, gnugrep, gnused and
-      # systemd to whatever the service sets, so only the head is ours to fix.
-      path = cfg.systemd.services.qcfractalcompute.path;
+      pythonPath = cfg.systemd.services.qcfractalcompute.environment.PYTHONPATH or null;
     in
-    # python3.withPackages yields a "…-env" derivation; it must come first so
-    # that its python3 wins over the bare one the package wrapper prepends.
-    lib.hasSuffix "-env" (builtins.head path).name && builtins.elem fakePsi4 path
+    pythonPath != null && lib.hasInfix "-env/lib/python" pythonPath
   );
 
   # ==========================================================================
@@ -460,7 +454,7 @@ rec {
       compute-defaults
       compute-user-created
       compute-programs-in-path
-      compute-python-env-first-in-path
+      compute-python-path-for-discovery
     ];
   };
 }
