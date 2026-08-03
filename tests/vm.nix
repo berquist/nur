@@ -51,11 +51,12 @@
   # supplying this argument explicitly.  Everything else in this file works
   # either way.
   #
-  # The flake passes nixos-qchem.packages.<system>.psi4 rather than
-  # pkgs.qchem.psi4 from a locally-overlaid nixpkgs: only the former matches
-  # what nix-qchem.cachix.org holds.  See the comment in flake.nix.  Falling
-  # back to pkgs.qchem.psi4 here still works if the caller happens to have the
-  # overlay applied, it just will not hit that cache.
+  # The flake passes qchem.psi4 from its own instantiation of the nixpkgs
+  # revision NixOS-QChem pins, with NixOS-QChem's config — only that matches
+  # what nix-qchem.cachix.org holds, and it is deliberately *not*
+  # nixos-qchem.packages.<system>.psi4.  See the comment in flake.nix for both
+  # halves of that.  Falling back to pkgs.qchem.psi4 here still works if the
+  # caller happens to have the overlay applied, it just will not hit the cache.
   psi4 ?
     pkgs.qchem.psi4 or (throw ''
       tests/vm.nix: the compute tests need Psi4, which comes from the
