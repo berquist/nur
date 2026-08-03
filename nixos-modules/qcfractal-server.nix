@@ -277,6 +277,32 @@ in
           to be present but peer authentication ignores.
         '';
       };
+
+      autoUpgrade = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Run `qcfractal-server upgrade-db` automatically before starting the
+          server, applying any Alembic migrations the packaged version needs.
+
+          Left false by default deliberately.  A QCFractal upgrade that adds
+          migrations makes the server refuse to start with "Database needs
+          migration", and upstream's own message says to migrate only *after
+          backing up* — a schema migration on a large production database is
+          not something to trigger implicitly from a `nixos-rebuild switch`.
+
+          With this false, the migration is a manual step:
+
+          ```
+          systemctl start qcfractal-upgrade-db.service
+          ```
+
+          The unit is defined either way; this option only controls whether it
+          is pulled in automatically and ordered before
+          {file}`qcfractal.service`.  Enable it for throwaway, development or
+          well-backed-up deployments where unattended upgrades are wanted.
+        '';
+      };
     };
 
     extraConfig = lib.mkOption {
@@ -386,6 +412,44 @@ in
       };
     };
 
+    # Apply Alembic migrations.  Always defined so that an administrator can
+    # run it by hand after taking a backup -- which is what upstream's
+    # "Database needs migration. Please run `qcfractal-server upgrade-db`
+    # (after backing up!)" is asking for -- but only wired into the boot
+    # sequence when database.autoUpgrade is set.
+    #
+    # Ordered after init-db because upgrade-db requires an existing, populated
+    # database: it refuses with "Database at ... does not exist for upgrading?"
+    # otherwise, and it reads the config file that init-db installs.  On a
+    # freshly bootstrapped database init-db has already stamped the alembic
+    # head, so this is a no-op rather than a second bootstrap path.
+    systemd.services.qcfractal-upgrade-db = {
+      description = "QCFractal - apply database schema migrations";
+      wantedBy = lib.optional cfg.database.autoUpgrade "multi-user.target";
+      after = [
+        "network.target"
+        "qcfractal-init-db.service"
+      ]
+      ++ lib.optional localDB "postgresql.target";
+      requires = [ "qcfractal-init-db.service" ] ++ lib.optional localDB "postgresql.target";
+
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        User = cfg.user;
+        Group = cfg.group;
+        WorkingDirectory = cfg.stateDir;
+
+        ExecStart = pkgs.writeShellScript "qcfractal-upgrade-db" ''
+          set -euo pipefail
+          ${runtimeSecrets}
+          exec ${lib.getExe cfg.package} \
+            --config='${cfg.stateDir}/qcf_config.yaml' \
+            upgrade-db
+        '';
+      };
+    };
+
     systemd.services.qcfractal = {
       description = "QCFractal quantum-chemistry server";
       wantedBy = [ "multi-user.target" ];
@@ -393,8 +457,13 @@ in
         "network.target"
         "qcfractal-init-db.service"
       ]
+      ++ lib.optional cfg.database.autoUpgrade "qcfractal-upgrade-db.service"
       ++ lib.optional localDB "postgresql.target";
-      requires = [ "qcfractal-init-db.service" ] ++ lib.optional localDB "postgresql.target";
+      requires = [
+        "qcfractal-init-db.service"
+      ]
+      ++ lib.optional cfg.database.autoUpgrade "qcfractal-upgrade-db.service"
+      ++ lib.optional localDB "postgresql.target";
 
       # Bound the restart loop.  systemd's default start limit (5 failures in
       # 10s) can never trigger with RestartSec=15s, so a permanently broken

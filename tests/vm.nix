@@ -120,6 +120,12 @@ in
           # Distinctive value so the assertion below proves the generated
           # qcf_config.yaml is what the server actually loaded.
           serverName = "nixos-vm-test-server";
+          # Exercise the migration unit.  On a freshly bootstrapped database
+          # init-db has already stamped the alembic head, so upgrade-db should
+          # be a successful no-op — which is exactly the property worth
+          # checking, since it runs on every boot in this mode and must not
+          # fail or re-bootstrap.
+          database.autoUpgrade = true;
           # Defaults: createLocally = true, peer auth via Unix socket.
         };
       };
@@ -130,7 +136,13 @@ in
 
       # Schema initialisation must complete before the server starts.
       machine.wait_for_unit("qcfractal-init-db.service")
+      machine.wait_for_unit("qcfractal-upgrade-db.service")
       machine.wait_for_unit("qcfractal.service")
+
+      # upgrade-db must have exited cleanly rather than merely been reached.
+      machine.succeed(
+          "systemctl show -p Result --value qcfractal-upgrade-db.service | grep -x success"
+      )
 
       # PostgreSQL role and database should exist.
       machine.succeed(
@@ -372,7 +384,139 @@ in
   };
 
   # ==========================================================================
-  # Test 5: end-to-end — submit a calculation and check the stored result.
+  # Test 5: compute worker authenticates against a secured server.
+  #
+  # Every other compute test runs with enableSecurity = false, which leaves the
+  # module's credential path — server.username plus server.passwordFile, read
+  # at start and exported as QCF_COMPUTE_SERVER__PASSWORD for pydantic-settings
+  # to map onto server.password — completely uncovered.  This covers it.
+  #
+  # enableSecurity is on, so the worker cannot register at all without valid
+  # credentials.  allowUnauthenticatedRead is also on, purely so the test
+  # script can read the manager list without holding a token of its own; the
+  # "anonymous" role grants managers:read, while registering a manager needs
+  # managers:add, which only an authenticated compute account has.  The
+  # assertion is therefore on the manager's recorded username: that field is
+  # None for the unauthenticated worker in compute-connects, and must be the
+  # worker account here.
+  # ==========================================================================
+  compute-authenticated =
+    let
+      workerPassword = "s3cret-worker-password";
+    in
+    pkgs.testers.nixosTest {
+      name = "qcfractal-compute-authenticated";
+
+      nodes.machine =
+        { ... }:
+        {
+          imports = [
+            minimalVM
+            serverModule
+            computeModule
+          ];
+          virtualisation.memorySize = 2048;
+
+          services.qcfractal = {
+            enable = true;
+            api.host = "0.0.0.0";
+            # enableSecurity defaults to true — stated here because it is the
+            # entire point of this test.
+            enableSecurity = true;
+            allowUnauthenticatedRead = true;
+          };
+
+          services.qcfractalCompute = {
+            enable = true;
+            server.fractalUri = "http://localhost:7777";
+            server.username = "worker";
+            server.passwordFile = "/run/qcfractal-worker-password";
+            executor.maxWorkers = 1;
+            executor.memoryPerWorker = 1.0;
+            executor.programs = [ psi4 ];
+          };
+
+          # A real deployment would place this with systemd credentials, agenix
+          # or sops-nix.  What matters for the module is only that the file is
+          # read at service start rather than baked into the unit, so a tmpfiles
+          # rule is enough here.
+          systemd.tmpfiles.rules = [
+            "f /run/qcfractal-worker-password 0400 qcfractalcompute qcfractalcompute - ${workerPassword}"
+          ];
+        };
+
+      testScript = ''
+        machine.start()
+        machine.wait_for_unit("qcfractal.service")
+        machine.wait_for_open_port(7777)
+
+        # The worker account does not exist yet, so qcfractalcompute is
+        # expected to be failing/restarting at this point.  Create it.
+        #
+        # `qcfractal-server user add` validates the whole FractalConfig before
+        # it touches the database, so it needs the same secrets the units get:
+        # the generated api keys from secrets.env, plus the empty database
+        # password that peer authentication ignores but the model requires.
+        machine.succeed(
+            "sudo -u qcfractal sh -c '"
+            "set -a; . /var/lib/qcfractal/secrets.env; set +a; "
+            "export QCF_DATABASE__PASSWORD=; "
+            "${lib.getExe pkgs.qcfractal} --config=/var/lib/qcfractal/qcf_config.yaml "
+            "user add worker --password ${workerPassword} --role compute'"
+        )
+
+        # Don't wait out the 30s restart backoff.
+        machine.systemctl("restart qcfractalcompute.service")
+        machine.wait_for_unit("qcfractalcompute.service")
+
+        import json
+
+        query_managers = (
+            "curl -sf -X POST http://localhost:7777/api/v1/managers/query "
+            "-H 'Content-Type: application/json' -d '{}'"
+        )
+
+        def managers_registered(_):
+            status, output = machine.execute(query_managers)
+            if status != 0:
+                return False
+            return len(json.loads(output)) > 0
+
+        with machine.nested("waiting for the authenticated manager to register"):
+            retry(managers_registered, timeout_seconds = 180)
+
+        managers = json.loads(machine.succeed(query_managers))
+        print(managers)
+
+        # Registration alone proves credentials were accepted — managers:add is
+        # denied to the anonymous role — and the username proves the server
+        # attributed the manager to the worker account rather than treating the
+        # connection as anonymous.
+        usernames = {m["username"] for m in managers}
+        assert usernames == {"worker"}, f"unexpected manager usernames: {usernames}"
+
+        # The password must reach the worker by being read from the file at
+        # start, never by being baked into the unit.  Resolve the actual
+        # ExecStart script rather than globbing the store: a glob that matches
+        # nothing makes grep exit non-zero, which machine.fail would read as
+        # success, so the check would pass without having inspected anything.
+        import re
+
+        show = machine.succeed(
+            "systemctl show -p ExecStart --value qcfractalcompute.service"
+        )
+        match = re.search(r"path=(\S+)", show)
+        assert match, f"could not parse ExecStart: {show}"
+        start_script = match.group(1)
+
+        machine.succeed(f"test -f {start_script}")
+        machine.succeed(f"grep -q qcfractal-worker-password {start_script}")
+        machine.fail(f"grep -q '${workerPassword}' {start_script}")
+      '';
+    };
+
+  # ==========================================================================
+  # Test 6: end-to-end — submit a calculation and check the stored result.
   #
   # The full round trip: a client submits a singlepoint through qcportal, the
   # server queues it, the worker claims and runs it in Psi4, and the result

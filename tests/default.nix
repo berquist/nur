@@ -170,6 +170,56 @@ rec {
     cfg.services.postgresql.ensureDatabases == [ ]
   );
 
+  # The migration unit always exists so it can be run by hand after a backup,
+  # but by default nothing pulls it in and the server does not wait on it.
+  server-upgrade-db-manual-by-default = check "server-upgrade-db-manual-by-default" (
+    let
+      cfg = evalServer {
+        services.qcfractal.enable = true;
+      };
+      upgrade = cfg.systemd.services.qcfractal-upgrade-db;
+    in
+    cfg.systemd.services ? qcfractal-upgrade-db
+    && upgrade.wantedBy == [ ]
+    && !(builtins.elem "qcfractal-upgrade-db.service" cfg.systemd.services.qcfractal.requires)
+    # It must still be ordered after init-db, so that a manual run on a fresh
+    # machine cannot race the bootstrap that creates the config and database.
+    && builtins.elem "qcfractal-init-db.service" upgrade.requires
+  );
+
+  # autoUpgrade = true: pulled in at boot and the server waits for it.
+  server-upgrade-db-auto = check "server-upgrade-db-auto" (
+    let
+      cfg = evalServer {
+        services.qcfractal = {
+          enable = true;
+          database.autoUpgrade = true;
+        };
+      };
+      upgrade = cfg.systemd.services.qcfractal-upgrade-db;
+      server = cfg.systemd.services.qcfractal;
+    in
+    upgrade.wantedBy == [ "multi-user.target" ]
+    && builtins.elem "qcfractal-upgrade-db.service" server.requires
+    && builtins.elem "qcfractal-upgrade-db.service" server.after
+  );
+
+  # The migration runs as the service user and needs the same secrets as the
+  # other two units: FractalConfig validation happens before it touches the
+  # database, so a missing api.secret_key fails it just as it fails `start`.
+  server-upgrade-db-secrets = check "server-upgrade-db-secrets" (
+    let
+      cfg = evalServer {
+        services.qcfractal.enable = true;
+      };
+      s = cfg.systemd.services.qcfractal-upgrade-db.serviceConfig.ExecStart.text;
+    in
+    lib.hasInfix "QCF_API__SECRET_KEY" s
+    && lib.hasInfix "QCF_API__JWT_SECRET_KEY" s
+    && lib.hasInfix "QCF_DATABASE__PASSWORD" s
+    && lib.hasInfix "upgrade-db" s
+  );
+
   # createLocally = false: postgresql must not be touched.
   server-remote-db = check "server-remote-db" (
     let
@@ -437,6 +487,9 @@ rec {
       server-disabled
       server-defaults
       server-db-not-precreated
+      server-upgrade-db-manual-by-default
+      server-upgrade-db-auto
+      server-upgrade-db-secrets
       server-remote-db
       server-required-secrets
       server-secrets-outside-store

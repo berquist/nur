@@ -120,6 +120,7 @@
       # The two compute checks additionally need Psi4, so they are defined only
       # on x86_64-linux (the sole system NixOS-QChem's flake has outputs for):
       #   nix build .#checks.x86_64-linux.vm-compute-connects
+      #   nix build .#checks.x86_64-linux.vm-compute-authenticated
       #   nix build .#checks.x86_64-linux.vm-compute-singlepoint
       #
       # All at once:
@@ -192,6 +193,7 @@
         }
         // nixpkgs.lib.optionalAttrs (psi4 != null) {
           vm-compute-connects = vmTests.compute-connects;
+          vm-compute-authenticated = vmTests.compute-authenticated;
           vm-compute-singlepoint = vmTests.compute-singlepoint;
         }
       );
