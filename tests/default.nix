@@ -109,12 +109,26 @@ rec {
   # ==========================================================================
 
   # mkPackageOption in both modules resolves against the *top level* of pkgs,
-  # not python3Packages.
+  # not python313Packages.
   overlay-toplevel-packages = check "overlay-toplevel-packages" (
     overlaidPkgs ? qcfractal
     && overlaidPkgs ? qcfractalcompute
-    && overlaidPkgs.qcfractal == overlaidPkgs.python3Packages.qcfractal
-    && overlaidPkgs.qcfractalcompute == overlaidPkgs.python3Packages.qcfractalcompute
+    && overlaidPkgs.qcfractal == overlaidPkgs.python313Packages.qcfractal
+    && overlaidPkgs.qcfractalcompute == overlaidPkgs.python313Packages.qcfractalcompute
+  );
+
+  # The interpreter the QCArchive packages are pinned to is spelled out twice —
+  # `py` in ../default.nix and the top-level `inherit` in ../overlays/default.nix
+  # — and nothing forces the two to agree.  If they drift, `nix-build -A
+  # qcfractal` and `pkgs.qcfractal` silently become different derivations and
+  # every consumer builds the closure twice.
+  overlay-python-pin = check "overlay-python-pin" (
+    let
+      nur = import ../default.nix { inherit pkgs; };
+    in
+    nur.qcfractal == overlaidPkgs.qcfractal
+    && nur.qcfractalcompute == overlaidPkgs.qcfractalcompute
+    && nur.qcportal == overlaidPkgs.qcportal
   );
 
   # Both modules invoke the package via lib.getExe, which falls back to the
@@ -483,6 +497,7 @@ rec {
     name = "qcfractal-module-tests";
     paths = [
       overlay-toplevel-packages
+      overlay-python-pin
       overlay-main-programs
       server-disabled
       server-defaults

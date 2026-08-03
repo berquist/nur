@@ -10,6 +10,7 @@
 {
   lib,
   buildPythonPackage,
+  pythonAtLeast,
   fetchPypi,
   setuptools,
   versioningit,
@@ -74,6 +75,11 @@ buildPythonPackage rec {
   pythonImportsCheck = [ "qcfractal" ];
 
   meta = with lib; {
+    # Inherited from qcportal, which cannot import on 3.14; see the note there.
+    # meta.broken does not propagate to dependents, and a broken dependency
+    # throws at *evaluation* time when a dependent is built, so each package
+    # that pulls in qcportal has to carry the marking itself.
+    broken = pythonAtLeast "3.14";
     description = "QCFractal server - distributed quantum chemistry compute & database";
     homepage = "https://github.com/MolSSI/QCFractal";
     # The console script is qcfractal-server, not qcfractal; without this

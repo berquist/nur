@@ -4,6 +4,7 @@
 {
   lib,
   buildPythonPackage,
+  pythonAtLeast,
   fetchPypi,
   setuptools,
   versioningit,
@@ -57,6 +58,8 @@ buildPythonPackage rec {
   # pythonImportsCheck = [ "qcarchivetesting" ];
 
   meta = with lib; {
+    # Inherited from qcportal; see the note in ../qcportal/default.nix.
+    broken = pythonAtLeast "3.14";
     description = "pytest harnesses for testing QCArchive / QCFractal components";
     homepage = "https://github.com/MolSSI/QCFractal";
     license = lib.licenses.bsd3;
