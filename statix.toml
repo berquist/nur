@@ -1,0 +1,17 @@
+# statix configuration.
+#
+# Run via `just lint`, or as the `statix` pre-commit hook declared in flake.nix.
+
+disabled = [
+  # repeated_keys (W20) wants `systemd = { tmpfiles.rules = ...; services.foo = ...; }`
+  # in place of the flat `systemd.tmpfiles.rules = ...; systemd.services.foo = ...;`
+  # that the NixOS modules and the tests use throughout.
+  #
+  # That flat, dotted style is the ordinary way NixOS configuration is written,
+  # it keeps each unit definition at one indentation level, and it lets related
+  # settings sit next to the comment that explains them rather than being
+  # gathered by prefix.  Collapsing the module's three systemd units into one
+  # nested block, or tests/vm.nix's per-node `database.*` and `executor.*`
+  # settings, would make both materially harder to read.
+  "repeated_keys",
+]
