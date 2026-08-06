@@ -93,6 +93,25 @@ fail() {
   failed=1
 }
 
+# Print why something failed.  Not just `tail`: nixpkgs answers a broken
+# package with a dozen lines of "here is how to allow it anyway", which pushes
+# the one line that names the package off the bottom.  Lead with the error
+# lines, and fall back to the tail when there are none to find.
+show_error() {
+  local out=$1 errors line
+  # "error:" on a line by itself is nix opening a trace, not a message — the
+  # one worth printing always has text after the colon.
+  errors=$(grep -E '^[[:space:]]*error:[[:space:]]*[^[:space:]]' <<<"$out")
+  if [[ -n $errors ]]; then
+    while IFS= read -r line; do
+      # Strip nix's own indentation, then re-indent under the FAIL line.
+      printf '      %s\n' "${line#"${line%%[![:space:]]*}"}"
+    done <<<"$errors"
+  else
+    tail -15 <<<"$out" | sed 's/^/      /'
+  fi
+}
+
 # Psi4 comes from the nixos-qchem flake input, which is out of reach here.
 # The compute tests only ever put it on the worker's PATH, so a stub is enough
 # to instantiate them — this checks their module config and testScript, not
@@ -109,9 +128,9 @@ echo "=== qcarchive eval tests ==="
 # source in — it fails with "path ... is not valid" until an instantiation has
 # registered it.  The first run is slow for the same reason.
 echo "  instantiating (first run copies nixpkgs into $store, and is slow) ..."
-if ! nix_eval tests -A qcarchive.all >/dev/null 2>&1; then
+if ! out=$(nix_eval tests -A qcarchive.all 2>&1); then
   fail "tests -A qcarchive.all does not instantiate"
-  nix_eval tests -A qcarchive.all 2>&1 | tail -15 | sed 's/^/      /'
+  show_error "$out"
 fi
 
 # Reported here rather than next to NIX_PATH above, because reading anything
@@ -158,11 +177,11 @@ echo "=== VM tests instantiate ==="
 vm_names=$(nix_eval --eval --json --arg psi4 "$psi4_stub" \
   -E 'builtins.attrNames (import ./tests/qcarchive/vm.nix { })' 2>/dev/null | jq -r '.[]?')
 for t in $vm_names; do
-  if nix_eval tests/qcarchive/vm.nix -A "$t" --arg psi4 "$psi4_stub" >/dev/null 2>&1; then
+  if out=$(nix_eval tests/qcarchive/vm.nix -A "$t" --arg psi4 "$psi4_stub" 2>&1); then
     echo "  OK: $t"
   else
     fail "$t"
-    nix_eval tests/qcarchive/vm.nix -A "$t" --arg psi4 "$psi4_stub" 2>&1 | tail -5 | sed 's/^/      /'
+    show_error "$out"
   fi
 done
 
@@ -176,14 +195,14 @@ dd_names=$(nix_eval --eval --json \
   -E 'builtins.attrNames (import ./tests { }).dotdrop' 2>/dev/null | jq -r '.[]?')
 if [[ -z $dd_names ]]; then
   fail "could not evaluate tests/dotdrop at all"
-  nix_eval tests -A dotdrop.all 2>&1 | tail -15 | sed 's/^/      /'
+  show_error "$(nix_eval tests -A dotdrop.all 2>&1)"
 fi
 for t in $dd_names; do
-  if nix_eval tests -A "dotdrop.$t" >/dev/null 2>&1; then
+  if out=$(nix_eval tests -A "dotdrop.$t" 2>&1); then
     echo "  OK: $t"
   else
     fail "dotdrop.$t"
-    nix_eval tests -A "dotdrop.$t" 2>&1 | tail -5 | sed 's/^/      /'
+    show_error "$out"
   fi
 done
 
