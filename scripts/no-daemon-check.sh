@@ -20,6 +20,10 @@
 # read off without a daemon.  Instantiating still catches a broken overlay, a
 # missing attribute or a syntax error in the test script.
 #
+# Everything is evaluated against the nixpkgs pinned in flake.lock, resolved to
+# its store path without the network (see locked_nixpkgs below), so that what
+# passes here is what `nix flake check` sees.
+#
 # Exits non-zero if any of them fails.  Safe to run outside the sandbox too:
 # it only ever writes under $TMPDIR.
 
@@ -35,16 +39,51 @@ store="$TMPDIR/no-daemon-check-store"
 export XDG_CACHE_HOME="$TMPDIR/no-daemon-check-cache"
 export NIXPKGS_CONFIG=
 
-# NIX_PATH normally points at flake:nixpkgs, which needs the network.  The
-# flake registry has already resolved it to a store path; reuse that.
+# NIX_PATH normally points at flake:nixpkgs, which needs the network.  There
+# are two ways to resolve it offline, and they are not interchangeable:
+#
+#   1. this flake's *own* locked nixpkgs — what `nix flake check` evaluates
+#      against, and what CI sees;
+#   2. the flake registry's pre-resolved nixpkgs — whatever the sandbox image
+#      happens to carry.
+#
+# Prefer 1.  The registry copy trails the lock, and the gap is not cosmetic:
+# with the registry at python3 = 3.13 and the lock at 3.14, everything that
+# hinges on the default interpreter — the python313 pin, the meta.broken
+# markings on the qcportal dependants, any `pkgs.python3.withPackages` in a
+# test — passes here and fails in `nix flake check`.  That is exactly how
+# tests/qcarchive/vm.nix's compute-singlepoint slipped through.
+#
+# A flake input is added to the store as a fixed-output path (recursive
+# sha256, name "source"), so its location is a pure function of the narHash
+# already recorded in flake.lock: no network, no daemon, no `nix flake`
+# command — which matters, since libgit2 in the sandbox refuses to open this
+# repo at all ("unsupported extension name extensions.refstorage").
+locked_nixpkgs() {
+  local narhash base16 path
+  narhash=$(jq -r '.nodes.nixpkgs.locked.narHash // empty' flake.lock 2>/dev/null)
+  [[ $narhash == sha256-* ]] || return 1
+  base16=$(nix-hash --to-base16 --type sha256 "${narhash#sha256-}" 2>/dev/null) || return 1
+  path=$(nix-store --print-fixed-path --recursive sha256 "$base16" source 2>/dev/null) || return 1
+  # Only usable if the input has actually been fetched at some point.
+  [[ -d $path ]] || return 1
+  printf '%s\n' "$path"
+}
+
+nixpkgs_origin=inherited
 if [[ -z "${NIX_PATH:-}" || "$NIX_PATH" == *flake:* ]]; then
-  registry=/etc/nix/registry.json
-  if [[ -r $registry ]]; then
-    resolved=$(jq -r '.flakes[] | select(.from.id == "nixpkgs") | .to.path // empty' "$registry" 2>/dev/null | head -1)
-    [[ -n ${resolved:-} ]] && export NIX_PATH="nixpkgs=$resolved"
+  if resolved=$(locked_nixpkgs); then
+    nixpkgs_origin=flake.lock
+  else
+    registry=/etc/nix/registry.json
+    if [[ -r $registry ]]; then
+      resolved=$(jq -r '.flakes[] | select(.from.id == "nixpkgs") | .to.path // empty' "$registry" 2>/dev/null | head -1)
+      nixpkgs_origin="flake registry — NOT the locked nixpkgs, so default-interpreter breakage will be missed"
+    fi
   fi
+  [[ -n ${resolved:-} ]] && export NIX_PATH="nixpkgs=$resolved"
 fi
-echo "NIX_PATH=${NIX_PATH:-<unset>}"
+echo "NIX_PATH=${NIX_PATH:-<unset>} [$nixpkgs_origin]"
 
 nix_eval() { nix-instantiate --store "$store" "$@"; }
 
@@ -74,6 +113,13 @@ if ! nix_eval tests -A qcarchive.all >/dev/null 2>&1; then
   fail "tests -A qcarchive.all does not instantiate"
   nix_eval tests -A qcarchive.all 2>&1 | tail -15 | sed 's/^/      /'
 fi
+
+# Reported here rather than next to NIX_PATH above, because reading anything
+# out of <nixpkgs> needs the store seeded first.  Worth a line: the whole
+# python313 pin is about this number, and if it is not what flake.lock says,
+# this run is not checking what CI checks.
+default_python=$(nix_eval --eval --expr '(import <nixpkgs> { }).python3.version' 2>/dev/null | tr -d '"')
+echo "  <nixpkgs> default python3 = ${default_python:-unknown}"
 
 # check{} in tests/qcarchive/default.nix bakes the verdict into the
 # derivation's build command, so the PASS/FAIL of every test is readable
