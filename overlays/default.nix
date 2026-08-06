@@ -7,6 +7,16 @@
 # Add new overlays here as additional attributes; default.nix composes
 # them all via lib.composeManyExtensions.
 {
+  # dotdrop is a standalone CLI application — nothing here imports it as a
+  # library — so it is a plain top-level package rather than a
+  # pythonPackagesExtensions entry, and it follows the default `python3`
+  # instead of the 3.13 pin the QCArchive set is stuck on.  Keeping it in its
+  # own overlay is what lets a consumer take `overlays.dotdrop` without
+  # dragging in qcportal and its closure.
+  dotdrop = final: _prev: {
+    dotdrop = final.python3Packages.callPackage ../pkgs/dotdrop { };
+  };
+
   # Injects all QCArchive/QCFractal Python packages into every pythonX.pkgs
   # set via pythonPackagesExtensions.  This is what makes
   # python3.withPackages (p: [ p.qcfractal p.qcportal ... ]) work.
