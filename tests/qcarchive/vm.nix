@@ -559,8 +559,13 @@ in
 
         # qcportal for the submitting client.  This is the same derivation the
         # server uses, reached through the overlay's python package set.
+        #
+        # python313, not python3: the overlay injects qcportal into *every*
+        # interpreter's package set, but on 3.14 it carries meta.broken (see
+        # default.nix), so `pkgs.python3` refuses to evaluate here as soon as
+        # nixpkgs moves its default past 3.13.
         environment.systemPackages = [
-          (pkgs.python3.withPackages (p: [ p.qcportal ]))
+          (pkgs.python313.withPackages (p: [ p.qcportal ]))
         ];
       };
 
