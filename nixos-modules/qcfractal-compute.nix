@@ -248,6 +248,62 @@ in
         '';
       };
 
+      mpi = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Launch QC programs through `mpirun` instead of running the bare
+            executable.
+
+            Needed by NWChem, and by nothing else here.  nixpkgs builds NWChem
+            against ARMCI's MPI-PR back end, which dedicates one MPI rank per
+            node to communication progress: with a single rank there are zero
+            compute ranks and it aborts during Global Arrays initialisation.
+            QCEngine decides this for itself as
+            `node.is_batch_node or nnodes > 1` (qcengine/config.py), both false
+            for a local executor, so it has to be forced.
+
+            Only the NWChem and MRChem harnesses consult the resulting task
+            config; Psi4, CFOUR and the rest launch exactly as they did.
+
+            Requires {option}`executor.mpi.package`, and
+            {option}`executor.coresPerWorker` of at least 2 — the rank count is
+            derived from it, so a worker with one core still gets one rank and
+            the same failure.
+          '';
+        };
+
+        package = lib.mkOption {
+          type = lib.types.nullOr lib.types.package;
+          default = null;
+          example = lib.literalExpression "pkgs.qchem.nwchem.passthru.mpi";
+          description = ''
+            MPI implementation providing `mpirun`, added to the service's PATH.
+
+            This must be the same implementation the QC program was linked
+            against; `passthru.mpi` on the program is the reliable way to name
+            it.
+
+            It has to be present before the program becomes discoverable at
+            all, not merely before a task runs: the manager's startup probe
+            calls `get_version()` on every program it finds, NWChem's runs the
+            executable, and an exception there takes the whole discovery down
+            rather than just that one program.
+          '';
+        };
+
+        command = lib.mkOption {
+          type = lib.types.str;
+          default = "mpirun -n {total_ranks}";
+          description = ''
+            Launch command template.  QCEngine's `create_mpi_invocation`
+            formats `{nnodes}`, `{ranks_per_node}`, `{total_ranks}` and
+            `{cores_per_rank}` into it and appends the executable.
+          '';
+        };
+      };
+
       programs = lib.mkOption {
         type = lib.types.listOf lib.types.package;
         default = [ ];
@@ -287,6 +343,29 @@ in
 
   config = lib.mkIf cfg.enable {
 
+    assertions = [
+      {
+        assertion = cfg.executor.mpi.enable -> cfg.executor.mpi.package != null;
+        message = ''
+          services.qcfractalCompute: executor.mpi.enable is set but
+          executor.mpi.package is null.  mpirun has to be on the service's
+          PATH, and it must be the implementation the QC program was linked
+          against — e.g. executor.mpi.package = pkgs.qchem.nwchem.passthru.mpi.
+        '';
+      }
+      {
+        assertion = cfg.executor.mpi.enable -> cfg.executor.coresPerWorker >= 2;
+        message = ''
+          services.qcfractalCompute: executor.mpi.enable is set with
+          executor.coresPerWorker = ${toString cfg.executor.coresPerWorker}.
+          QCEngine derives the rank count from the cores given to a task, so
+          this still launches a single rank — and the MPI-PR back end NWChem is
+          built against spends its first rank on communication progress, leaving
+          none to compute with.  Use at least 2.
+        '';
+      }
+    ];
+
     users.users = lib.mkIf (cfg.user == "qcfractalcompute") {
       qcfractalcompute = {
         isSystemUser = true;
@@ -316,7 +395,7 @@ in
       after = [ "network.target" ];
 
       # QCEngine probes PATH at startup to find available QC programs.
-      path = cfg.executor.programs;
+      path = cfg.executor.programs ++ lib.optional cfg.executor.mpi.enable cfg.executor.mpi.package;
 
       # Bound the restart loop, as the server module does.  systemd's default
       # start limit (5 failures in 10s) can never trigger with RestartSec=30s,
@@ -386,6 +465,23 @@ in
         # the bracket in the compute-singlepoint VM test comes from — so the
         # variable leaking into the QC program's own subprocess is harmless.
         PYTHONPATH = pythonPath;
+      }
+      // lib.optionalAttrs cfg.executor.mpi.enable {
+        # QCEngine merges QCENGINE_* into the task config
+        # (read_qcengine_task_environment) and applies it over the values it
+        # derives from the node, while anything the caller passes explicitly
+        # still wins.  That is the whole reason these can be set here at all:
+        # qcfractalcompute passes ncores per task and nothing else, so the
+        # environment is the only lever for the rest.
+        QCENGINE_MPIEXEC_COMMAND = cfg.executor.mpi.command;
+        QCENGINE_USE_MPIEXEC = "true";
+
+        # The startup probe gets no task config, so it would size itself from
+        # the entire node and run a version check on as many ranks as the
+        # machine has cores.  Real tasks pass ncores themselves — apps/qcengine
+        # .py sets it from cores_per_worker — so this only reaches the probe,
+        # and it makes the probe launch look like the tasks that follow it.
+        QCENGINE_NCORES = toString cfg.executor.coresPerWorker;
       };
 
       serviceConfig = {

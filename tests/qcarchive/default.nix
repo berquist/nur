@@ -542,6 +542,81 @@ lib.fix (self: {
     pythonPath != null && lib.hasInfix "-env/lib/python" pythonPath
   );
 
+  # MPI is off by default: nothing on PATH, and no QCENGINE_* in the
+  # environment.  QCEngine reads every QCENGINE_* variable it finds, so setting
+  # them unconditionally would change how every harness is launched, not just
+  # NWChem's.
+  compute-mpi-disabled-by-default = check "compute-mpi-disabled-by-default" (
+    let
+      cfg = evalCompute {
+        services.qcfractalCompute.enable = true;
+      };
+      env = cfg.systemd.services.qcfractalcompute.environment;
+    in
+    !(env ? QCENGINE_USE_MPIEXEC) && !(env ? QCENGINE_MPIEXEC_COMMAND) && !(env ? QCENGINE_NCORES)
+  );
+
+  # mpi.enable: the launch template reaches the unit, mpirun reaches PATH, and
+  # the probe is capped to the same rank count a task gets.
+  compute-mpi-enabled = check "compute-mpi-enabled" (
+    let
+      fakeMpi = pkgs.runCommand "mpi-stub" { } "mkdir -p $out/bin && touch $out/bin/mpirun";
+      cfg = evalCompute {
+        services.qcfractalCompute = {
+          enable = true;
+          executor = {
+            coresPerWorker = 4;
+            mpi = {
+              enable = true;
+              package = fakeMpi;
+            };
+          };
+        };
+      };
+      unit = cfg.systemd.services.qcfractalcompute;
+    in
+    unit.environment.QCENGINE_USE_MPIEXEC == "true"
+    && unit.environment.QCENGINE_MPIEXEC_COMMAND == "mpirun -n {total_ranks}"
+    && unit.environment.QCENGINE_NCORES == "4"
+    && builtins.elem fakeMpi unit.path
+    # The python env must still be there — QCENGINE_* is merged into that
+    # attrset, and a `//` on the wrong side would silently drop it, taking
+    # program discovery with it.
+    && lib.hasInfix "-env/lib/python" unit.environment.PYTHONPATH
+  );
+
+  # ==========================================================================
+  # Compute module — assertion violations (must throw during evaluation)
+  # ==========================================================================
+
+  # mpi.enable without an MPI package: mpirun would be missing from PATH, and
+  # the failure would surface as the whole discovery collapsing.
+  assertion-mpi-without-package = assertFails "assertion-mpi-without-package" (nixosEval [
+    ../../nixos-modules/qcfractal-compute.nix
+    {
+      services.qcfractalCompute = {
+        enable = true;
+        executor.coresPerWorker = 2;
+        executor.mpi.enable = true;
+      };
+    }
+  ]);
+
+  # mpi.enable with one core per worker: one rank, which is exactly the
+  # configuration MPI-PR cannot run.
+  assertion-mpi-single-core = assertFails "assertion-mpi-single-core" (nixosEval [
+    ../../nixos-modules/qcfractal-compute.nix
+    {
+      services.qcfractalCompute = {
+        enable = true;
+        executor.mpi = {
+          enable = true;
+          package = pkgs.runCommand "mpi-stub" { } "mkdir -p $out/bin && touch $out/bin/mpirun";
+        };
+      };
+    }
+  ]);
+
   # ==========================================================================
   # Convenience target: every test above, built at once.
   # ==========================================================================
