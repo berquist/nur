@@ -12,6 +12,7 @@
   pydantic-settings,
   pyyaml,
   numpy,
+  networkx,
 }:
 
 buildPythonPackage rec {
@@ -47,6 +48,17 @@ buildPythonPackage rec {
     pydantic-settings
     pyyaml
     numpy
+
+    # Not a declared dependency of anything: QCEngine's NWChem harness reports
+    # itself available only if `which_import("networkx")` succeeds as well as
+    # `which("nwchem")` (programs/nwchem/runner.py), and upstream tells you to
+    # `conda install networkx` rather than declaring it.  It is listed here
+    # because this is the package whose closure becomes the compute module's
+    # PYTHONPATH, which is the interpreter that performs discovery — see
+    # ../../nixos-modules/qcfractal-compute.nix.  Without it NWChem is silently
+    # absent from the programs a worker advertises, indistinguishable from not
+    # having installed it.
+    networkx
   ];
 
   pythonImportsCheck = [ "qcfractalcompute" ];
