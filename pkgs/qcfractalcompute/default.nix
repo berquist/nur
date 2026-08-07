@@ -12,8 +12,6 @@
   pydantic-settings,
   pyyaml,
   numpy,
-  # pytestCheckHook,
-  # qcarchivetesting,
 }:
 
 buildPythonPackage rec {
@@ -50,11 +48,6 @@ buildPythonPackage rec {
     pyyaml
     numpy
   ];
-
-  # nativeCheckInputs = [
-  #   pytestCheckHook
-  #   qcarchivetesting
-  # ];
 
   pythonImportsCheck = [ "qcfractalcompute" ];
 

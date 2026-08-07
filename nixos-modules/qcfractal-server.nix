@@ -28,27 +28,29 @@ let
   # be rendered into the world-readable Nix store: database.password,
   # api.secret_key and api.jwt_secret_key.  They are supplied from the
   # environment instead -- see runtimeSecrets below.
-  serverConfig = lib.generators.toYAML { } (
-    {
-      name = cfg.serverName;
-      loglevel = cfg.logLevel;
-      enable_security = cfg.enableSecurity;
-      allow_unauthenticated_read = cfg.allowUnauthenticatedRead;
+  baseConfig = {
+    name = cfg.serverName;
+    loglevel = cfg.logLevel;
+    enable_security = cfg.enableSecurity;
+    allow_unauthenticated_read = cfg.allowUnauthenticatedRead;
 
-      api = {
-        inherit (cfg.api) host port;
-      };
+    api = {
+      inherit (cfg.api) host port;
+    };
 
-      database = {
-        own = false;
-        inherit (cfg.database) host port;
-        database_name = cfg.database.name;
-        username = cfg.database.user;
-      };
-    }
-    // lib.optionalAttrs (cfg.logFile != null) { logfile = cfg.logFile; }
-    // cfg.extraConfig
-  );
+    database = {
+      own = false;
+      inherit (cfg.database) host port;
+      database_name = cfg.database.name;
+      username = cfg.database.user;
+    };
+  }
+  // lib.optionalAttrs (cfg.logFile != null) { logfile = cfg.logFile; };
+
+  # recursiveUpdate rather than //: with a shallow merge, an extraConfig.api
+  # holding only `host` would replace the whole api block and silently drop the
+  # generated port.
+  serverConfig = lib.generators.toYAML { } (lib.recursiveUpdate baseConfig cfg.extraConfig);
 
   serverConfigFile = pkgs.writeText "qcf_config.yaml" serverConfig;
 
@@ -307,8 +309,10 @@ in
       type = lib.types.attrs;
       default = { };
       description = ''
-        Extra key-value pairs merged into the generated qcf_config.yaml.
-        Values here override module-derived settings.
+        Extra settings merged recursively into the generated qcf_config.yaml.
+        Values here override module-derived settings of the same name, leaving
+        sibling keys alone — {option}`extraConfig.api.host` does not disturb
+        the generated {option}`api.port`.
       '';
     };
   };

@@ -100,8 +100,12 @@ let
   # `nix-build tests -A qcarchive.all` works with a plain <nixpkgs>.
   overlaidPkgs = pkgs.extend (import ../../overlays).qcfractal;
 
+  # lib.fix so that `all` can enumerate its siblings rather than repeating them:
+  # a hand-maintained list is one a new test gets left out of.  No cycle — taking
+  # the attribute *names* of self does not force any of the values, and nothing
+  # but `all` refers back to the set.
 in
-rec {
+lib.fix (self: {
   # ==========================================================================
   # Overlay contract
   #
@@ -309,6 +313,31 @@ rec {
     !(lib.hasInfix "QCF_API__SECRET_KEY" s) && !(lib.hasInfix "QCF_API__JWT_SECRET_KEY" s)
   );
 
+  # extraConfig merges *recursively*: a nested key overrides its own leaf and
+  # leaves its siblings alone.  Under a shallow //, an extraConfig.api holding
+  # only `host` would replace the whole api block and drop the generated port,
+  # so the two evaluations below would render different YAML and the config
+  # file would land on a different store path.  Comparing the ExecStart text is
+  # how that store path is reached without building anything.
+  server-extraconfig-merges-nested = check "server-extraconfig-merges-nested" (
+    let
+      configPathOf =
+        extra:
+        (evalServer {
+          services.qcfractal = {
+            enable = true;
+            extraConfig = extra;
+          };
+        }).systemd.services.qcfractal-init-db.serviceConfig.ExecStart.text;
+    in
+    configPathOf { api.host = "0.0.0.0"; } == configPathOf {
+      api = {
+        host = "0.0.0.0";
+        port = 7777; # the module's own default, restated
+      };
+    }
+  );
+
   # database.passwordFile is read at start time and never inlined.
   server-password-file = check "server-password-file" (
     let
@@ -450,6 +479,25 @@ rec {
       cfg.systemd.services.qcfractalcompute.serviceConfig.WorkingDirectory == "/var/lib/qcfractalcompute"
   );
 
+  # The same recursive-merge contract on the compute side, where a shallow //
+  # is worse still: extraConfig.executors would delete local_executor outright.
+  # Overriding one leaf of it through extraConfig must produce exactly the
+  # config the corresponding module option produces.
+  compute-extraconfig-merges-nested = check "compute-extraconfig-merges-nested" (
+    let
+      configPathOf =
+        settings:
+        (evalCompute {
+          services.qcfractalCompute = {
+            enable = true;
+          }
+          // settings;
+        }).systemd.services.qcfractalcompute.serviceConfig.ExecStart.text;
+    in
+    configPathOf { executor.maxWorkers = 4; }
+    == configPathOf { extraConfig.executors.local_executor.max_workers = 4; }
+  );
+
   compute-user-created = check "compute-user-created" (
     let
       cfg = evalCompute {
@@ -495,38 +543,10 @@ rec {
   );
 
   # ==========================================================================
-  # Convenience target: build all tests at once.
+  # Convenience target: every test above, built at once.
   # ==========================================================================
   all = pkgs.symlinkJoin {
     name = "qcfractal-module-tests";
-    paths = [
-      overlay-toplevel-packages
-      overlay-python-pin
-      overlay-main-programs
-      server-disabled
-      server-defaults
-      server-db-not-precreated
-      server-upgrade-db-manual-by-default
-      server-upgrade-db-auto
-      server-upgrade-db-secrets
-      server-remote-db
-      server-required-secrets
-      server-secrets-outside-store
-      server-secrets-extraconfig-wins
-      server-password-file
-      server-open-firewall
-      server-no-firewall
-      server-custom-port
-      server-state-dir
-      server-custom-state-dir
-      server-user-created
-      assertion-user-mismatch
-      assertion-socket-without-local
-      compute-disabled
-      compute-defaults
-      compute-user-created
-      compute-programs-in-path
-      compute-python-path-for-discovery
-    ];
+    paths = lib.attrValues (removeAttrs self [ "all" ]);
   };
-}
+})
