@@ -37,12 +37,33 @@ Conventions both modules follow:
   not: putting a python env on `PATH` (the package's own wrapper prepends a bare interpreter that
   wins), and `NIX_PYTHONPATH` (`sitecustomize.py` pops it "to prevent leakage", so children never
   see it). `compute-python-path-for-discovery` guards this.
-- Psi4 needs nothing extra despite being a Python-native harness. `Psi4Harness.found()` wants both
-  `which("psi4")` and `which_import("psi4")`, but when only the executable is present it recovers by
-  running `psi4 --module` and appending the printed path to `sys.path`. That works here because
-  psi4's launcher handles `--module` before importing anything beyond the stdlib, so stderr stays
-  empty — the fallback requires `(stdout) and (not stderr) and rc == 0`. Actual calculations run as
-  `psi4 --qcschema` subprocesses, so the psiapi path is never exercised.
+- **`executor.programs` entries that are Python packages also get appended to `PYTHONPATH`**, each
+  as its own `withPackages` env. Discovery is not the reason — a Python-native harness may import
+  its program *in-process* even when the calculation runs as a subprocess. `Psi4Harness.found()`
+  gets psi4 itself onto `sys.path` by running `psi4 --module` and appending the printed path (which
+  works because psi4's launcher handles `--module` before importing anything beyond the stdlib, so
+  stderr stays empty — the fallback requires `(stdout) and (not stderr) and rc == 0`), but that
+  directory carries none of psi4's *dependencies*. Harmless until QCEngine 0.50.0 replaced
+  0.50.0rc2's version comparison with `inspect.signature(psi4.driver.p4util.state_to_atomicinput)`,
+  making `compute()` import psi4 unconditionally: the import now reaches `driver_nbody.py` and dies
+  on `No module named 'qcmanybody'`. QCEngine turns that into an execution error, so the manager
+  stays up and *every claimed task errors* — it reads as a bad calculation, not a missing module.
+  Do not merge the program envs into `pythonEnv`: `pkgs.qchem.*` comes from a different nixpkgs
+  instantiation, so the two closures collide on numpy, pydantic, qcelemental and qcengine.
+  Appending keeps those resolving to `pythonEnv`, which is what the `psi4 --module` fallback
+  already did.
+- **`pkgs.qchem.psi4` is a `toPythonApplication`, so `psi4.pythonModule` is `false`, not an
+  interpreter.** NixOS-QChem's `overlay.nix` builds it as
+  `toPythonApplication python3.pkgs.psi4`, and that wrapper sets `pythonModule = false` to mark the
+  program as *not* importable as a library. So `p ? pythonModule` is true while
+  `p.pythonModule.pythonVersion` is missing, and any filter written the obvious way silently drops
+  psi4 and leaves `PYTHONPATH` byte-identical — the VM test then rebuilds to the *same derivation
+  hash*, which looks exactly like the edit never landed. Test `lib.isDerivation p.pythonModule`,
+  and take the application form's closure and interpreter from `requiredPythonModules` (47 entries
+  for psi4; the interpreter is its one element with `pythonVersion`/`withPackages`).
+- Psi4 itself is deliberately absent from the env it gets: `found()`'s `psi4 --module` fallback
+  already supplies it. Verified by running the HF/STO-3G singlepoint with psi4's own site-packages
+  removed from `PYTHONPATH` — still -1.1167383 Eh.
 
 Both of the above were checked by running the real code against the store paths rather than by
 reading it, which is worth doing before touching this again — no nix-daemon is needed:
