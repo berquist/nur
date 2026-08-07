@@ -6,21 +6,24 @@
 
 ## What's in it
 
-**QCArchive / QCFractal** — Python packages and two NixOS service modules for running a
-QCFractal server and a compute worker:
+### QCArchive / [QCFractal](https://github.com/MolSSI/QCFractal)
 
-| | |
-|---|---|
-| `qcportal`, `qcfractal`, `qcfractalcompute`, `qcarchivetesting` | QCArchive 0.65, none of which are in nixpkgs |
-| `parsl` | the task executor `qcfractalcompute` runs on |
-| `nixosModules.qcfractal-server` | `services.qcfractal.*` — web API, PostgreSQL wiring, Alembic migrations |
-| `nixosModules.qcfractal-compute` | `services.qcfractalCompute.*` — a local worker that discovers QC programs on its `PATH` |
+Python packages and two NixOS service modules for running a QCFractal server and a compute worker:
 
-**dotdrop** — the dotfile manager, also not in nixpkgs. Unrelated to the above.
+| Name                                                            | Description                                                 |
+|-----------------------------------------------------------------|-------------------------------------------------------------|
+| `qcportal`, `qcfractal`, `qcfractalcompute`, `qcarchivetesting` | QCArchive ecosystem packages                                |
+| `nixosModules.qcfractal-server`                                 | `services.qcfractal.*` — the QCFractal database and web API |
+| `nixosModules.qcfractal-compute`                                | `services.qcfractalCompute.*` — a QCFractal compute worker  |
+| [`parsl`](https://github.com/Parsl/parsl)                       | the task executor used by QCFractal workers                 |
 
-Quantum-chemistry programs (Psi4, CFOUR, NWChem, …) come from
-[NixOS-QChem](https://github.com/Nix-QChem/NixOS-QChem), re-exported here as `overlays.qchem`
-so that `pkgs.qchem.*` and the modules can be brought in together.
+#### Support
+
+Some quantum chemistry programs come from [NixOS-QChem](https://github.com/Nix-QChem/NixOS-QChem), re-exported here as `overlays.qchem` so that `pkgs.qchem.*` and the modules can be brought in together.
+
+### [dotdrop](https://github.com/deadc0de6/dotdrop)
+
+> Save your dotfiles once, deploy them everywhere
 
 ## Using it
 
