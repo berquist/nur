@@ -466,8 +466,13 @@ in
             "user add worker --password ${workerPassword} --role compute'"
         )
 
-        # Don't wait out the 30s restart backoff.
-        machine.systemctl("restart qcfractalcompute.service")
+        # Don't wait out the 30s restart backoff.  Through succeed() rather
+        # than machine.systemctl(), which returns (status, output) and raises
+        # on nothing: a restart that never happened — a masked unit, a hit
+        # start limit — would be swallowed here and only resurface 180s later
+        # as the retry below timing out, pointing at registration rather than
+        # at the restart.
+        machine.succeed("systemctl restart qcfractalcompute.service")
         machine.wait_for_unit("qcfractalcompute.service")
 
         import json
