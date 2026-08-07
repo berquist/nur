@@ -20,41 +20,100 @@ let
   # Generate the manager config YAML.
   # The server password is intentionally absent; it is injected at runtime
   # via an environment variable read from server.passwordFile.
-  computeConfig = lib.generators.toYAML { } (
-    {
-      cluster = cfg.clusterName;
-      loglevel = cfg.logLevel;
-      update_frequency = cfg.updateFrequency;
+  baseConfig = {
+    cluster = cfg.clusterName;
+    loglevel = cfg.logLevel;
+    update_frequency = cfg.updateFrequency;
 
-      server = {
-        fractal_uri = cfg.server.fractalUri;
-      }
-      // lib.optionalAttrs (cfg.server.username != null) {
-        inherit (cfg.server) username;
-      };
-
-      executors.local_executor = {
-        type = "local";
-        max_workers = cfg.executor.maxWorkers;
-        cores_per_worker = cfg.executor.coresPerWorker;
-        memory_per_worker = cfg.executor.memoryPerWorker;
-        compute_tags = cfg.executor.computeTags;
-        environments.use_manager_environment = true;
-      }
-      // lib.optionalAttrs (cfg.executor.scratchDirectory != null) {
-        scratch_directory = cfg.executor.scratchDirectory;
-      };
+    server = {
+      fractal_uri = cfg.server.fractalUri;
     }
-    // lib.optionalAttrs (cfg.logFile != null) { logfile = cfg.logFile; }
-    // cfg.extraConfig
-  );
+    // lib.optionalAttrs (cfg.server.username != null) {
+      inherit (cfg.server) username;
+    };
+
+    executors.local_executor = {
+      type = "local";
+      max_workers = cfg.executor.maxWorkers;
+      cores_per_worker = cfg.executor.coresPerWorker;
+      memory_per_worker = cfg.executor.memoryPerWorker;
+      compute_tags = cfg.executor.computeTags;
+      environments.use_manager_environment = true;
+    }
+    // lib.optionalAttrs (cfg.executor.scratchDirectory != null) {
+      scratch_directory = cfg.executor.scratchDirectory;
+    };
+  }
+  // lib.optionalAttrs (cfg.logFile != null) { logfile = cfg.logFile; };
+
+  # recursiveUpdate rather than //: with a shallow merge, an extraConfig.server
+  # would replace the whole server block and drop the fractal_uri, and an entry
+  # under extraConfig.executors would delete local_executor outright.
+  computeConfig = lib.generators.toYAML { } (lib.recursiveUpdate baseConfig cfg.extraConfig);
 
   computeConfigFile = pkgs.writeText "qcf_compute_config.yaml" computeConfig;
+
+  py = cfg.package.pythonModule;
 
   # A single merged site-packages directory holding qcfractalcompute and its
   # whole dependency closure, exported as PYTHONPATH on the unit below so that
   # QCEngine's out-of-process program discovery can import qcengine.
-  pythonEnv = cfg.package.pythonModule.withPackages (_: [ cfg.package ]);
+  pythonEnv = py.withPackages (_: [ cfg.package ]);
+
+  # QC programs written in Python need their own dependency closure importable
+  # as well — see the PYTHONPATH comment below.  They come in two shapes, and
+  # only one of them can name its own interpreter:
+  #
+  #   * a module (buildPythonPackage): `pythonModule` is the interpreter, and
+  #     the package itself is what belongs in the env;
+  #   * an application (toPythonApplication): `pythonModule` is deliberately
+  #     `false`, so that nothing treats the program as importable.  This is
+  #     what pkgs.qchem.psi4 is — NixOS-QChem's overlay.nix builds it as
+  #     `toPythonApplication python3.pkgs.psi4`.  Its dependency closure is
+  #     `requiredPythonModules`, which carries the interpreter along as its one
+  #     non-module element.
+  #
+  # Testing `pythonModule` for a *derivation* rather than for presence is the
+  # whole point: the application form has the attribute, set to `false`, so a
+  # `p ? pythonModule` check passes and then finds no pythonVersion behind it.
+  # Written the obvious way, the filter silently drops psi4 and leaves
+  # PYTHONPATH byte-identical — the VM test then rebuilds to the *same*
+  # derivation hash, which looks exactly like the edit never landed.
+  # Anything else — a plain executable such as pkgs.qchem.cfour — contributes
+  # no modules and is skipped, as is a program built for another interpreter,
+  # whose site-packages would not even sit at the same path.
+  #
+  # psi4 itself is deliberately not added: QCEngine's `psi4 --module` fallback
+  # already puts it on sys.path, and the application form has no business in a
+  # python env.  Only its dependencies were ever missing.
+  programPythonEnv =
+    p:
+    let
+      isModule = lib.isDerivation (p.pythonModule or false);
+      mods = if isModule then [ p ] else p.requiredPythonModules or [ ];
+      interp =
+        if isModule then
+          p.pythonModule
+        else
+          lib.findFirst (m: m ? pythonVersion && m ? withPackages) null mods;
+    in
+    if interp == null || interp.pythonVersion != py.pythonVersion then
+      null
+    else
+      interp.withPackages (_: mods);
+
+  # Each program gets its own env instead of being merged into pythonEnv,
+  # because pkgs.qchem.* is instantiated from a *different* nixpkgs than this
+  # module's pkgs (see flake.nix on nixpkgs-qchem).  Merging would collide on
+  # every package the two closures share — numpy, pydantic, qcelemental,
+  # qcengine — at differing versions.  Appending instead leaves those resolving
+  # to pythonEnv, exactly as they do today via QCEngine's `psi4 --module`
+  # sys.path fallback; only the program's private dependencies come from here.
+  programEnvs = lib.remove null (map programPythonEnv cfg.executor.programs);
+
+  pythonPath = lib.concatMapStringsSep ":" (e: "${e}/${py.sitePackages}") (
+    [ pythonEnv ] ++ programEnvs
+  );
 
 in
 {
@@ -202,8 +261,13 @@ in
           environments or worker_init scripts are needed under NixOS.
 
           Programs available from NixOS-QChem (pkgs.qchem.*) include:
-          psi4, cfour, nwchem, orca, gamess-us, xtb, mrcc, and many others.
-          pkgs.nwchem is also available directly from nixpkgs.
+          psi4, cfour, orca, gamess-us, xtb, mrcc, and many others.
+
+          NWChem — either pkgs.qchem.nwchem or nixpkgs' own pkgs.nwchem — is
+          the known exception and does not currently work: QCEngine's harness
+          also requires the `networkx` Python module, which is in neither
+          qcengine's nor qcfractalcompute's closure, so the program is never
+          discovered.  See docs/nwchem-as-a-test-program.md.
         '';
       };
     };
@@ -212,8 +276,11 @@ in
       type = lib.types.attrs;
       default = { };
       description = ''
-        Extra key-value pairs merged into the generated manager config YAML.
-        Values here override module-derived settings.
+        Extra settings merged recursively into the generated manager config
+        YAML.  Values here override module-derived settings of the same name,
+        leaving sibling keys alone — an entry under
+        {option}`extraConfig.executors` adds an executor rather than replacing
+        the generated `local_executor`.
       '';
     };
   };
@@ -251,6 +318,15 @@ in
       # QCEngine probes PATH at startup to find available QC programs.
       path = cfg.executor.programs;
 
+      # Bound the restart loop, as the server module does.  systemd's default
+      # start limit (5 failures in 10s) can never trigger with RestartSec=30s,
+      # so a permanently broken configuration would otherwise restart every 30
+      # seconds forever, never reaching "failed" and never surfacing as an
+      # error.  Twenty attempts over an hour still rides out a server that is
+      # down for a while, which is the case worth retrying through.
+      startLimitIntervalSec = 3600;
+      startLimitBurst = 20;
+
       environment = {
         # Required for any program to be discovered at all.
         #
@@ -278,13 +354,38 @@ in
         # placed here.  NIX_PYTHONPATH cannot either — sitecustomize.py pops it
         # ("unset in order to prevent leakage"), so children never see it.
         # PYTHONPATH is inherited, and pythonEnv merges the whole closure into
-        # one directory, so a single entry suffices.
+        # one directory, so one entry covers discovery.
         #
-        # Verified by running qcengine_list.py directly: bare gives "{}",
-        # with this set it gives {"psi4": "1.10", "qcengine": "..."}.  A full
-        # HF/STO-3G calculation also runs correctly with it set, so the
+        # The trailing entries, one per Python-package program, are needed for
+        # a second and unrelated reason: a Python-native harness may import its
+        # program *in-process* even when the calculation itself runs as a
+        # subprocess.  QCEngine 0.50.0 made Psi4Harness.compute do exactly that
+        #
+        #   psi4_can_v2 = "dtype" in inspect.signature(
+        #       psi4.driver.p4util.state_to_atomicinput).parameters
+        #
+        # replacing the plain version comparison 0.50.0rc2 used.  Psi4Harness
+        # .found() puts psi4 itself on sys.path (it runs `psi4 --module` and
+        # appends the printed path), but that directory alone carries none of
+        # psi4's dependencies, so `import psi4` reaches driver_nbody.py and
+        # dies with "No module named 'qcmanybody'".  QCEngine catches it as an
+        # execution error, so the manager stays up and every task it claims
+        # errors instead — the failure looks like a bad calculation, not a
+        # missing module.
+        #
+        # All of this was checked by running the real code against the store
+        # paths rather than by reading it, and is worth re-checking that way
+        # before touching it again — no nix-daemon needed:
+        #
+        #   PYTHONPATH=<these dirs> PATH=<bare python>/bin:<psi4>/bin \
+        #     python3 .../run_scripts/qcengine_list.py
+        #
+        # Bare that prints "{}"; with PYTHONPATH set it prints
+        # {"psi4": "1.10", "qcengine": "0.50.0"}.  A full HF/STO-3G H2
+        # singlepoint run the same way returns -1.1167383 Eh — which is where
+        # the bracket in the compute-singlepoint VM test comes from — so the
         # variable leaking into the QC program's own subprocess is harmless.
-        PYTHONPATH = "${pythonEnv}/${cfg.package.pythonModule.sitePackages}";
+        PYTHONPATH = pythonPath;
       };
 
       serviceConfig = {

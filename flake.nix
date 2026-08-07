@@ -202,11 +202,7 @@
 
             hooks = {
               # Nix-scoped: these three carry their own `files` filters.
-              #
-              # nixfmt-rfc-style, not nixfmt: the latter is git-hooks.nix's
-              # deprecated alias for nixfmt-classic.  Both names resolve to the
-              # same nixfmt 1.3.1 derivation on the nixpkgs side.
-              nixfmt-rfc-style.enable = true;
+              nixfmt.enable = true;
               statix.enable = true;
               deadnix.enable = true;
 

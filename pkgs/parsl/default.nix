@@ -138,11 +138,6 @@ buildPythonPackage rec {
     "local"
   ];
 
-  # disabledTestPaths = [
-  #   # needs a working MPI runtime (test-requirements.txt pulls in mpi4py)
-  #   "parsl/tests/test_mpi_apps"
-  # ];
-
   disabledTests = [
     # Globus Compute package not being picked up?
     "test_gc_executor_resets_uep_after_submit"
@@ -169,14 +164,3 @@ buildPythonPackage rec {
     mainProgram = "parsl-perf";
   };
 }
-
-# To fill in the hash:
-#
-#   nix store prefetch-file --json \
-#     https://files.pythonhosted.org/packages/16/94/32047135b76f8c2c56dc87cc2e53e41aa7848659e0d6f82f23f984d54552/parsl-2026.7.27.tar.gz
-#
-# and paste the returned SRI string in place of lib.fakeHash.
-#
-# Build it with:
-#
-#   nix-build -E 'with import <nixpkgs> {}; python3Packages.callPackage ./default.nix {}'

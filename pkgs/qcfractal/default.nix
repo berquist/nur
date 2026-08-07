@@ -52,24 +52,6 @@ buildPythonPackage rec {
     qcportal
   ];
 
-  # propagatedBuildInputs = [
-  #   qcportal
-  #   sqlalchemy
-  #   alembic
-  #   psycopg2
-  #   pydantic
-  #   pydantic-settings
-  #   pyyaml
-  #   bcrypt
-  #   cryptography
-  #   flask
-  #   flask-jwt-extended
-  #   waitress
-  #   numpy
-  # ];
-
-  # dontBuild = true;
-
   # qcfractal imports its own top-level package; the CLI script is installed
   # separately via the wheel's entry_points.
   pythonImportsCheck = [ "qcfractal" ];

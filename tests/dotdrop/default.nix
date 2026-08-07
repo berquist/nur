@@ -47,8 +47,10 @@ let
     pkgs.tree
   ];
 
+  # lib.fix so that `all` enumerates its siblings instead of repeating them; see
+  # the note in ../qcarchive/default.nix.
 in
-rec {
+lib.fix (self: {
   # ==========================================================================
   # Upstream's own end-to-end suite, run against the *installed* binary.
   #
@@ -267,17 +269,10 @@ rec {
       '';
 
   # ==========================================================================
-  # Convenience target: build all tests at once.
-  #
-  # Hand-maintained, like tests/qcarchive/default.nix's — new tests must be
-  # added here too.
+  # Convenience target: every test above, built at once.
   # ==========================================================================
   all = pkgs.symlinkJoin {
     name = "dotdrop-tests";
-    paths = [
-      metadata
-      roundtrip
-      tests-ng
-    ];
+    paths = lib.attrValues (removeAttrs self [ "all" ]);
   };
-}
+})

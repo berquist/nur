@@ -1,41 +1,23 @@
 # tests/qcarchive/vm.nix
 #
-# VM-based integration tests for the QCFractal NixOS modules.
-# These tests actually boot a NixOS VM and verify that the services start,
-# PostgreSQL is initialised, and the API responds.
+# VM-based integration tests for the QCFractal NixOS modules.  These boot a
+# real NixOS VM and verify that the services start, PostgreSQL is initialised,
+# and the API responds — so the real qcfractal and qcfractalcompute packages
+# have to be buildable.
 #
-# Prerequisites
-# -------------
-# The real qcfractal and qcfractalcompute packages must be buildable.
-# Apply the NUR overlay before running these tests:
-#
-#   nix-build tests/qcarchive/vm.nix \
-#     --arg pkgs 'import <nixpkgs> { overlays = [ (import ../../overlays).qcfractal ]; }'
-#
-# Or from the flake:
 #   nix build .#checks.x86_64-linux.vm-server-local-db
-#
-# Run options
-# -----------
-# Run a specific test:
-#   nix-build tests/qcarchive/vm.nix -A server-local-db
-#
-# All tests via the flake:
-#   nix build .#checks.x86_64-linux.vm-server-local-db
-#
-# Interactive debugging:
+#   just vm-test server-local-db
 #   $(nix-build tests/qcarchive/vm.nix -A server-local-db.driver)/bin/nixos-test-driver
-
-# pkgs must already have the qcfractal overlay applied, because
-# testers.nixosTest uses the pkgs argument directly as the package set for
-# VM nodes — nixpkgs.overlays inside a node module is evaluated too late to
-# affect the pkgs instance the test framework has already constructed.
 #
-# From the command line:
-#   nix-build tests/qcarchive/vm.nix \
+# pkgs must arrive with the qcfractal overlay already applied, because
+# testers.nixosTest uses the pkgs argument directly as the package set for VM
+# nodes — nixpkgs.overlays inside a node module is evaluated too late to affect
+# the pkgs instance the framework has already constructed.  The flake's pkgs'
+# and the default argument below both handle this; from the command line it
+# takes
+#
+#   nix-build tests/qcarchive/vm.nix -A server-local-db \
 #     --arg pkgs 'import <nixpkgs> { overlays = [ (import ./overlays).qcfractal ]; }'
-#
-# From the flake, pkgs' is already overlaid before being passed here.
 {
   pkgs ? import <nixpkgs> {
     overlays = [ (import ../../overlays).qcfractal ];
@@ -85,6 +67,31 @@ let
   # Import our NixOS modules.
   serverModule = ../../nixos-modules/qcfractal-server.nix;
   computeModule = ../../nixos-modules/qcfractal-compute.nix;
+
+  # Shared by the two compute tests that wait for a manager to register.
+  #
+  # There is no GET /api/v1/managers route; managers are listed through POST
+  # /api/v1/managers/query, whose body is a ManagerQueryFilters model with every
+  # field optional, so {} means "no filter".  Responses default to JSON when
+  # Accept does not ask for msgpack.
+  #
+  # Registration is asynchronous: the manager heartbeats to the server only
+  # after Parsl has finished spinning up its executor, which takes appreciably
+  # longer than a fixed sleep can be relied on.  Poll instead.
+  managerQuery = ''
+    import json
+
+    query_managers = (
+        "curl -sf -X POST http://localhost:7777/api/v1/managers/query "
+        "-H 'Content-Type: application/json' -d '{}'"
+    )
+
+    def managers_registered(_):
+        status, output = machine.execute(query_managers)
+        if status != 0:
+            return False
+        return len(json.loads(output)) > 0
+  '';
 
 in
 {
@@ -343,31 +350,13 @@ in
         };
       };
 
-    # Registration is asynchronous: the manager heartbeats to the server after
-    # Parsl has finished spinning up its executor, which takes appreciably
-    # longer than a fixed sleep can be relied on.  Poll instead.
     testScript = ''
       machine.start()
       machine.wait_for_unit("qcfractal.service")
       machine.wait_for_open_port(7777)
       machine.wait_for_unit("qcfractalcompute.service")
 
-      import json
-
-      # There is no GET /api/v1/managers route; managers are listed through
-      # POST /api/v1/managers/query, whose body is a ManagerQueryFilters
-      # model with every field optional, so {} means "no filter".  Responses
-      # default to JSON when Accept does not ask for msgpack.
-      query_managers = (
-          "curl -sf -X POST http://localhost:7777/api/v1/managers/query "
-          "-H 'Content-Type: application/json' -d '{}'"
-      )
-
-      def managers_registered(_):
-          status, output = machine.execute(query_managers)
-          if status != 0:
-              return False
-          return len(json.loads(output)) > 0
+      ${managerQuery}
 
       with machine.nested("waiting for the compute manager to register"):
           retry(managers_registered, timeout_seconds = 180)
@@ -466,22 +455,16 @@ in
             "user add worker --password ${workerPassword} --role compute'"
         )
 
-        # Don't wait out the 30s restart backoff.
-        machine.systemctl("restart qcfractalcompute.service")
+        # Don't wait out the 30s restart backoff.  Through succeed() rather
+        # than machine.systemctl(), which returns (status, output) and raises
+        # on nothing: a restart that never happened — a masked unit, a hit
+        # start limit — would be swallowed here and only resurface 180s later
+        # as the retry below timing out, pointing at registration rather than
+        # at the restart.
+        machine.succeed("systemctl restart qcfractalcompute.service")
         machine.wait_for_unit("qcfractalcompute.service")
 
-        import json
-
-        query_managers = (
-            "curl -sf -X POST http://localhost:7777/api/v1/managers/query "
-            "-H 'Content-Type: application/json' -d '{}'"
-        )
-
-        def managers_registered(_):
-            status, output = machine.execute(query_managers)
-            if status != 0:
-                return False
-            return len(json.loads(output)) > 0
+        ${managerQuery}
 
         with machine.nested("waiting for the authenticated manager to register"):
             retry(managers_registered, timeout_seconds = 180)

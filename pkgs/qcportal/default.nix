@@ -20,11 +20,6 @@
   pyjwt,
   dateutils,
   pytz,
-  # pyarrow,
-  # pytestCheckHook,
-  # deepdiff,
-  # qcfractal,
-  # qcarchivetesting,
 }:
 
 buildPythonPackage rec {
@@ -59,13 +54,6 @@ buildPythonPackage rec {
     dateutils
     pytz
   ];
-
-  # nativeCheckInputs = [
-  #   pytestCheckHook
-  #   deepdiff
-  #   # qcfractal
-  #   # qcarchivetesting
-  # ];
 
   pythonImportsCheck = [ "qcportal" ];
 
