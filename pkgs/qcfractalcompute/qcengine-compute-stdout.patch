@@ -1,0 +1,39 @@
+Give the compute subprocess a real stdout object, not None.
+
+run_scripts/qcengine_compute.py wraps the QCEngine call in
+`redirect_stdout(None)` so that chatter from a QC program cannot pollute the
+JSON result it prints on stdout afterwards.  But `redirect_stdout(None)` sets
+`sys.stdout` to None outright, and anything imported inside that block which
+touches `sys.stdout` dies on `'NoneType' object has no attribute ...`.
+
+QCEngine 0.50.0 made that reachable.  Psi4Harness.compute now imports psi4
+in-process to inspect a signature, psi4's __init__ imports its endorsed
+plugins, and adcc evaluates `sys.stdout.isatty()` as a default argument at
+class-definition time:
+
+    adcc/timings.py:197
+        def describe(self, colour=sys.stdout.isatty()):
+    AttributeError: 'NoneType' object has no attribute 'isatty'
+
+psi4 guards its plugin imports with `except ImportError`, which does not catch
+an AttributeError, so the whole `import psi4` fails.  QCEngine reports that as
+an execution error rather than crashing, so the manager stays up and every
+task it claims errors out — it reads as a bad calculation, not a broken
+import.
+
+Redirecting into throwaway StringIO objects keeps the real stdout clean, which
+is all this block is for, and is what the comment on the line above already
+describes ("the string io objects").  `io` is imported at the top of the file
+and otherwise unused, which suggests it is what was meant.
+
+--- a/qcfractalcompute/run_scripts/qcengine_compute.py
++++ b/qcfractalcompute/run_scripts/qcengine_compute.py
+@@ -44,7 +44,7 @@
+         function_kwargs = json.load(f)
+ 
+     # Redirect stdout/stderr to the string io objects. This can cause issues with how we return our json
+-    with redirect_stdout(None), redirect_stderr(None):
++    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+         if "procedure" in function_kwargs:
+             ret = qcengine.compute_procedure(**function_kwargs)
+         else:

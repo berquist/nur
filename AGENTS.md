@@ -280,6 +280,14 @@ subdirectory-per-subject layout and what each suite covers.
   `qcportal`; consumers get the rest from their own `withPackages`/devShell.
 - `parsl` is built from the sdist (the wheel omits `version.py` and `requirements.txt`) and
   patches `conftest.py` for pytest 9 (upstream Parsl#4051). Only `parsl/tests/unit` is run.
+- `qcfractalcompute` patches `run_scripts/qcengine_compute.py` to redirect into `StringIO`
+  rather than `None`. `redirect_stdout(None)` sets `sys.stdout` to None, and since QCEngine
+  0.50.0 that block imports psi4 in-process, which imports adcc, which reads
+  `sys.stdout.isatty()` at class-definition time — so every claimed task fails with
+  `'NoneType' object has no attribute 'isatty'`. 0.65 is the newest release, so there is
+  nothing to upgrade to; see the patch header. Coupled to the `PYTHONPATH` change in
+  `nixos-modules/qcfractal-compute.nix` — that is what makes adcc importable in the first
+  place, and so what exposed this.
 
 ## Working inside the Claude Code sandbox
 
