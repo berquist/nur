@@ -44,7 +44,7 @@
     # Pinning it by hand rather than reading nixos-qchem's lock at eval time is
     # deliberate: flakes offer no supported way to reach a transitive input's
     # locked revision, and `follows` cannot express "match the dependency".
-    nixpkgs-qchem.url = "github:NixOS/nixpkgs/3e41b24abd260e8f71dbe2f5737d24122f972158";
+    nixpkgs-qchem.url = "github:NixOS/nixpkgs/afb4584a80bbf779ce0f691509ff902d188c2b3d";
   };
 
   # Binary cache for NixOS-QChem (Psi4 and CFOUR are large; fetch binaries
