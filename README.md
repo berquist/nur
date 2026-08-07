@@ -12,7 +12,7 @@ Python packages and two NixOS service modules for running a QCFractal server and
 
 | Name                                                            | Description                                                 |
 |-----------------------------------------------------------------|-------------------------------------------------------------|
-| `qcportal`, `qcfractal`, `qcfractalcompute`, `qcarchivetesting` | QCArchive ecosystem 0.65 packages                           |
+| `qcportal`, `qcfractal`, `qcfractalcompute`, `qcarchivetesting` | QCArchive ecosystem packages                                |
 | `nixosModules.qcfractal-server`                                 | `services.qcfractal.*` — the QCFractal database and web API |
 | `nixosModules.qcfractal-compute`                                | `services.qcfractalCompute.*` — a QCFractal compute worker  |
 | [`parsl`](https://github.com/Parsl/parsl)                       | the task executor used by QCFractal workers                 |
