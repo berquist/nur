@@ -6,3 +6,4 @@ result-*
 # regenerate it, then `just hooks` to run the hooks over the tree.
 /.pre-commit-config.yaml
 
+.direnv/

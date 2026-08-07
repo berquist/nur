@@ -88,13 +88,21 @@ ci-matrix:
 # errors with "unrecognised flag"), but it streams build output by default, so
 # the nix-build recipes below need nothing extra.
 
-# Everything: eval tests, all six VM tests, and the pre-commit hooks.
+# Everything: eval tests, dotdrop tests, all six VM tests, and the hooks.
 check:
     nix flake check -L
 
-# Evaluation tests only — fast, no VM, stubbed packages.
-eval-tests:
+# Every non-VM test: the QCFractal eval tests and the dotdrop integration tests.
+tests:
     nix-build tests -A all --no-out-link
+
+# QCFractal module evaluation tests only — fast, no VM, stubbed packages.
+eval-tests:
+    nix-build tests -A qcarchive.all --no-out-link
+
+# dotdrop integration tests. No VM, but these build the real package.
+dotdrop-tests:
+    nix-build tests -A dotdrop.all --no-out-link
 
 # One VM integration test, e.g. `just vm-test server-local-db`. Needs KVM.
 vm-test name:
@@ -102,7 +110,7 @@ vm-test name:
 
 # Drop into the interactive driver for one VM test.
 vm-test-interactive name:
-    $(nix-build tests/vm.nix -A {{ name }}.driver)/bin/nixos-test-driver
+    $(nix-build tests/qcarchive/vm.nix -A {{ name }}.driver)/bin/nixos-test-driver
 
 # Eval tests, VM test instantiation and a parse of every Nix file — the whole
 # of what can be checked without a nix-daemon, and so the whole of what runs

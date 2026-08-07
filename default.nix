@@ -39,6 +39,11 @@ in
   # Non-Python packages.
   example-package = pkgs'.callPackage ./pkgs/example-package { };
 
+  # Python *applications*: reached through the overlay rather than
+  # callPackage'd here, so that pkgs.dotdrop and this attribute are the same
+  # derivation.  Built against the default python3, not the 3.13 pin below.
+  inherit (pkgs') dotdrop;
+
   # Python packages, reached through the extended python313Packages so that
   # these derivations are identical to what python313.withPackages returns.
   inherit (py)

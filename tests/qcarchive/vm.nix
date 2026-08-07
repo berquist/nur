@@ -1,4 +1,4 @@
-# tests/vm.nix
+# tests/qcarchive/vm.nix
 #
 # VM-based integration tests for the QCFractal NixOS modules.
 # These tests actually boot a NixOS VM and verify that the services start,
@@ -9,8 +9,8 @@
 # The real qcfractal and qcfractalcompute packages must be buildable.
 # Apply the NUR overlay before running these tests:
 #
-#   nix-build tests/vm.nix \
-#     --arg pkgs 'import <nixpkgs> { overlays = [ (import ../overlays).qcfractal ]; }'
+#   nix-build tests/qcarchive/vm.nix \
+#     --arg pkgs 'import <nixpkgs> { overlays = [ (import ../../overlays).qcfractal ]; }'
 #
 # Or from the flake:
 #   nix build .#checks.x86_64-linux.vm-server-local-db
@@ -18,13 +18,13 @@
 # Run options
 # -----------
 # Run a specific test:
-#   nix-build tests/vm.nix -A server-local-db
+#   nix-build tests/qcarchive/vm.nix -A server-local-db
 #
 # All tests via the flake:
 #   nix build .#checks.x86_64-linux.vm-server-local-db
 #
 # Interactive debugging:
-#   $(nix-build tests/vm.nix -A server-local-db.driver)/bin/nixos-test-driver
+#   $(nix-build tests/qcarchive/vm.nix -A server-local-db.driver)/bin/nixos-test-driver
 
 # pkgs must already have the qcfractal overlay applied, because
 # testers.nixosTest uses the pkgs argument directly as the package set for
@@ -32,20 +32,20 @@
 # affect the pkgs instance the test framework has already constructed.
 #
 # From the command line:
-#   nix-build tests/vm.nix \
+#   nix-build tests/qcarchive/vm.nix \
 #     --arg pkgs 'import <nixpkgs> { overlays = [ (import ./overlays).qcfractal ]; }'
 #
 # From the flake, pkgs' is already overlaid before being passed here.
 {
   pkgs ? import <nixpkgs> {
-    overlays = [ (import ../overlays).qcfractal ];
+    overlays = [ (import ../../overlays).qcfractal ];
   },
 
   # A real QC program for the compute-worker tests.  qcfractalcompute refuses
   # to start an executor with no discoverable programs, so these tests cannot
   # run with an empty PATH.
   #
-  # Psi4 comes from NixOS-QChem, which is a *flake input* — ../overlays cannot
+  # Psi4 comes from NixOS-QChem, which is a *flake input* — ../../overlays cannot
   # provide it, so the default argument above has no pkgs.qchem.  The
   # psi4-backed tests are therefore reachable only through the flake, or by
   # supplying this argument explicitly.  Everything else in this file works
@@ -83,8 +83,8 @@ let
   };
 
   # Import our NixOS modules.
-  serverModule = ../nixos-modules/qcfractal-server.nix;
-  computeModule = ../nixos-modules/qcfractal-compute.nix;
+  serverModule = ../../nixos-modules/qcfractal-server.nix;
+  computeModule = ../../nixos-modules/qcfractal-compute.nix;
 
 in
 {
@@ -559,8 +559,13 @@ in
 
         # qcportal for the submitting client.  This is the same derivation the
         # server uses, reached through the overlay's python package set.
+        #
+        # python313, not python3: the overlay injects qcportal into *every*
+        # interpreter's package set, but on 3.14 it carries meta.broken (see
+        # default.nix), so `pkgs.python3` refuses to evaluate here as soon as
+        # nixpkgs moves its default past 3.13.
         environment.systemPackages = [
-          (pkgs.python3.withPackages (p: [ p.qcportal ]))
+          (pkgs.python313.withPackages (p: [ p.qcportal ]))
         ];
       };
 

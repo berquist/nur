@@ -84,17 +84,19 @@
         # Our Python packages (pkgs.python313Packages.qcfractal, etc.):
         #   inputs.nur-berquist.overlays.qcfractal
         #
+        # dotdrop (pkgs.dotdrop):
+        #   inputs.nur-berquist.overlays.dotdrop
+        #
         # NixOS-QChem re-exported for convenience (pkgs.qchem.*):
         #   inputs.nur-berquist.overlays.qchem
         #
-        # Both at once:
+        # All at once:
         #   inputs.nur-berquist.overlays.default
         overlays = (import ./overlays) // {
           inherit (inputs.nixos-qchem.overlays) qchem;
-          default = inputs.nixpkgs.lib.composeManyExtensions [
-            inputs.nixos-qchem.overlays.qchem
-            (import ./overlays).qcfractal
-          ];
+          default = inputs.nixpkgs.lib.composeManyExtensions (
+            [ inputs.nixos-qchem.overlays.qchem ] ++ builtins.attrValues (import ./overlays)
+          );
         };
       };
 
@@ -108,16 +110,19 @@
         let
           inherit (inputs.nixpkgs) lib;
 
-          # pkgs' has our overlay applied — required by both the eval tests
-          # (for runCommand) and the VM tests (testers.nixosTest uses pkgs
-          # directly as the node package set).
+          # pkgs' has our overlays applied — required by the eval tests (for
+          # runCommand and for pkgs.dotdrop), and by the VM tests
+          # (testers.nixosTest uses pkgs directly as the node package set).
+          #
+          # Composed from *all* of ./overlays, matching what default.nix does,
+          # so that a package added there needs no second edit here.
           #
           # Distinct from the `pkgs` argument above, which flake-parts hands us
           # unmodified: legacyPackages below must stay un-overlaid, because
           # default.nix applies the overlays itself.
           pkgs' = import inputs.nixpkgs {
             inherit system;
-            overlays = [ (import ./overlays).qcfractal ];
+            overlays = builtins.attrValues (import ./overlays);
           };
 
           # Psi4 for the compute tests.
@@ -160,10 +165,12 @@
           # need Psi4 are defined only there.  They need KVM anyway.
           psi4 = if system == "x86_64-linux" then qchemPkgs.qchem.psi4 else null;
 
-          vmTests = import ./tests/vm.nix {
+          vmTests = import ./tests/qcarchive/vm.nix {
             pkgs = pkgs';
             inherit psi4;
           };
+
+          tests = import ./tests { pkgs = pkgs'; };
 
           nurAttrs = import ./default.nix { inherit pkgs; };
         in
@@ -237,8 +244,11 @@
           # -------------------------------------------------------------------
           # Checks
           #
-          # Evaluation tests (fast, no VM, no real packages):
+          # QCFractal module evaluation tests (fast, no VM, no real packages):
           #   nix build .#checks.x86_64-linux.eval
+          #
+          # dotdrop integration tests (no VM, but they build the real package):
+          #   nix build .#checks.x86_64-linux.dotdrop
           #
           # VM integration tests (require KVM and real packages):
           #   nix build .#checks.x86_64-linux.vm-server-local-db
@@ -258,7 +268,11 @@
           # -------------------------------------------------------------------
           checks = {
             # Evaluation tests — always fast, no real packages needed.
-            eval = (import ./tests { pkgs = pkgs'; }).all;
+            eval = tests.qcarchive.all;
+
+            # dotdrop integration tests — no VM, but they do build dotdrop and
+            # run upstream's tests-ng scripts against the installed binary.
+            dotdrop = tests.dotdrop.all;
 
             # VM tests — prefixed "vm-" for easy selection.
             vm-server-local-db = vmTests.server-local-db;
