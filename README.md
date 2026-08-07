@@ -19,7 +19,7 @@ Python packages and two NixOS service modules for running a QCFractal server and
 
 #### Support
 
-Quantum chemistry programs (Psi4, CFOUR, NWChem, ...) come from [NixOS-QChem](https://github.com/Nix-QChem/NixOS-QChem), re-exported here as `overlays.qchem` so that `pkgs.qchem.*` and the modules can be brought in together.
+Some quantum chemistry programs come from [NixOS-QChem](https://github.com/Nix-QChem/NixOS-QChem), re-exported here as `overlays.qchem` so that `pkgs.qchem.*` and the modules can be brought in together.
 
 ### [dotdrop](https://github.com/deadc0de6/dotdrop)
 
