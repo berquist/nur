@@ -14,11 +14,19 @@ same sequence, so it is also what those tests assert.
 
 ## Before you start
 
+**This runs after `nixos-rebuild switch`, not before.** Two of the prerequisites below are
+things the rebuild itself produces: `qcfractal-manage` reaches `PATH` only with the server
+module, and `qcfractal-init-db.service` creates the schema during the switch. There is nothing
+to bootstrap until both have happened, and the worker crash-loops in the window between the
+switch and this procedure.
+
 Both procedures below assume:
 
 - `services.qcfractal.enable = true` on the server host, and it has **started at least once** —
-  the first start generates `secrets.env` and `qcf_config.yaml` under `stateDir`, and nothing
-  can be done before they exist.
+  `qcfractal-init-db.service` generates `secrets.env` and `qcf_config.yaml` under `stateDir` and
+  stamps the database, and nothing can be done before they exist. It is `wantedBy
+  multi-user.target`, so the switch starts it for you; `systemctl status qcfractal-init-db` says
+  whether it succeeded.
 - `services.qcfractalCompute.server.passwordFile` is set on the worker host to a path outside
   the Nix store, in a directory the service user can traverse.
 - `qcfractal-manage` is on the server host's `PATH`. The server module installs it whenever
@@ -38,22 +46,25 @@ set -o pipefail
 pw_file=/var/lib/secrets/qcfractal-worker-password   # your server.passwordFile
 svc_user=qcfractalcompute                            # your services.qcfractalCompute.user
 
-out=$(mktemp)            # mktemp is 0600, and the CLI prints the password to stdout
-trap 'rm -f "$out"' EXIT
+out=$(sudo qcfractal-manage user add worker --role compute)
 
-sudo qcfractal-manage user add worker --role compute > "$out"
-
-pw=$(sed -n '/utogenerated password for/{n;n;p;}' "$out")
-[ -n "$pw" ] || { echo "no password in the CLI output; read $out" >&2; exit 1; }
+pw=$(printf '%s\n' "$out" | sed -n '/utogenerated password for/{n;n;p;}')
+[ -n "$pw" ] || { printf '%s\n' 'no password in the CLI output:' "$out" >&2; exit 1; }
 
 sudo install -m 0400 -o "$svc_user" -g "$svc_user" /dev/null "$pw_file"
 printf '%s\n' "$pw" | sudo tee "$pw_file" > /dev/null
-unset pw
+unset pw out
 
 sudo systemctl restart qcfractalcompute.service
 ```
 
-`install` creates the file empty with the right owner and mode, then `tee` fills it — root
+The output is captured in a shell variable rather than a temp file, so the password never
+touches the disk anywhere but `$pw_file` — and there is no cleanup to get wrong. `sudo cmd >
+file` would be the obvious alternative and is worse twice over: the redirect runs as *you*, not
+as root (shellcheck flags this as SC2024), and it leaves the password in a file that a `trap`
+has to remember to remove.
+
+`install` creates `$pw_file` empty with the right owner and mode, then `tee` fills it — root
 writes through the `0400`. The trailing newline is fine: the unit reads the file with
 `"$(< file)"`, and command substitution strips trailing newlines.
 
