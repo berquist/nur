@@ -165,9 +165,13 @@
           # need Psi4 are defined only there.  They need KVM anyway.
           psi4 = if system == "x86_64-linux" then qchemPkgs.qchem.psi4 else null;
 
+          # NWChem needs no flake input — it is in nixpkgs, and so cached — but
+          # it is Linux-only, and a VM test could not run anywhere else anyway.
+          nwchem = if pkgs'.stdenv.hostPlatform.isLinux then pkgs'.nwchem else null;
+
           vmTests = import ./tests/qcarchive/vm.nix {
             pkgs = pkgs';
-            inherit psi4;
+            inherit psi4 nwchem;
           };
 
           tests = import ./tests { pkgs = pkgs'; };
@@ -251,6 +255,10 @@
           #   nix build .#checks.x86_64-linux.vm-server-open-firewall
           #   nix build .#checks.x86_64-linux.vm-server-remote-db
           #
+          # The NWChem round trip needs no flake input — NWChem is in nixpkgs —
+          # so it is defined on any Linux system:
+          #   nix build .#checks.x86_64-linux.vm-compute-nwchem-singlepoint
+          #
           # The three compute checks additionally need Psi4, so they are defined
           # only on x86_64-linux (the sole system NixOS-QChem's flake has
           # outputs for):
@@ -274,6 +282,9 @@
             vm-server-local-db = vmTests.server-local-db;
             vm-server-open-firewall = vmTests.server-open-firewall;
             vm-server-remote-db = vmTests.server-remote-db;
+          }
+          // lib.optionalAttrs (nwchem != null) {
+            vm-compute-nwchem-singlepoint = vmTests.compute-nwchem-singlepoint;
           }
           // lib.optionalAttrs (psi4 != null) {
             vm-compute-connects = vmTests.compute-connects;
