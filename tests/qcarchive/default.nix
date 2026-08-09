@@ -317,6 +317,10 @@ lib.fix (self: {
     # It must read the keys, never create them: run under sudo that would
     # leave a root-owned secrets.env the service can no longer read.
     && !(lib.hasInfix "umask 077" s)
+    # --help and --version answer before the privilege and secrets checks,
+    # since the wrapper is the only route to the CLI once a deployment stops
+    # installing the package itself.
+    && lib.hasInfix "--version)" s
   );
 
   # extraConfig wins: pydantic-settings puts env_settings ahead of the config
