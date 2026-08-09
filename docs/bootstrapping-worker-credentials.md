@@ -28,7 +28,22 @@ Both procedures below assume:
   multi-user.target`, so the switch starts it for you; `systemctl status qcfractal-init-db` says
   whether it succeeded.
 - `services.qcfractalCompute.server.passwordFile` is set on the worker host to a path outside
-  the Nix store, in a directory the service user can traverse.
+  the Nix store, **in a directory that already exists**. Declare the directory rather than
+  creating it by hand — it is not itself a secret, so nothing keeps it out of the configuration:
+
+  ```nix
+  systemd.tmpfiles.rules = [
+    "d /var/lib/secrets 0751 root root - -"
+  ];
+  ```
+
+  `0751` lets a service user traverse in without being able to list what is there; each file
+  inside carries its own `0400`. `systemd-tmpfiles-setup.service` runs in `sysinit.target`, so
+  the directory exists well before either unit starts.
+
+  The module deliberately does **not** create `dirOf passwordFile` for you. That path is just as
+  likely to be a sops-nix or agenix mount point, and those own their directory's mode and
+  ownership themselves — creating it first would fight them.
 - `qcfractal-manage` is on the server host's `PATH`. The server module installs it whenever
   `services.qcfractal.enable` is true.
 
@@ -86,7 +101,7 @@ On the **worker**, the file must end up:
 
 - containing the password and **nothing else** — not `KEY=value`, no quotes, no comments;
 - mode `0400`, owned by `services.qcfractalCompute.user`;
-- in a directory that user can traverse (`0751` root-owned is a reasonable parent).
+- in the directory declared under "Before you start", which the rebuild has already created.
 
 Then `sudo systemctl restart qcfractalcompute.service`.
 
@@ -134,7 +149,7 @@ Every failure mode presents identically — the unit starts, fails to authentica
 | Symptom in the journal | Usual cause |
 |---|---|
 | `401`, invalid credentials | the file's contents do not match the account's password |
-| the file read fails at start | mode/ownership, or a directory the service user cannot traverse |
+| the file read fails at start | mode/ownership, or a parent directory that is missing or that the service user cannot traverse |
 | the account does not exist | `user add` was never run, or was run against a different server |
 | `Connection refused` | the server is not up, or `server.fractalUri` is wrong |
 
