@@ -40,6 +40,12 @@ then apply `nur-berquist.overlays.default` (everything) or one of `overlays.qcfr
 independent, and you do not need both. `system-flake-snippet.nix` is a complete, copyable
 example of that wiring.
 
+A compute worker needs one manual step after `nixos-rebuild`: its QCFractal account lives in
+PostgreSQL and its password must stay out of the store, so neither can be declared. Until you
+have done it, `qcfractalcompute.service` crash-loops on a failed login. The exact procedure —
+for one host or two, plus rotation and what to check when it fails — is in
+[`docs/bootstrapping-worker-credentials.md`](docs/bootstrapping-worker-credentials.md).
+
 Individual packages are available the usual NUR ways:
 
 ```sh
