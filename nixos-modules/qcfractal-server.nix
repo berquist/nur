@@ -132,6 +132,21 @@ let
     name = "qcfractal-manage";
     runtimeInputs = [ pkgs.util-linux ];
     text = ''
+      # Help and version read argparse's own tables and exit: no config, no
+      # database, no privileges.  Answered before any check below, and without
+      # --config, so that this wrapper is never less useful than the CLI it
+      # stands in front of -- on a host where the server has not started yet,
+      # or to a user who cannot read stateDir, everything after this point
+      # refuses.  Scanned across all arguments rather than just the first, so
+      # that subcommand help ("user add --help") works too.
+      for arg in "$@"; do
+        case "$arg" in
+          -h | --help | --version)
+            exec ${lib.getExe cfg.package} "$@"
+            ;;
+        esac
+      done
+
       # Privileges first: stateDir is 0750, so to anyone else the secrets file
       # below is not merely unreadable but unstattable, and checking for it
       # first would answer "does not exist" to what is really "not allowed".
