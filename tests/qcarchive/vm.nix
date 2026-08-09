@@ -657,11 +657,10 @@ in
   # communication progress and therefore cannot run in a single rank at all --
   # so "works without MPI" is not a fallback, it is a failure.
   #
-  # Reading QCEngine settled how the env-var route is *meant* to work (see
-  # docs/nwchem-as-a-test-program.md).  What only a VM can settle, and what
-  # this test is for: whether mpirun runs at all under this unit's sandboxing
-  # (ProtectSystem=strict, PrivateTmp, RestrictAddressFamilies), and whether
-  # HF/STO-3G maps onto NWChem's SCF module as expected.
+  # What only a VM can settle, and what this test is for: whether mpirun runs
+  # at all under this unit's sandboxing (ProtectSystem=strict, PrivateTmp,
+  # RestrictAddressFamilies), and whether HF/STO-3G maps onto NWChem's SCF
+  # module as expected.
   #
   # Psi4 stays the end-to-end reference; this guards the MPI wiring, and needs
   # no flake input to do it.

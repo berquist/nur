@@ -340,12 +340,6 @@ in
 
           Programs available from NixOS-QChem (pkgs.qchem.*) include:
           psi4, cfour, orca, gamess-us, xtb, mrcc, and many others.
-
-          NWChem — either pkgs.qchem.nwchem or nixpkgs' own pkgs.nwchem — is
-          the known exception and does not currently work: QCEngine's harness
-          also requires the `networkx` Python module, which is in neither
-          qcengine's nor qcfractalcompute's closure, so the program is never
-          discovered.  See docs/nwchem-as-a-test-program.md.
         '';
       };
     };

@@ -32,7 +32,6 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `repeated_keys` disabled? Why does the whitespace hook skip `*.patch`? | `statix.toml`, `flake.nix` |
 | Why does `qcfractalcompute` carry a patch? Why is `parsl` built from the sdist? | the respective `pkgs/*/default.nix` |
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
-| Should the VM tests use NWChem instead of Psi4? | `docs/nwchem-as-a-test-program.md` |
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
 
 ## Architecture
