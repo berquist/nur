@@ -48,7 +48,10 @@ Both procedures below assume:
   `services.qcfractal.enable` is true.
 
 Substitute your own values for `worker` (your `server.username`), `qcfractalcompute` (your
-`services.qcfractalCompute.user`) and the password-file path throughout.
+`services.qcfractalCompute.user`) and the password-file path throughout. The account name has
+to match `server.username` **exactly**: creating `worker` while the module logs in as
+`worker-meyeri` fails the same way a wrong password does, with a `401` and no mention of which
+of the two is wrong.
 
 ## One host running both server and worker
 
@@ -58,10 +61,11 @@ included, ever needs to see it:
 ```sh
 set -o pipefail
 
+username=worker                                      # your server.username
 pw_file=/var/lib/secrets/qcfractal-worker-password   # your server.passwordFile
 svc_user=qcfractalcompute                            # your services.qcfractalCompute.user
 
-out=$(sudo qcfractal-manage user add worker --role compute)
+out=$(sudo qcfractal-manage user add "$username" --role compute)
 
 pw=$(printf '%s\n' "$out" | sed -n '/utogenerated password for/{n;n;p;}')
 [ -n "$pw" ] || { printf '%s\n' 'no password in the CLI output:' "$out" >&2; exit 1; }
@@ -148,14 +152,23 @@ Every failure mode presents identically — the unit starts, fails to authentica
 
 | Symptom in the journal | Usual cause |
 |---|---|
-| `401`, invalid credentials | the file's contents do not match the account's password |
+| `401`, invalid credentials | the file's contents do not match the account's password, **or** the account was created under a different name than `server.username` |
 | the file read fails at start | mode/ownership, or a parent directory that is missing or that the service user cannot traverse |
 | the account does not exist | `user add` was never run, or was run against a different server |
 | `Connection refused` | the server is not up, or `server.fractalUri` is wrong |
 
-Check the file's contents against a fresh reset before assuming anything subtler. A stray
-newline in the middle, a `KEY=value` wrapper, or an editor's added trailing whitespace are the
-common ones — only *trailing* newlines are stripped.
+The server's own journal names the account it rejected — `Authentication failed for user
+<name>` — so start there and check that name against `sudo qcfractal-manage user list`. If the
+name is absent from that list, the password is a red herring; you created the account under
+some other name, most likely by pasting the block above without substituting `username`.
+
+Otherwise check the file's contents against a fresh reset before assuming anything subtler. A
+stray newline in the middle, a `KEY=value` wrapper, or an editor's added trailing whitespace
+are the common ones — only *trailing* newlines are stripped.
+
+A worker that has been crash-looping will have tripped systemd's start limit, and `systemctl
+restart` then refuses with `start request repeated too quickly`. Clear it with `sudo systemctl
+reset-failed qcfractalcompute.service` before starting again.
 
 ## Why `qcfractal-manage` rather than `qcfractal-server`
 
