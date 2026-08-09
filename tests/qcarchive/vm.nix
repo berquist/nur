@@ -443,17 +443,26 @@ in
         # The worker account does not exist yet, so qcfractalcompute is
         # expected to be failing/restarting at this point.  Create it.
         #
-        # `qcfractal-server user add` validates the whole FractalConfig before
-        # it touches the database, so it needs the same secrets the units get:
-        # the generated api keys from secrets.env, plus the empty database
-        # password that peer authentication ignores but the model requires.
+        # Through qcfractal-manage, which the server module installs, rather
+        # than by rebuilding its preamble here: `qcfractal-server` validates
+        # the whole FractalConfig before it touches the database, so running it
+        # by hand needs the generated api keys from secrets.env plus the empty
+        # database password that peer authentication ignores but the model
+        # requires.  Calling the wrapper is what covers it -- it is the only
+        # test that runs the thing every human bootstrap also runs.
+        #
+        # Run as root, so this exercises the drop to the service user too.
+        # --password is passed only because the password was pre-placed above;
+        # a real bootstrap omits it and lets the server generate one.
         machine.succeed(
-            "sudo -u qcfractal sh -c '"
-            "set -a; . /var/lib/qcfractal/secrets.env; set +a; "
-            "export QCF_DATABASE__PASSWORD=; "
-            "${lib.getExe pkgs.qcfractal} --config=/var/lib/qcfractal/qcf_config.yaml "
-            "user add worker --password ${workerPassword} --role compute'"
+            "qcfractal-manage user add worker --password ${workerPassword} --role compute"
         )
+
+        # The account is visible through the same wrapper, and the wrapper
+        # refuses rather than half-working for a caller who cannot read
+        # stateDir at all.
+        machine.succeed("qcfractal-manage user list | grep -q worker")
+        machine.fail("runuser -u nobody -- qcfractal-manage user list")
 
         # Don't wait out the 30s restart backoff.  Through succeed() rather
         # than machine.systemctl(), which returns (status, output) and raises
