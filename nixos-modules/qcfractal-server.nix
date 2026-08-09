@@ -74,20 +74,30 @@ let
 
   randomSecret = "${pkgs.coreutils}/bin/head -c 32 /dev/urandom | ${pkgs.coreutils}/bin/base64 -w 0";
 
-  apiSecretsSetup = lib.optionalString (generatedSecrets != [ ]) ''
-    if [ ! -f '${secretsFile}' ]; then
-      ( umask 077
-        {
-          ${lib.concatStringsSep "\n      " (
-            map (v: "printf '${v}=%s\\n' \"$(${randomSecret})\"") generatedSecrets
-          )}
-        } > '${secretsFile}'
-      )
-    fi
+  # Loading the keys is separated from generating them because the two have
+  # different callers.  The units may create the file; anything a human runs
+  # must only ever read it, since run under sudo it would create the file owned
+  # by root and the service could no longer read its own keys.
+  loadApiSecrets = lib.optionalString (generatedSecrets != [ ]) ''
     set -a
+    # shellcheck source=/dev/null
     . '${secretsFile}'
     set +a
   '';
+
+  apiSecretsSetup =
+    lib.optionalString (generatedSecrets != [ ]) ''
+      if [ ! -f '${secretsFile}' ]; then
+        ( umask 077
+          {
+            ${lib.concatStringsSep "\n      " (
+              map (v: "printf '${v}=%s\\n' \"$(${randomSecret})\"") generatedSecrets
+            )}
+          } > '${secretsFile}'
+        )
+      fi
+    ''
+    + loadApiSecrets;
 
   # database.password is required by FractalConfig even when it is meaningless.
   dbPasswordSetup =
@@ -108,6 +118,41 @@ let
 
   # Shared preamble for both units; they load the same configuration.
   runtimeSecrets = apiSecretsSetup + dbPasswordSetup;
+
+  # `qcfractal-server` is not only a daemon: user management, backups and
+  # restores all run it by hand, and with enableSecurity there is no
+  # declarative route to creating the first account -- users live in
+  # PostgreSQL, so a deployment is not finished until someone has run
+  # `user add`.  Doing that correctly means reproducing what the units set up
+  # first, because FractalConfig validates in full before the CLI touches the
+  # database: without the generated api keys and a database.password it exits
+  # on a validation error that says nothing about either.  Reconstructing that
+  # from this file is not a reasonable thing to ask, so ship it.
+  manageScript = pkgs.writeShellApplication {
+    name = "qcfractal-manage";
+    runtimeInputs = [ pkgs.util-linux ];
+    text = ''
+      # Privileges first: stateDir is 0750, so to anyone else the secrets file
+      # below is not merely unreadable but unstattable, and checking for it
+      # first would answer "does not exist" to what is really "not allowed".
+      if [ "$(id -u -n)" != '${cfg.user}' ]; then
+        if [ "$(id -u)" -ne 0 ]; then
+          echo "qcfractal-manage: run as root or as ${cfg.user}." >&2
+          exit 1
+        fi
+        exec runuser -u '${cfg.user}' -- "$0" "$@"
+      fi
+
+      if [ ! -f '${secretsFile}' ]; then
+        echo "qcfractal-manage: '${secretsFile}' does not exist." >&2
+        echo "Start qcfractal.service once before managing the server." >&2
+        exit 1
+      fi
+      ${loadApiSecrets}
+      ${dbPasswordSetup}
+      exec ${lib.getExe cfg.package} --config='${cfg.stateDir}/qcf_config.yaml' "$@"
+    '';
+  };
 
 in
 {
@@ -374,6 +419,11 @@ in
         }
       ];
     };
+
+    # Bootstrapping an account is a required step on any server with
+    # enableSecurity, so the tool for it belongs on the PATH of whoever has to
+    # do it rather than behind a nix-shell invocation.
+    environment.systemPackages = [ manageScript ];
 
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.api.port ];
 

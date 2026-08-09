@@ -186,6 +186,12 @@ in
           QCFractal username for this compute worker account.
           null attempts unauthenticated access (requires
           {option}`services.qcfractal.allowUnauthenticatedRead` on the server).
+
+          The account must already exist on the server: QCFractal keeps users
+          in PostgreSQL, so there is no declarative way to create one, and this
+          service will crash-loop on a failed login until someone has run
+          `qcfractal-manage user add <name> --role compute` there.  See
+          `docs/bootstrapping-worker-credentials.md`.
         '';
       };
 
@@ -199,6 +205,22 @@ in
           Read at service start; supplied via the
           QCF_COMPUTE_SERVER__PASSWORD environment variable, which
           pydantic-settings maps to the server.password config field.
+
+          The file holds the password and nothing else — not `KEY=value`, no
+          quoting.  A trailing newline is fine: it is read with
+          `"$(< file)"`, and command substitution strips those.
+
+          It is read by {option}`user` as the service starts, not by root and
+          not through systemd credentials, so that user must be able to read
+          the file and traverse every directory above it.  0400 owned by
+          {option}`user`:{option}`group` in a directory that user can reach is
+          the intended arrangement.  Keep it out of the Nix store, which is
+          world-readable; `services.qcfractal.stateDir` is not a good home for
+          it either, since that belongs to the server user.  A secret placed by
+          sops-nix or agenix fits here unchanged: point this at its `path`.
+
+          `docs/bootstrapping-worker-credentials.md` is the procedure for
+          filling it in, for one host or two, and for rotating it afterwards.
         '';
       };
     };

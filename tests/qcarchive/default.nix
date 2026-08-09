@@ -293,6 +293,32 @@ lib.fix (self: {
     lib.hasInfix "/srv/qcfractal/secrets.env" s && lib.hasInfix "umask 077" s
   );
 
+  # qcfractal-manage has to carry the same preamble the units do, against the
+  # on-disk config rather than the store copy, or bootstrapping a user fails on
+  # a validation error that names none of it.  This is the eval-time half; the
+  # compute-authenticated VM test actually runs it.
+  server-manage-script = check "server-manage-script" (
+    let
+      cfg = evalServer {
+        services.qcfractal = {
+          enable = true;
+          stateDir = "/srv/qcfractal";
+        };
+      };
+      manage = lib.findFirst (
+        p: (p.name or "") == "qcfractal-manage"
+      ) null cfg.environment.systemPackages;
+      s = manage.text or "";
+    in
+    manage != null
+    && lib.hasInfix "/srv/qcfractal/secrets.env" s
+    && lib.hasInfix "QCF_DATABASE__PASSWORD" s
+    && lib.hasInfix "--config='/srv/qcfractal/qcf_config.yaml'" s
+    # It must read the keys, never create them: run under sudo that would
+    # leave a root-owned secrets.env the service can no longer read.
+    && !(lib.hasInfix "umask 077" s)
+  );
+
   # extraConfig wins: pydantic-settings puts env_settings ahead of the config
   # file, so the module must not export values the user pinned by hand.
   server-secrets-extraconfig-wins = check "server-secrets-extraconfig-wins" (
