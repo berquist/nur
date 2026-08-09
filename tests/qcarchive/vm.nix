@@ -47,6 +47,11 @@
       or pass one in:
         nix-build tests/vm.nix -A compute-connects --arg psi4 '<derivation>'
     ''),
+
+  # NWChem, for the one test that exercises the MPI launch path.  Unlike Psi4
+  # this is in nixpkgs proper, so the default works with no flake input and
+  # cache.nixos.org covers it.
+  nwchem ? pkgs.nwchem,
 }:
 
 let
@@ -91,6 +96,85 @@ let
         if status != 0:
             return False
         return len(json.loads(output)) > 0
+  '';
+
+  # H2 at 1.4 bohr, HF/STO-3G: small enough that either program finishes in
+  # seconds, and a well-known reference value (about -1.117 Eh) to check the
+  # stored result against.
+  #
+  # Parameterised by program, and shared by the two round-trip tests, so that
+  # they submit provably identical work and differ only in which program runs
+  # it -- which is the only thing either of them is comparing.
+  submitScript =
+    program:
+    pkgs.writeText "submit-${program}.py" ''
+      import sys
+      from qcportal import PortalClient
+      from qcportal.molecules import Molecule
+
+      client = PortalClient("http://localhost:7777")
+
+      # Geometry is in bohr, which is qcelemental's default.
+      h2 = Molecule(symbols=["H", "H"], geometry=[0.0, 0.0, 0.0, 0.0, 0.0, 1.4])
+
+      meta, ids = client.add_singlepoints([h2], "${program}", "energy", "hf", "sto-3g")
+      if not meta.success:
+          sys.exit(f"submission failed: {meta}")
+      print(ids[0])
+    '';
+
+  # Independent of the program: a record id is a record id.
+  collectScript = pkgs.writeText "collect.py" ''
+    import sys
+    from qcportal import PortalClient
+
+    record_id = int(sys.argv[1])
+    client = PortalClient("http://localhost:7777")
+    record = client.get_singlepoints(record_id)
+
+    if record.status != "complete":
+        # Not done yet, or failed.  Surface the error if there is one so the
+        # test log shows why rather than just timing out.
+        if record.status == "error":
+            sys.exit(f"record errored: {record.error}")
+        sys.exit(f"status={record.status}")
+
+    print(record.return_result)
+  '';
+
+  # The round trip itself, likewise shared: submit, wait, read the energy back
+  # and bracket it.  `program` only picks which submit script runs.
+  singlepointScript = program: ''
+    machine.start()
+    machine.wait_for_unit("qcfractal.service")
+    machine.wait_for_open_port(7777)
+    machine.wait_for_unit("qcfractalcompute.service")
+
+    # Submit one singlepoint and remember the record id.
+    record_id = machine.succeed(
+        "python3 ${submitScript program}"
+    ).strip()
+    print(f"submitted record {record_id}")
+
+    # The worker has to claim the task, run ${program} and post the result back.
+    def record_complete(_):
+        status, _output = machine.execute(
+            f"python3 ${collectScript} {record_id}"
+        )
+        return status == 0
+
+    with machine.nested("waiting for the calculation to complete"):
+        retry(record_complete, timeout_seconds = 600)
+
+    energy = float(
+        machine.succeed(f"python3 ${collectScript} {record_id}").strip()
+    )
+    print(f"HF/STO-3G energy for H2 via ${program}: {energy} Eh")
+
+    # Bracket the known reference (about -1.117 Eh) loosely enough to tolerate
+    # convergence details, tightly enough that a wrong molecule, method or
+    # unit would fail.
+    assert -1.3 < energy < -0.9, f"energy out of range: {energy}"
   '';
 
 in
@@ -561,76 +645,70 @@ in
         ];
       };
 
-    testScript =
-      let
-        # H2 at 1.4 bohr, HF/STO-3G: small enough that Psi4 finishes in
-        # seconds, and a well-known reference value (about -1.117 Eh) to
-        # check the stored result against.
-        submitScript = pkgs.writeText "submit.py" ''
-          import sys
-          from qcportal import PortalClient
-          from qcportal.molecules import Molecule
+    testScript = singlepointScript "psi4";
+  };
 
-          client = PortalClient("http://localhost:7777")
+  # ==========================================================================
+  # Test 7: the same round trip through NWChem, which is the MPI launch path.
+  #
+  # QCEngine runs Psi4 as a bare executable, so test 6 never touches
+  # executor.mpi.  NWChem is the one program here that does, and nixpkgs
+  # builds it for ARMCI's MPI-PR back end, which dedicates one rank to
+  # communication progress and therefore cannot run in a single rank at all --
+  # so "works without MPI" is not a fallback, it is a failure.
+  #
+  # Reading QCEngine settled how the env-var route is *meant* to work (see
+  # docs/nwchem-as-a-test-program.md).  What only a VM can settle, and what
+  # this test is for: whether mpirun runs at all under this unit's sandboxing
+  # (ProtectSystem=strict, PrivateTmp, RestrictAddressFamilies), and whether
+  # HF/STO-3G maps onto NWChem's SCF module as expected.
+  #
+  # Psi4 stays the end-to-end reference; this guards the MPI wiring, and needs
+  # no flake input to do it.
+  # ==========================================================================
+  compute-nwchem-singlepoint = pkgs.testers.nixosTest {
+    name = "qcfractal-compute-nwchem-singlepoint";
 
-          # Geometry is in bohr, which is qcelemental's default.
-          h2 = Molecule(symbols=["H", "H"], geometry=[0.0, 0.0, 0.0, 0.0, 0.0, 1.4])
+    nodes.machine =
+      { ... }:
+      {
+        imports = [
+          minimalVM
+          serverModule
+          computeModule
+        ];
+        virtualisation.memorySize = 4096;
+        virtualisation.diskSize = 8192;
+        # MPI-PR spends one rank on communication progress, so the two ranks
+        # coresPerWorker asks for below need two cores to land on.
+        virtualisation.cores = 2;
 
-          meta, ids = client.add_singlepoints([h2], "psi4", "energy", "hf", "sto-3g")
-          if not meta.success:
-              sys.exit(f"submission failed: {meta}")
-          print(ids[0])
-        '';
+        services.qcfractal = {
+          enable = true;
+          api.host = "0.0.0.0";
+          enableSecurity = false; # the client below connects unauthenticated
+        };
 
-        collectScript = pkgs.writeText "collect.py" ''
-          import sys
-          from qcportal import PortalClient
+        services.qcfractalCompute = {
+          enable = true;
+          server.fractalUri = "http://localhost:7777";
+          executor.maxWorkers = 1;
+          # Below 2 the module's own assertion rejects the configuration,
+          # because MPI-PR would leave zero compute ranks.
+          executor.coresPerWorker = 2;
+          executor.memoryPerWorker = 1.0;
+          executor.programs = [ nwchem ];
+          executor.mpi = {
+            enable = true;
+            package = nwchem.passthru.mpi;
+          };
+        };
 
-          record_id = int(sys.argv[1])
-          client = PortalClient("http://localhost:7777")
-          record = client.get_singlepoints(record_id)
+        environment.systemPackages = [
+          (pkgs.python313.withPackages (p: [ p.qcportal ]))
+        ];
+      };
 
-          if record.status != "complete":
-              # Not done yet, or failed.  Surface the error if there is one so
-              # the test log shows why rather than just timing out.
-              if record.status == "error":
-                  sys.exit(f"record errored: {record.error}")
-              sys.exit(f"status={record.status}")
-
-          print(record.return_result)
-        '';
-      in
-      ''
-        machine.start()
-        machine.wait_for_unit("qcfractal.service")
-        machine.wait_for_open_port(7777)
-        machine.wait_for_unit("qcfractalcompute.service")
-
-        # Submit one singlepoint and remember the record id.
-        record_id = machine.succeed(
-            "python3 ${submitScript}"
-        ).strip()
-        print(f"submitted record {record_id}")
-
-        # The worker has to claim the task, run Psi4 and post the result back.
-        def record_complete(_):
-            status, _output = machine.execute(
-                f"python3 ${collectScript} {record_id}"
-            )
-            return status == 0
-
-        with machine.nested("waiting for the calculation to complete"):
-            retry(record_complete, timeout_seconds = 600)
-
-        energy = float(
-            machine.succeed(f"python3 ${collectScript} {record_id}").strip()
-        )
-        print(f"HF/STO-3G energy for H2: {energy} Eh")
-
-        # Bracket the known reference (about -1.117 Eh) loosely enough to
-        # tolerate convergence details, tightly enough that a wrong molecule,
-        # method or unit would fail.
-        assert -1.3 < energy < -0.9, f"energy out of range: {energy}"
-      '';
+    testScript = singlepointScript "nwchem";
   };
 }

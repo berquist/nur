@@ -99,7 +99,7 @@ matrix leg end-to-end locally. Add CI logic there, not to the workflow.
 just                      # list every recipe
 just ci nixos-26.05       # one channel's full sequence; `just ci-matrix` for all three
 just build qcfractal      # single package, NUR style; or nix build .#qcfractal
-just check                # everything: eval tests, all six VM tests, pre-commit hooks
+just check                # everything: eval tests, all seven VM tests, pre-commit hooks
 just tests                # every non-VM suite (see tests/AGENTS.md)
 just vm-test server-local-db          # one VM test; needs KVM
 just fmt / just lint / just hooks     # nixfmt, statix+deadnix, prek

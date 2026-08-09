@@ -1,8 +1,9 @@
 # Using NWChem instead of Psi4 in the compute VM tests
 
-Status: **both blockers fixed, 2026-08-07.** NWChem now works as a compute program; the VM
-tests still use Psi4 as the end-to-end reference. What was done, and what is still open, is at
-the bottom under "Resolution".
+Status: **both blockers fixed, 2026-08-07; MPI verified under test, 2026-08-09.** NWChem works
+as a compute program and `compute-nwchem-singlepoint` guards the MPI launch path; the VM tests
+still use Psi4 as the end-to-end reference, which remains the recommendation. What was done is
+at the bottom under "Resolution".
 
 The compute VM tests need a real QC program on the worker's `PATH` — `qcfractalcompute` raises
 `ValueError: Executor <label> has no available programs` and exits if an executor discovers none
@@ -84,9 +85,22 @@ The env-var route was verified by reading the installed QCEngine 0.50.0 rather t
 task config, `config.update(task_config)` (line 331) applies it over the node-derived values,
 and `use_mpiexec` is consulted only by `programs/nwchem/runner.py` and `programs/mrchem.py`.
 
-Still unverified, and it is what a VM test would settle: whether `mpirun -n 2` runs at all
-inside a test VM under this unit's sandboxing (`ProtectSystem=strict`, `PrivateTmp`,
-`RestrictAddressFamilies`), and whether HF/STO-3G maps onto NWChem's SCF module as expected.
-`personal-cluster-config`'s `hosts/meyeri/qcarchive-test.nix` exercises exactly that against a
-real deployment; an `compute-nwchem-singlepoint` here would be the version that guards the
-module.
+That last question — whether `mpirun -n 2` runs at all inside a test VM under this unit's
+sandboxing (`ProtectSystem=strict`, `PrivateTmp`, `RestrictAddressFamilies`), and whether
+HF/STO-3G maps onto NWChem's SCF module as expected — **is answered, and the answer is yes**:
+`compute-nwchem-singlepoint` in `tests/qcarchive/vm.nix` passes as of 2026-08-09. The unit's
+sandboxing needed no relaxing for MPI, which was the outcome in doubt.
+
+```sh
+just vm-test compute-nwchem-singlepoint
+```
+
+It is the same H2 HF/STO-3G round trip as `compute-singlepoint`, sharing its submit, collect
+and assertion scripts, so the two differ only in which program runs the job. Unlike the Psi4
+tests it needs no flake input, so it is a check on any Linux system rather than only
+x86_64-linux.
+
+`personal-cluster-config`'s `hosts/meyeri/qcarchive-test.nix` still exercises NWChem against a
+real deployment, alongside CFOUR and an authenticated client. The difference in what each can
+cover is fixed: CFOUR is `requireFile`, behind a registration wall, so CI here can never build
+it.
