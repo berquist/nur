@@ -5,12 +5,18 @@
 
   # build-system
   setuptools,
+  setuptools-scm,
 
   # dependencies
   ase,
+  attrs,
   h5py,
+  netcdf4,
   numpy,
   pandas,
+  psutil,
+  pyvista,
+  vtk,
   xarray,
 
   # tests
@@ -31,13 +37,23 @@ buildPythonPackage rec {
     hash = "sha256-y1jd+thlTMg1GvxtxqwY74aRt9QEHEPWBprQ/7p3l24=";
   };
 
-  build-system = [ setuptools ];
+  build-system = [
+    setuptools
+    setuptools-scm
+  ];
+
+  env.SETUPTOOLS_SCM_PRETEND_VERSION = version;
 
   dependencies = [
     ase
+    attrs
     h5py
+    netcdf4
     numpy
     pandas
+    psutil
+    pyvista
+    vtk
     xarray
   ];
 
