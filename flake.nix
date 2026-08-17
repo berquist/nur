@@ -38,13 +38,12 @@
     # This must be bumped in lockstep with the nixos-qchem input above.  Read
     # the target revision out of the input's own lock:
     #
-    #   nix flake metadata github:Nix-QChem/NixOS-QChem --json \
-    #     | jq -r '.locks.nodes.nixpkgs.locked.rev'
+    #   nix flake metadata github:Nix-QChem/NixOS-QChem --json | jq -r '.locks.nodes.nixpkgs.locked.rev'
     #
     # Pinning it by hand rather than reading nixos-qchem's lock at eval time is
     # deliberate: flakes offer no supported way to reach a transitive input's
     # locked revision, and `follows` cannot express "match the dependency".
-    nixpkgs-qchem.url = "github:NixOS/nixpkgs/3e41b24abd260e8f71dbe2f5737d24122f972158";
+    nixpkgs-qchem.url = "github:NixOS/nixpkgs/54ba4bcec4043e72a4006d825e0d7aff5562008f";
 
     # cclib is not in nixpkgs and upstream carries its own flake, so take it
     # from there rather than repackaging.  Only overlays.default is used — a
