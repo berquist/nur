@@ -1,41 +1,63 @@
 {
   lib,
   buildPythonPackage,
-  fetchPypi,
+  fetchFromGitHub,
 
   # build-system
   setuptools,
 
   # dependencies
-  numpy,
-  scipy,
+  click,
 
   # tests
   pytestCheckHook,
+  deepdiff,
 }:
 
 buildPythonPackage rec {
   pname = "upf-to-json";
-  version = "0.9.5";
+  version = "1.0.0";
   pyproject = true;
 
-  # PEP 625 underscore in the sdist filename; the project is spelled with
-  # hyphens.  aiida-core asks for `upf_to_json~=0.9.2` and uv.lock resolves that
-  # to 0.9.5.
-  src = fetchPypi {
-    pname = "upf_to_json";
-    inherit version;
-    hash = "sha256-V2FMTIZ38E8WFnnOTt2y9VuHmEYFuKUlPT0ogjX1bko=";
+  # fetchFromGitHub at 1.0.0, not fetchPypi at the 0.9.5 that aiida-core's
+  # `upf_to_json~=0.9.2` resolves to, and for one reason: **0.9.x ships no
+  # tests**.  The whole tests/ directory — the suite and its seven UPF fixtures
+  # from GBRV, SG15, PseudoDojo, ATOMPAW and pslibrary — arrived in 1.0.0, and
+  # the sdist for 0.9.5 does not carry it either.  Packaging 0.9.5 therefore
+  # meant a pytestCheckPhase that collected zero items and reported success.
+  #
+  # The bump is safe: the public surface is `from .upf_to_json import
+  # upf_to_json` at both tags, and aiida-core's only call site
+  # (src/aiida/orm/nodes/data/upf.py) passes exactly the
+  # `upf_to_json(text, fname=...)` signature the 1.0.0 suite exercises.  The
+  # diff between the two is a rewrite of the two parsers, not an API change.
+  #
+  # It does need ../aiida-core to relax `upf_to_json~=0.9.2`; see the
+  # pythonRelaxDeps list there.
+  src = fetchFromGitHub {
+    owner = "simonpintarelli";
+    repo = "upf_to_json";
+    tag = version;
+    hash = "sha256-fRx/Bv+9lQEumD1Q1d6hom7CXQU65p8UREIocm6lO00=";
   };
 
   build-system = [ setuptools ];
 
-  dependencies = [
-    numpy
-    scipy
+  # numpy and scipy were dependencies of the 0.9.x series and are not imported
+  # anywhere in 1.0.0 — the parsers now use only json, re and ElementTree.
+  dependencies = [ click ];
+
+  nativeCheckInputs = [
+    pytestCheckHook
+    deepdiff
   ];
 
-  nativeCheckInputs = [ pytestCheckHook ];
+  # tests/test_upf_to_json.py opens its fixtures by bare relative filename
+  # (`open("cr_pbe_v1.5.uspp.F.UPF")`), so it only passes with tests/ as the
+  # working directory.  From the source root every case fails on FileNotFound.
+  preCheck = ''
+    cd tests
+  '';
 
   pythonImportsCheck = [ "upf_to_json" ];
 
@@ -43,6 +65,7 @@ buildPythonPackage rec {
     description = "Convert pseudopotential files in UPF format to JSON";
     homepage = "https://github.com/simonpintarelli/upf_to_json";
     license = lib.licenses.bsd2;
+    mainProgram = "upf2json";
     maintainers = with lib.maintainers; [ berquist ];
   };
 }

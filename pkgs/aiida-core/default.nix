@@ -89,12 +89,19 @@ buildPythonPackage rec {
   # The locked nixpkgs sits above six of upstream's upper bounds.  These are
   # metadata relaxations only: nothing here changes which version is installed,
   # it stops pythonRuntimeDepsCheckHook from refusing the ones nixpkgs has.
+  #
+  # upf-to-json is the one that is not about nixpkgs.  Upstream asks for
+  # `upf_to_json~=0.9.2`, and the 0.9.x series ships no tests at all — so
+  # ../upf-to-json packages 1.0.0 instead, which does.  The call site here,
+  # src/aiida/orm/nodes/data/upf.py, uses `upf_to_json(text, fname=...)`, and
+  # that signature is identical across the two.
   pythonRelaxDeps = [
     "click"
     "importlib-metadata"
     "jedi"
     "paramiko"
     "tabulate"
+    "upf-to-json"
     "wrapt"
   ];
 

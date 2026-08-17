@@ -24,13 +24,15 @@
   # tests
   pytestCheckHook,
 
-  # Defaulted for the same reason cclib is, but a different absence: xtb is a
-  # top-level attribute of nixpkgs-unstable and *not* of the nixpkgs
-  # NixOS-QChem pins, which is the one this package is actually built against —
-  # there it is `pkgs.qchem.xtb`, from NixOS-QChem's own overlay.  Neither
-  # spelling resolves on both, so ../../overlays/default.nix picks whichever the
-  # package set has and this falls back to running fewer tests.
+  # Defaulted for the same reason cclib is, but a different absence.  Both of
+  # these are `pkgs.qchem.*` attributes from NixOS-QChem's overlay on the
+  # package set this is actually built against, and xtb is *additionally* a
+  # top-level attribute of nixpkgs-unstable while crest is not in nixpkgs at
+  # all.  No single spelling resolves everywhere, so
+  # ../../overlays/default.nix picks whichever the package set has and this
+  # falls back to running fewer tests.
   xtb ? null,
+  crest ? null,
 }:
 
 buildPythonPackage {
@@ -70,19 +72,21 @@ buildPythonPackage {
     pytestCheckHook
   ]
   # tests/test_cmin.py and tests/test_qdescp.py shell out to xtb for
-  # single-point energies and atomic descriptors.
-  ++ lib.optional (xtb != null) xtb;
+  # single-point energies and atomic descriptors; tests/test_csearch.py drives
+  # CREST conformer searches through `subprocess.run(["crest", ...])`, and
+  # reaches xtb as well.
+  ++ lib.optional (xtb != null) xtb
+  ++ lib.optional (crest != null) crest;
 
-  # tests/test_csearch.py drives CREST conformer searches through
-  # `subprocess.run(["crest", ...])`.  CREST is in neither nixpkgs nor
-  # NixOS-QChem, so this is the one file that cannot run.
-  disabledTestPaths = [
-    "tests/test_csearch.py"
-  ]
-  ++ lib.optionals (xtb == null) [
-    "tests/test_cmin.py"
-    "tests/test_qdescp.py"
-  ];
+  # Each file is skipped only when the program it shells out to is absent, so
+  # the whole suite runs on the package set that has NixOS-QChem's qchem.* —
+  # which is the one ../../flake.nix actually builds this on.
+  disabledTestPaths =
+    lib.optionals (xtb == null) [
+      "tests/test_cmin.py"
+      "tests/test_qdescp.py"
+    ]
+    ++ lib.optional (xtb == null || crest == null) "tests/test_csearch.py";
 
   # The cmin and qdescp tests compare against reference numbers recorded from
   # one particular xtb build.  A mismatch there is version skew rather than a

@@ -54,6 +54,9 @@ lib.fix (self: {
       ''
         set -euo pipefail
 
+        # See the note on HOME in cli-errors below.
+        export HOME="$(mktemp -d)"
+
         # mainProgram must actually exist.  lib.getExe falls back to the
         # package name without complaint, and here the two happen to agree —
         # so assert rather than assume, because a rename upstream would make
@@ -110,7 +113,15 @@ lib.fix (self: {
       }
       ''
         set -euo pipefail
-        cd "$(mktemp -d)"
+
+        # A writable HOME, not the stdenv default of /homeless-shelter.  cclib's
+        # closure pulls in matplotlib, which tries to create
+        # $HOME/.config/matplotlib on import and prints a four-line complaint
+        # when it cannot.  The tests pass either way — matplotlib falls back to
+        # a temporary cache — but the noise buries the two error messages these
+        # tests are actually asserting on.  Same fix as ../dotdrop/default.nix.
+        export HOME="$(mktemp -d)"
+        cd "$HOME"
 
         # --- a path that is not there -------------------------------------
         if harmonwig missing.out > stdout.txt 2> stderr.txt; then

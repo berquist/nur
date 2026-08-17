@@ -97,14 +97,16 @@
   # dependencies (morfeus-ml, colour-science, lwreg, …) come from
   # cheminformatics above, which does inject into every interpreter.
   cheminformatics-cclib = final: _prev: {
-    # xtb is threaded in by hand because neither spelling resolves on both
-    # package sets this overlay is applied to: nixpkgs-unstable has it at the
-    # top level and the nixpkgs NixOS-QChem pins does not, where it is
-    # `qchem.xtb` from NixOS-QChem's own overlay instead.  The `or null` tail is
-    # what keeps the attribute-path lookup from throwing on a set that has
-    # neither; aqme then runs its non-xtb tests.
+    # xtb and crest are threaded in by hand because no single spelling resolves
+    # on both package sets this overlay is applied to.  Both are `qchem.*` from
+    # NixOS-QChem's overlay on the set ../flake.nix builds aqme against; xtb is
+    # additionally a top-level attribute of nixpkgs-unstable, and crest is not
+    # in nixpkgs at all.  The `or null` tail is what keeps the attribute-path
+    # lookup from throwing on a set that has neither, and aqme then skips just
+    # the test files that need the missing program.
     aqme = final.python3.pkgs.callPackage ../pkgs/aqme {
       xtb = final.xtb or final.qchem.xtb or null;
+      crest = final.crest or final.qchem.crest or null;
     };
     ccreg = final.python3.pkgs.callPackage ../pkgs/ccreg { };
     dbstep = final.python3.pkgs.callPackage ../pkgs/dbstep { };

@@ -26,7 +26,7 @@ buildPythonPackage rec {
   src = fetchPypi {
     pname = "qe_tools";
     inherit version;
-    hash = "sha256-AL/JM6TlIeT82kZgD/+2VETDTUzV5MCgnk0prjbkvbw=";
+    hash = "sha256-IIAE6kpt+ylS99xht8R9Zp5S81J2AyG94cao4lyLXjs=";
   };
 
   build-system = [ flit-core ];
