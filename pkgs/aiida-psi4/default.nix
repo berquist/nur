@@ -29,7 +29,7 @@ buildPythonPackage {
     owner = "ltalirz";
     repo = "aiida-psi4";
     rev = "637e6b0b29e724a158014269d55d9091c6af48c7";
-    hash = lib.fakeHash;
+    hash = "sha256-JMdYxwU3z7cgOIgbzbKslxzcr3pKtKKSSRXSTSWc+v8=";
   };
 
   # There is no [project] table and no [build-system] table either — the whole

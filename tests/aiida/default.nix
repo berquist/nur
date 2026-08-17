@@ -86,6 +86,28 @@ let
   # Real (unstubbed) package set, for the overlay contract tests below.
   overlaidPkgs = pkgs.extend (import ../../overlays).aiida;
 
+  # The same, but with broken packages allowed.  aiida-gaussian carries
+  # meta.broken on every path this repo offers — its cclib comes from a flake
+  # input that ../../overlays cannot reach; see
+  # ../../pkgs/aiida-gaussian/default.nix — and nixpkgs' checkMeta throws on any
+  # attribute access to a broken derivation, so the two contract tests below
+  # cannot even look at it through `overlaidPkgs`.  They still have to: those
+  # tests are about the aliases being present and pointing at the same
+  # derivation, which is exactly what rots silently, and buildability is
+  # ci.nix's job rather than theirs.
+  #
+  # Re-imported from `pkgs.path` with `pkgs.config` carried over, rather than
+  # from <nixpkgs>, so that a caller passing its own package set still gets that
+  # set's nixpkgs and configuration.
+  brokenPkgs = import pkgs.path {
+    inherit (pkgs.stdenv.hostPlatform) system;
+    config = pkgs.config // {
+      allowBroken = true;
+    };
+  };
+
+  brokenOverlaidPkgs = brokenPkgs.extend (import ../../overlays).aiida;
+
   # Everything the aiida overlay lifts to the top level of pkgs and
   # ../../default.nix re-exports.  Deliberately not derived from either file:
   # the point of the two tests below is that three hand-written lists — this
@@ -98,11 +120,18 @@ let
   exportedPackages = [
     "aiida-core"
     "aiida-cp2k"
+    "aiida-gaussian"
     "aiida-octopus"
     "aiida-orca"
     "aiida-psi4"
     "aiida-quantumespresso"
   ];
+
+  # The subset of the above that cannot be built from either entry point, and
+  # so carries meta.broken.  Spelled out rather than derived, so that a package
+  # becoming broken by accident shows up as a failing test rather than as a
+  # quietly shrinking build set — see aiida-overlay-broken-set below.
+  brokenExportedPackages = [ "aiida-gaussian" ];
 
   # aiida-init's ExecStart is a writeShellScript derivation; the daemon's is a
   # plain string.  `.text` rather than builtins.readFile: reading the store path
@@ -127,7 +156,19 @@ lib.fix (self: {
   # configuration writes `services.aiida.plugins = [ pkgs.aiida-cp2k ]`.
   aiida-overlay-toplevel-packages = check "aiida-overlay-toplevel-packages" (
     lib.all (
-      name: overlaidPkgs ? ${name} && overlaidPkgs.${name} == overlaidPkgs.python313Packages.${name}
+      name:
+      brokenOverlaidPkgs ? ${name}
+      && brokenOverlaidPkgs.${name} == brokenOverlaidPkgs.python313Packages.${name}
+    ) exportedPackages
+  );
+
+  # ci.nix filters on meta.broken, so which packages carry it decides what gets
+  # built and cached.  Assert the set exactly, in both directions: a new broken
+  # package that nobody recorded, and a package that stopped being broken
+  # without the list being updated, are both worth a failing test.
+  aiida-overlay-broken-set = check "aiida-overlay-broken-set" (
+    lib.all (
+      name: (brokenOverlaidPkgs.${name}.meta.broken or false) == (lib.elem name brokenExportedPackages)
     ) exportedPackages
   );
 
@@ -138,9 +179,9 @@ lib.fix (self: {
   # twice.
   aiida-overlay-python-pin = check "aiida-overlay-python-pin" (
     let
-      nur = import ../../default.nix { inherit pkgs; };
+      nur = import ../../default.nix { pkgs = brokenPkgs; };
     in
-    lib.all (name: nur ? ${name} && nur.${name} == overlaidPkgs.${name}) exportedPackages
+    lib.all (name: nur ? ${name} && nur.${name} == brokenOverlaidPkgs.${name}) exportedPackages
   );
 
   # The module invokes the package through a withPackages environment, but
@@ -152,8 +193,9 @@ lib.fix (self: {
   );
 
   # The overlay must not disturb the QCArchive family, which shares the
-  # interpreter: the pymatgen override lives at aiida-core's callPackage site
-  # precisely so that it cannot leak into python313Packages generally.
+  # interpreter: the pymatgen override is a `let` binding inside the package-set
+  # extension, threaded by hand into the two packages that need it, precisely so
+  # that it cannot leak into python313Packages generally.
   aiida-overlay-pymatgen-override-is-local = check "aiida-overlay-pymatgen-override-is-local" (
     !(builtins.tryEval overlaidPkgs.python313Packages.pymatgen.drvPath).success
   );

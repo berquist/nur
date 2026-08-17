@@ -60,7 +60,7 @@
     # It matters more than it looks: cclib's nix/cclib.nix promotes the whole
     # `bridges` extra (psi4, pyscf, iodata, biopython, trexio, openbabel) into
     # hard dependencies, so building it means building Psi4 unless the
-    # nix-qchem cache is hit — see harmonwigPkgs below.
+    # nix-qchem cache is hit — see cclibPkgs below.
     cclib = {
       url = "github:cclib/cclib/545fa9bdd25af7b6e70d3323d4156791dd54a440";
       inputs.nixpkgs.follows = "nixpkgs-qchem";
@@ -116,6 +116,15 @@
         # harmonwig (pkgs.harmonwig) — but only usable when composed *after*
         # cclib's own overlay, which supplies its cclib; see pkgs/harmonwig:
         #   inputs.nur-berquist.overlays.harmonwig
+        #
+        # morfeus, QMzyme and the cheminformatics dependencies nixpkgs lacks
+        # (pkgs.morfeus-ml, pkgs.python313Packages.mdanalysis, …):
+        #   inputs.nur-berquist.overlays.cheminformatics
+        #
+        # DBSTEP, aqme, ccreg and digichem (pkgs.dbstep, …) — like harmonwig,
+        # usable only when composed after cclib's overlay, and after
+        # overlays.cheminformatics, which supplies their other dependencies:
+        #   inputs.nur-berquist.overlays.cheminformatics-cclib
         #
         # NixOS-QChem re-exported for convenience (pkgs.qchem.*):
         #   inputs.nur-berquist.overlays.qchem
@@ -202,12 +211,12 @@
           # need Psi4 are defined only there.  They need KVM anyway.
           psi4 = if system == "x86_64-linux" then qchemPkgs.qchem.psi4 else null;
 
-          # harmonwig needs cclib, and cclib's overlay needs the qchem set:
-          # nix/overlay.nix there reads final.qchem.python3.pkgs.psi4.  Building
-          # both onto qchemPkgs rather than pkgs' is what makes that affordable
-          # — qchemPkgs already reproduces NixOS-QChem's own instantiation, which
-          # is the only thing nix-qchem.cachix.org was populated from, so Psi4 is
-          # a download rather than an afternoon.
+          # Five packages here need cclib, and cclib's overlay needs the qchem
+          # set: nix/overlay.nix there reads final.qchem.python3.pkgs.psi4.
+          # Building onto qchemPkgs rather than pkgs' is what makes that
+          # affordable — qchemPkgs already reproduces NixOS-QChem's own
+          # instantiation, which is the only thing nix-qchem.cachix.org was
+          # populated from, so Psi4 is a download rather than an afternoon.
           #
           # Two things make this safe rather than merely convenient.  cclib's
           # overlay overrides the *top-level* python3 (not
@@ -216,11 +225,35 @@
           # revision NixOS-QChem pins, python3 is 3.13 — psi4 has no 3.14 build
           # yet, which is exactly why cclib pins that revision.
           #
+          # The three overlays taken from ./overlays are exactly those whose
+          # packages resolve cclib.  `cheminformatics` is included not because
+          # anything in it needs cclib — nothing does — but because it is where
+          # morfeus-ml, colour-science, lwreg, configurables and openprattle
+          # come from, and cheminformatics-cclib reaches them through
+          # final.python3.pkgs.
+          #
+          # `aiida` is deliberately *not* in this list, even though
+          # aiida-gaussian would become buildable if it were.  Adding it would
+          # rebuild aiida-core and its whole closure against the year-old
+          # nixpkgs NixOS-QChem pins instead of ours, which is both expensive
+          # and a second, silently divergent AiiDA.  See
+          # pkgs/aiida-gaussian/default.nix.
+          #
           # Only defined where NixOS-QChem has outputs; its flake hardcodes
           # x86_64-linux and optAVX implies an x86 -march.
-          harmonwigPkgs =
+          cclibPkgs =
+            let
+              ours = import ./overlays;
+            in
             if system == "x86_64-linux" then
-              qchemPkgs.extend (lib.composeExtensions inputs.cclib.overlays.default (import ./overlays).harmonwig)
+              qchemPkgs.extend (
+                lib.composeManyExtensions [
+                  inputs.cclib.overlays.default
+                  ours.harmonwig
+                  ours.cheminformatics
+                  ours.cheminformatics-cclib
+                ]
+              )
             else
               null;
 
@@ -235,11 +268,10 @@
 
           aiidaVmTests = import ./tests/aiida/vm.nix { pkgs = pkgs'; };
 
-          # Given harmonwigPkgs rather than pkgs', because that is the only
-          # package set in which harmonwig has a cclib; see ./tests/harmonwig
-          # and the harmonwigPkgs binding above.
-          harmonwigTests =
-            if harmonwigPkgs != null then import ./tests/harmonwig { pkgs = harmonwigPkgs; } else null;
+          # Given cclibPkgs rather than pkgs', because that is the only package
+          # set in which harmonwig has a cclib; see ./tests/harmonwig and the
+          # cclibPkgs binding above.
+          harmonwigTests = if cclibPkgs != null then import ./tests/harmonwig { pkgs = cclibPkgs; } else null;
 
           tests = import ./tests { pkgs = pkgs'; };
 
@@ -256,15 +288,35 @@
 
           # Flake-style packages (derivations only, filtered).
           #
-          # harmonwig is replaced rather than inherited: the one in nurAttrs
-          # comes from the bare ./overlays and carries meta.broken because
-          # ./overlays cannot reach the cclib flake input.  This is the working
-          # one.  `nix build .#harmonwig` therefore succeeds while
-          # `nix-build -A harmonwig` does not, which is the same split the
-          # Psi4-backed VM checks already live with.
+          # The five cclib-dependent packages are replaced rather than
+          # inherited: the ones in nurAttrs come from the bare ./overlays and
+          # carry meta.broken because ./overlays cannot reach the cclib flake
+          # input.  These are the working ones.  `nix build .#dbstep` therefore
+          # succeeds while `nix-build -A dbstep` does not, which is the same
+          # split the Psi4-backed VM checks already live with.
+          #
+          # aiida-gaussian is the one cclib dependant *not* replaced here; see
+          # the cclibPkgs binding above for why.
+          #
+          # Broken derivations are filtered out rather than left to fail.
+          # `nix flake check` forces every member of `packages`, and forcing a
+          # meta.broken derivation throws — so leaving `aiida-gaussian` in would
+          # take the whole check down, and so would the four below on any system
+          # where cclibPkgs is null.  They stay reachable through
+          # legacyPackages, which flake check does not force, and which answers
+          # with nixpkgs' own "marked as broken" message rather than an
+          # attribute-not-found.
           packages =
-            lib.filterAttrs (_: v: lib.isDerivation v) nurAttrs
-            // lib.optionalAttrs (harmonwigPkgs != null) { inherit (harmonwigPkgs) harmonwig; };
+            lib.filterAttrs (_: v: lib.isDerivation v && !(v.meta.broken or false)) nurAttrs
+            // lib.optionalAttrs (cclibPkgs != null) {
+              inherit (cclibPkgs)
+                harmonwig
+                aqme
+                ccreg
+                dbstep
+                digichem-core
+                ;
+            };
 
           # -------------------------------------------------------------------
           # Formatting and linting, wired up as git hooks.
@@ -326,6 +378,10 @@
           # AiiDA module evaluation tests (likewise fast and stubbed):
           #   nix build .#checks.x86_64-linux.eval-aiida
           #
+          # Cheminformatics overlay evaluation tests (likewise; nothing real is
+          # built, including the packages under test):
+          #   nix build .#checks.x86_64-linux.eval-cheminformatics
+          #
           # dotdrop integration tests (no VM, but they build the real package):
           #   nix build .#checks.x86_64-linux.dotdrop
           #
@@ -368,6 +424,11 @@
             # second path into `eval`, so that a failure names which module set
             # broke without having to read the build log.
             eval-aiida = tests.aiida.all;
+
+            # The cheminformatics overlays.  Not a module suite at all — these
+            # assert how ../overlays wires the cclib split, which is silent when
+            # it goes wrong.  See tests/cheminformatics/default.nix.
+            eval-cheminformatics = tests.cheminformatics.all;
 
             # dotdrop integration tests — no VM, but they do build dotdrop and
             # run upstream's tests-ng scripts against the installed binary.

@@ -28,7 +28,7 @@ buildPythonPackage {
     owner = "octopus-code";
     repo = "aiida-octopus";
     rev = "4903d6b94de74c3a2b57987c493fbf16433a7345";
-    hash = lib.fakeHash;
+    hash = "sha256-7/PqAL55a1rwWtnUpbK42MTqfLx4X4Re4kh59HC5ViY=";
   };
 
   build-system = [ flit-core ];

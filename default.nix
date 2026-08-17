@@ -44,6 +44,17 @@ in
   # pkgs/harmonwig/default.nix, and flake.nix for the working instantiation.
   inherit (pkgs') dotdrop harmonwig;
 
+  # The cheminformatics packages that need cclib.  Same arrangement as
+  # harmonwig above and for the same reason — see overlays/default.nix's
+  # cheminformatics-cclib — so on the bare NUR path all four carry meta.broken
+  # and only `nix build .#<name>` produces something usable.
+  inherit (pkgs')
+    aqme
+    ccreg
+    dbstep
+    digichem-core
+    ;
+
   # Python packages, reached through the extended python313Packages so that
   # these derivations are identical to what python313.withPackages returns.
   inherit (py)
@@ -55,9 +66,13 @@ in
 
     aiida-core
     aiida-cp2k
+    aiida-gaussian
     aiida-octopus
     aiida-orca
     aiida-psi4
     aiida-quantumespresso
+
+    morfeus-ml
+    qmzyme
     ;
 }

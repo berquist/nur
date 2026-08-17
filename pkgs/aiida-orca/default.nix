@@ -33,7 +33,7 @@ buildPythonPackage rec {
     owner = "ezpzbz";
     repo = "aiida-orca";
     rev = "90e9a3b27de0f9767e89ee8903728fabf126b49c";
-    hash = lib.fakeHash;
+    hash = "sha256-EQhOjFTbrFPV3gMBkJUO1dLXkZZ698pXNe7jff7lYyQ=";
   };
 
   build-system = [ hatchling ];

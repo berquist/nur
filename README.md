@@ -28,7 +28,7 @@ Some quantum chemistry programs come from [NixOS-QChem](https://github.com/Nix-Q
 | Name                                                                          | Description                                                        |
 |-------------------------------------------------------------------------------|--------------------------------------------------------------------|
 | `aiida-core`                                                                  | the workflow manager itself (`verdi`)                              |
-| `aiida-cp2k`, `aiida-orca`, `aiida-octopus`, `aiida-psi4`, `aiida-quantumespresso` | calculation, parser and workflow plugins                      |
+| `aiida-cp2k`, `aiida-gaussian`, `aiida-orca`, `aiida-octopus`, `aiida-psi4`, `aiida-quantumespresso` | calculation, parser and workflow plugins            |
 | `nixosModules.aiida`                                                          | `services.aiida.*` — a PostgreSQL-backed profile and its daemon    |
 
 A dozen dependencies that nixpkgs does not carry — `kiwipy`, `plumpy`, `disk-objectstore`,
@@ -42,16 +42,42 @@ you point it elsewhere. Plugins go in `services.aiida.plugins` so their entry po
 daemon's Python environment; the programs they drive go in `services.aiida.extraPackages`, which
 is a different thing and reaches the daemon's `PATH` instead.
 
+`aiida-gaussian` is the one plugin that is not buildable from either entry point. It needs cclib,
+and a plugin has to come from the same package set as the `aiida-core` it extends — see
+`pkgs/aiida-gaussian/default.nix` for the whole story.
+
+### Cheminformatics
+
+Standalone libraries and CLIs, unrelated to the two families above:
+
+| Name                                                                | Description                                                          |
+|---------------------------------------------------------------------|------------------------------------------------------------------------|
+| [`morfeus-ml`](https://github.com/digital-chemistry-laboratory/morfeus) | molecular features — Sterimol, buried volume, cone and solid angles |
+| [`qmzyme`](https://github.com/Klem-Research-Group/QMzyme)           | QM-based enzyme model generation and validation                      |
+| [`dbstep`](https://github.com/patonlab/DBSTEP)                      | DFT-based steric parameters                                          |
+| [`aqme`](https://github.com/jvalegre/aqme)                          | Automated Quantum Mechanical Environments                            |
+| [`ccreg`](https://github.com/ghutchis/ccreg)                        | computational chemistry registration system, built on `lwreg`        |
+| [`digichem-core`](https://github.com/Chemicus-Ltd/digichem-library) | result parsing and reporting for computational chemistry             |
+
+`mdanalysis`, `griddataformats`, `mda-xdrlib`, `mrcfile`, `basis-set-exchange`, `colour-science`,
+`configurables`, `openprattle` and `lwreg` come with them, reachable as `python313Packages.*`
+rather than as top-level attributes.
+
 ### [dotdrop](https://github.com/deadc0de6/dotdrop)
 
 > Save your dotfiles once, deploy them everywhere
 
 ### [harmonwig](https://github.com/ispg-group/harmonwig)
 
-Harmonic Wigner sampling of vibrational wavefunctions from quantum chemistry output. Its
-[cclib](https://github.com/cclib/cclib) dependency is in neither nixpkgs nor NixOS-QChem, so it
-comes from cclib's own flake — which means `nix build .#harmonwig` works but
-`nix-build -A harmonwig` does not, and the NUR attribute carries `meta.broken` to say so.
+Harmonic Wigner sampling of vibrational wavefunctions from quantum chemistry output.
+
+### The cclib split
+
+[cclib](https://github.com/cclib/cclib) is in neither nixpkgs nor NixOS-QChem, and upstream ships
+its own flake, so that is where it comes from here. `overlays/` is imported without flakes by
+`default.nix`, `overlay.nix` and `ci.nix`, so it cannot reach a flake input — which means
+`harmonwig`, `dbstep`, `aqme`, `ccreg` and `digichem-core` build through `nix build .#<name>` but
+not through `nix-build -A <name>`. Each carries `meta.broken` on the NUR path to say so.
 
 ## Using it
 
@@ -67,12 +93,15 @@ As a flake:
 ```
 
 then apply `nur-berquist.overlays.default` (everything) or one of `overlays.qcfractal`,
-`overlays.aiida`, `overlays.dotdrop`, `overlays.harmonwig`, `overlays.qchem`, and import the
-NixOS modules you actually enable — each is independent, and you do not need all of them.
-`system-flake-snippet.nix` is a complete, copyable example of that wiring.
+`overlays.aiida`, `overlays.cheminformatics`, `overlays.dotdrop`, `overlays.harmonwig`,
+`overlays.qchem`, and import the NixOS modules you actually enable — each is independent, and you
+do not need all of them. `system-flake-snippet.nix` is a complete, copyable example of that
+wiring.
 
-`overlays.harmonwig` is the one exception to "independent": it only yields a working harmonwig
-when composed *after* cclib's own overlay, since that is where its cclib comes from.
+`overlays.harmonwig` and `overlays.cheminformatics-cclib` are the exceptions to "independent":
+they only yield working packages when composed *after* cclib's own overlay, since that is where
+their cclib comes from. `overlays.cheminformatics-cclib` additionally needs
+`overlays.cheminformatics`, which supplies its other dependencies.
 
 A compute worker needs one manual step after `nixos-rebuild`: its QCFractal account lives in
 PostgreSQL and its password must stay out of the store, so neither can be declared. Until you

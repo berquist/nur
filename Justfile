@@ -88,12 +88,12 @@ ci-matrix:
 # errors with "unrecognised flag"), but it streams build output by default, so
 # the nix-build recipes below need nothing extra.
 
-# Everything: both eval suites, the dotdrop and harmonwig integration tests,
-# every VM test, and the hooks.
+# Everything: all three eval suites, the dotdrop and harmonwig integration
+# tests, every VM test, and the hooks.
 check:
     nix flake check -L
 
-# Every non-VM test reachable without the flake: the two eval suites and the
+# Every non-VM test reachable without the flake: the three eval suites and the
 # dotdrop integration tests.  Not harmonwig — its cclib comes from a flake
 # input, so `just harmonwig-tests` goes through the flake instead.
 tests:
@@ -106,6 +106,11 @@ qcfractal-eval-tests:
 # AiiDA module evaluation tests only — fast, no VM, stubbed packages.
 aiida-eval-tests:
     nix-build tests -A aiida.all --no-out-link
+
+# Cheminformatics overlay evaluation tests only — fast, no VM, nothing real
+# built. This is where the cclib split is asserted.
+cheminformatics-eval-tests:
+    nix-build tests -A cheminformatics.all --no-out-link
 
 # dotdrop integration tests. No VM, but these build the real package.
 dotdrop-tests:

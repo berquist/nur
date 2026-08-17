@@ -5,25 +5,59 @@ Guidance for working in this repository.
 ## What this is
 
 berquist's personal [NUR](https://github.com/nix-community/NUR) repository, built from
-`nur-packages-template`. It holds four unrelated bodies of work:
+`nur-packages-template`. It holds five unrelated bodies of work:
 
 - the **QCArchive/QCFractal ecosystem** — Python packages (`qcportal`, `qcfractal`,
   `qcfractalcompute`, `qcarchivetesting`, `parsl`) plus two NixOS service modules.
-- the **AiiDA ecosystem** — `aiida-core`, five quantum chemistry plugins (`aiida-cp2k`,
-  `aiida-orca`, `aiida-octopus`, `aiida-psi4`, `aiida-quantumespresso`), the fifteen-odd
-  dependencies of both that nixpkgs does not carry, and one NixOS service module. Together with
-  QCArchive this is the bulk of the repo. It shares the `python313` pin with QCArchive and
-  nothing else; the two overlays are separate so that a consumer can take one without the
-  other's closure.
+- the **AiiDA ecosystem** — `aiida-core`, six quantum chemistry plugins (`aiida-cp2k`,
+  `aiida-gaussian`, `aiida-orca`, `aiida-octopus`, `aiida-psi4`, `aiida-quantumespresso`), the
+  fifteen-odd dependencies of both that nixpkgs does not carry, and one NixOS service module.
+  Together with QCArchive this is the bulk of the repo. It shares the `python313` pin with
+  QCArchive and nothing else; the two overlays are separate so that a consumer can take one
+  without the other's closure.
+- the **cheminformatics family** — `morfeus-ml`, `qmzyme`, `dbstep`, `aqme`, `ccreg`,
+  `digichem-core`, plus the nine dependencies of those that nixpkgs lacks (`mdanalysis`,
+  `griddataformats`, `mda-xdrlib`, `mrcfile`, `basis-set-exchange`, `colour-science`,
+  `configurables`, `openprattle`, `lwreg`). Two overlays rather than one, split on whether the
+  package needs cclib — see the cclib split below.
 - **dotdrop** — a standalone dotfile-manager CLI, not in nixpkgs. It shares nothing with the
   above and is deliberately kept separate: its own overlay, its own test subdirectory, and the
   default `python3` rather than the 3.13 pin.
-- **harmonwig** — likewise a standalone CLI, and the one package here that is only buildable
-  through the flake, because its `cclib` comes from a flake input.
+- **harmonwig** — likewise a standalone CLI.
+
+### The cclib split
+
+cclib is in neither nixpkgs nor NixOS-QChem and upstream ships its own flake, so that is where it
+comes from. `overlays/` holds plain `final: prev:` functions and is imported **without flakes** by
+`default.nix`, `overlay.nix` and `ci.nix`, so it cannot reach a flake input. Six packages need
+cclib and each takes it as a defaulted `cclib ? null` argument:
+
+| Package | Where it lives | Buildable through |
+|---|---|---|
+| `harmonwig` | `overlays.harmonwig` | the flake only |
+| `dbstep`, `aqme`, `ccreg`, `digichem-core` | `overlays.cheminformatics-cclib` | the flake only |
+| `aiida-gaussian` | `overlays.aiida` | **neither**, today |
+| `qmzyme` | `overlays.cheminformatics` | both — its cclib use is test-only and lazy |
+
+The first five are `meta.broken` on the NUR path and replaced in `flake.nix`'s `packages` by the
+ones from `cclibPkgs`. `aiida-gaussian` is broken everywhere: a plugin must come from the same
+package set as its `aiida-core`, and putting the `aiida` overlay into `cclibPkgs` would rebuild
+that whole closure against NixOS-QChem's nixpkgs rather than ours.
+
+Note that cclib's overlay overrides the **top-level `python3` attribute** and nothing else, so
+`final.python3.pkgs` is the only set that has it. Two traps follow, and both are silent — a
+`callPackage` whose `cclib` argument is defaulted just leaves it `null`:
+
+- `final.python313Packages`, which every other family here uses, is a different set that never
+  sees cclib. So `overlays.cheminformatics-cclib` and `overlays.harmonwig` are top-level
+  `callPackage`s rather than `pythonPackagesExtensions` members.
+- **`final.python3Packages` is not `final.python3.pkgs`.** nixpkgs defines
+  `python3Packages = dontRecurseIntoAttrs python314Packages` — an alias to the *versioned* set,
+  which cclib's overlay does not touch. Spelling it `python3Packages` yields a package that is
+  `meta.broken` even on the flake path, with nothing to say so. Always `final.python3.pkgs`.
 
 The `nixos-qchem` flake input supplies quantum-chemistry programs as `pkgs.qchem.*` and is
-re-exported as `overlays.qchem`. The `cclib` flake input supplies cclib, which is nowhere in
-nixpkgs and which upstream ships a flake for.
+re-exported as `overlays.qchem`.
 
 ## Where the explanations live
 
@@ -45,10 +79,17 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does the AiiDA module ensure the *database* when the QCFractal one deliberately does not? | `nixos-modules/aiida.nix` (`services.postgresql`) |
 | Why `Type = "forking"` for the daemon, and where does that pid file come from? | `nixos-modules/aiida.nix` (`systemd.services.aiida-daemon`) |
 | Why is `core.zeromq` the default broker, and why is aiida-core taken from git? | `pkgs/aiida-core/default.nix` (the `src` comment) |
-| Why is nixpkgs' `pymatgen` interpreter gate lifted, and why at that one call site? | `overlays/default.nix` (the `aiida-core` `callPackage`) |
+| Why is nixpkgs' `pymatgen` interpreter gate lifted, and why is it a `let` binding? | `overlays/default.nix` (the `pymatgen` binding in the `aiida` extension) |
 | Why does `aiida-psi4` patch `setup.json`? What is `reentry` doing there? | `pkgs/aiida-psi4/default.nix` (`postPatch`) |
 | Why does every AiiDA package set `HOME` in `preBuild` rather than `preCheck`? | `pkgs/aiida-core/default.nix` (`preBuild`) |
-| Why is cclib a flake input, and what does that cost harmonwig on the NUR path? | `pkgs/harmonwig/default.nix` (the `cclib` argument), `flake.nix` (`harmonwigPkgs`) |
+| Why is cclib a flake input, and what does that cost on the NUR path? | `pkgs/harmonwig/default.nix` (the `cclib` argument), `flake.nix` (`cclibPkgs`) |
+| Why can `aiida-gaussian` not be built at all, and what would it take? | `pkgs/aiida-gaussian/default.nix` (the `cclib` argument), `flake.nix` (`cclibPkgs`) |
+| Why does `dbstep` skip `dbstep.graph` in its import check? Why is `pptk` not a dependency? | `pkgs/dbstep/default.nix` (`pythonImportsCheck`) |
+| Why is `pythonRelaxDeps = true` on aqme rather than a list? Why is `test_csearch.py` disabled? | `pkgs/aqme/default.nix` |
+| Why does `ccreg` drop its own `lwreg` requirement and add three undeclared ones? | `pkgs/ccreg/default.nix` (`pythonRemoveDeps`) |
+| Why do three packages rewrite a `default-version` in `postPatch`? | `pkgs/mda-xdrlib/default.nix` (`postPatch`) |
+| Why does MDAnalysis run no tests, and why is that not `doCheck = false`? | `pkgs/mdanalysis/default.nix` (the note above `pythonImportsCheck`) |
+| Why does the AiiDA eval suite need a second, broken-allowing package set? | `tests/aiida/default.nix` (`brokenPkgs`) |
 
 ## Architecture
 
@@ -74,22 +115,31 @@ key means editing both.
 
 ### Adding a Python package takes three edits
 
-The `qcfractal` and `aiida` overlays in `overlays/default.nix` each inject their Python packages
-into `pythonPackagesExtensions`, so they land in *every* `pythonX.pkgs` set, **and** re-export
-the public ones as top-level `pkgs.*` aliases. `default.nix` then re-exports the same names from
-`pkgs'.python313Packages`. All three routes are the *same* derivation, which the
-`overlay-python-pin` and `aiida-overlay-python-pin` eval tests assert. So a new package needs:
+The `qcfractal`, `aiida` and `cheminformatics` overlays in `overlays/default.nix` each inject
+their Python packages into `pythonPackagesExtensions`, so they land in *every* `pythonX.pkgs`
+set, **and** re-export the public ones as top-level `pkgs.*` aliases. `default.nix` then
+re-exports the same names from `pkgs'.python313Packages`. All three routes are the *same*
+derivation, which the `overlay-python-pin` and `aiida-overlay-python-pin` eval tests assert. So a
+new package needs:
 
 1. the `pself.callPackage` line in `overlays/default.nix`,
 2. the top-level `inherit (final.python313Packages)` list in the same file,
 3. the `inherit (py)` list in `default.nix`.
 
-Steps 2 and 3 are for *public* packages only. The AiiDA overlay carries a dozen dependencies —
-`kiwipy`, `plumpy`, `disk-objectstore`, `pgsu`, `aiida-pseudo` and the rest — that stop at step
-1 deliberately: they stay reachable through `python313Packages` and are not top-level
-attributes, so `ci.nix` does not build each of them in its own right. `tests/aiida/default.nix`
-spells out the public list in `exportedPackages`, a fourth hand-written copy that exists so the
-other three cannot drift apart silently.
+Steps 2 and 3 are for *public* packages only. The AiiDA and cheminformatics overlays between them
+carry twenty-odd dependencies — `kiwipy`, `plumpy`, `disk-objectstore`, `pgsu`, `aiida-pseudo`,
+`mdanalysis`, `colour-science`, `lwreg` and the rest — that stop at step 1 deliberately: they stay
+reachable through `python313Packages` and are not top-level attributes, so `ci.nix` does not build
+each of them in its own right. `tests/aiida/default.nix` spells out the public AiiDA list in
+`exportedPackages`, a fourth hand-written copy that exists so the other three cannot drift apart
+silently.
+
+**A cclib dependant is the exception to all of this.** It is a top-level
+`final.python3.pkgs.callPackage` in `overlays/default.nix` — one edit, not three — plus a line
+in `default.nix`'s `inherit (pkgs')` list and one in `flake.nix`'s `packages` override. It is not a
+`pythonPackagesExtensions` member because `python313Packages` is precisely the set that never has
+cclib. `aiida-gaussian` breaks that rule and pays for it by being unbuildable; see the cclib split
+above.
 
 Inside a package derivation, dependencies on sibling packages resolve automatically through the
 extended package-set fixpoint (`pself`) — do not thread them in manually. Non-Python packages

@@ -28,7 +28,7 @@ buildPythonPackage rec {
   src = fetchPypi {
     pname = "aiida_pseudo";
     inherit version;
-    hash = "sha256-bajniRfnqB7J2Qq5hwW1boWJroWrUmtNiwLXoXeP/Q4=";
+    hash = "sha256-nmzFv1mjaGM77Sx9GehPiaKfwdcqgDG5d0Bix8AY+bs=";
   };
 
   build-system = [ flit-core ];

@@ -7,6 +7,8 @@
 #   qcarchive/vm.nix        NixOS VM integration tests for the same
 #   aiida/default.nix       evaluation tests for the AiiDA NixOS module
 #   aiida/vm.nix            NixOS VM integration tests for the same
+#   cheminformatics/default.nix  evaluation tests for the two cheminformatics
+#                                overlays, including the cclib split
 #   dotdrop/default.nix     integration tests for the dotdrop package
 #   harmonwig/default.nix   integration tests for the harmonwig package
 #
@@ -48,9 +50,15 @@ let
     pkgs = pkgs.extend (import ../overlays).dotdrop;
   };
   aiida = import ./aiida { inherit pkgs; };
+  cheminformatics = import ./cheminformatics { inherit pkgs; };
 in
 {
-  inherit qcarchive dotdrop aiida;
+  inherit
+    qcarchive
+    dotdrop
+    aiida
+    cheminformatics
+    ;
 
   # Every non-VM test in the repo.
   all = pkgs.symlinkJoin {
@@ -59,6 +67,7 @@ in
       qcarchive.all
       dotdrop.all
       aiida.all
+      cheminformatics.all
     ];
   };
 }

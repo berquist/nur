@@ -36,7 +36,7 @@ buildPythonPackage rec {
     owner = "aiidateam";
     repo = "aiida-cp2k";
     tag = "v${version}";
-    hash = lib.fakeHash;
+    hash = "sha256-UjcZj5apv0nuLctNYoTzRK9SFo1xhVr0Mfehaf5P7FE=";
   };
 
   build-system = [ flit-core ];

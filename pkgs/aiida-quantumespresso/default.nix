@@ -38,7 +38,7 @@ buildPythonPackage rec {
     owner = "aiidateam";
     repo = "aiida-quantumespresso";
     tag = "v${version}";
-    hash = lib.fakeHash;
+    hash = "sha256-j2p8S8+sCIVO/7bRoSx0NxXRE8gSahYVfkrn8CS7Q6Y=";
   };
 
   build-system = [ hatchling ];
