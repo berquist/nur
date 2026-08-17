@@ -6,4 +6,5 @@
 {
   qcfractal-server = ./qcfractal-server.nix;
   qcfractal-compute = ./qcfractal-compute.nix;
+  aiida = ./aiida.nix;
 }

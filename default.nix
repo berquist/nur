@@ -38,7 +38,11 @@ in
   # Python *applications*: reached through the overlay rather than
   # callPackage'd here, so that pkgs.dotdrop and this attribute are the same
   # derivation.  Built against the default python3, not the 3.13 pin below.
-  inherit (pkgs') dotdrop;
+  #
+  # harmonwig is here too, but on the bare NUR path it carries meta.broken:
+  # its cclib comes from a flake input that ./overlays cannot reach.  See
+  # pkgs/harmonwig/default.nix, and flake.nix for the working instantiation.
+  inherit (pkgs') dotdrop harmonwig;
 
   # Python packages, reached through the extended python313Packages so that
   # these derivations are identical to what python313.withPackages returns.
@@ -48,5 +52,12 @@ in
     qcfractal
     qcfractalcompute
     qcarchivetesting
+
+    aiida-core
+    aiida-cp2k
+    aiida-octopus
+    aiida-orca
+    aiida-psi4
+    aiida-quantumespresso
     ;
 }

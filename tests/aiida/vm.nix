@@ -1,0 +1,458 @@
+# tests/aiida/vm.nix
+#
+# VM-based integration tests for the AiiDA NixOS module.  These boot a real
+# NixOS VM, so the real aiida-core — and, for the plugin test, the real
+# aiida-cp2k and cp2k — have to be buildable.
+#
+#   nix build .#checks.x86_64-linux.vm-aiida-daemon-local-db
+#   just vm-test aiida-daemon-local-db
+#   $(nix-build tests/aiida/vm.nix -A daemon-local-db.driver)/bin/nixos-test-driver
+#
+# pkgs must arrive with the aiida overlay already applied, for the same reason
+# spelled out at the top of ../qcarchive/vm.nix: testers.nixosTest uses the pkgs
+# argument directly as the package set for VM nodes, so nixpkgs.overlays inside
+# a node module comes too late.  From the command line that takes
+#
+#   nix-build tests/aiida/vm.nix -A daemon-local-db \
+#     --arg pkgs 'import <nixpkgs> { overlays = [ (import ./overlays).aiida ]; }'
+{
+  pkgs ? import <nixpkgs> {
+    overlays = [ (import ../../overlays).aiida ];
+  },
+}:
+
+let
+  inherit (pkgs) lib;
+
+  aiidaModule = ../../nixos-modules/aiida.nix;
+
+  # PostgreSQL, a Python interpreter carrying numpy and pymatgen, and a circus
+  # arbiter supervising worker processes do not fit in the 512 MiB default.
+  # mkDefault so the CP2K node can raise both without a conflict.
+  minimalVM = {
+    boot.loader.grub.enable = false;
+    virtualisation.diskSize = lib.mkDefault 4096; # MiB
+    virtualisation.memorySize = lib.mkDefault 2048; # MiB
+  };
+
+  # Run something as the daemon's own user, with the same environment the units
+  # get.  `verdi` reads AIIDA_PATH to find the profile, and aiida-core touches
+  # $HOME at import time (see pkgs/aiida-core/default.nix), so both have to be
+  # set for a command run outside systemd.  The cd matters too: sudo keeps the
+  # caller's working directory, and the test driver starts in one the aiida user
+  # cannot read.
+  asAiida =
+    command:
+    "cd /var/lib/aiida && sudo -u aiida env AIIDA_PATH=/var/lib/aiida HOME=/var/lib/aiida ${command}";
+
+  verdi = "verdi -p main";
+
+  # Scripts are run through `verdi run` rather than a bare python3.  That picks
+  # the interpreter verdi itself is running under — the withPackages environment
+  # the module built, holding aiida-core *and* the plugins — and loads the
+  # profile before executing, so nothing here has to guess at a path or repeat
+  # load_profile().
+  runScript = script: asAiida "${verdi} run ${script}";
+
+  # A code node for /bin/bash, which is what ArithmeticAddCalculation actually
+  # executes: its input file is a shell script computing x + y.  pkgs.bash
+  # rather than /bin/bash, which NixOS does not provide.
+  createBashCode = asAiida ''
+    ${verdi} code create core.code.installed \
+      --non-interactive \
+      --label add \
+      --computer localhost \
+      --default-calc-job-plugin core.arithmetic.add \
+      --filepath-executable ${lib.getExe pkgs.bash}
+  '';
+
+  # Submit MultiplyAddWorkChain and print its pk.
+  #
+  # `core.arithmetic.multiply_add` rather than the `core.arithmetic.add_multiply`
+  # workfunction: a process *function* can only be run in the caller's own
+  # process, never submitted, so it would prove nothing about the daemon.  The
+  # WorkChain is submitted, picked up by a daemon worker, and itself submits an
+  # ArithmeticAddCalculation — so a pass exercises the broker, the worker, the
+  # scheduler and the local transport, which is everything the module wires up.
+  submitWorkchain = pkgs.writeText "submit-multiply-add.py" ''
+    from aiida import orm
+    from aiida.engine import submit
+    from aiida.plugins import WorkflowFactory
+
+    MultiplyAdd = WorkflowFactory("core.arithmetic.multiply_add")
+
+    node = submit(
+        MultiplyAdd,
+        x=orm.Int(3),
+        y=orm.Int(5),
+        z=orm.Int(4),
+        code=orm.load_code("add@localhost"),
+    )
+    print(node.pk)
+  '';
+
+  # Report on a submitted process: exit 0 only once it has finished, printing
+  # the named output.  Shared by the workchain and the CP2K tests, which differ
+  # only in which output they read.
+  checkProcess =
+    outputExpression:
+    pkgs.writeText "check-process.py" ''
+      import sys
+
+      from aiida import orm
+
+      node = orm.load_node(int(sys.argv[1]))
+
+      if not node.is_terminated:
+          sys.exit(f"still running: {node.process_state}")
+
+      if not node.is_finished_ok:
+          # Surface the reason in the test log rather than leaving a bare
+          # timeout to be diagnosed from the VM's journal.
+          sys.exit(f"process failed: state={node.process_state} exit={node.exit_status} {node.exit_message}")
+
+      print(${outputExpression})
+    '';
+
+  # MultiplyAddWorkChain's single output.  Bound once so the two tests that
+  # submit it agree on the checker, and so it is one derivation rather than two
+  # identical ones.
+  checkResult = checkProcess "node.outputs.result.value";
+
+  # Poll until a submitted process reaches a terminal state, then read its
+  # result back.  `retry` comes from the NixOS test driver.
+  awaitProcess = checker: pk: ''
+    def process_finished(_):
+        status, _output = machine.execute(${builtins.toJSON (runScript checker)} + f" {${pk}}")
+        return status == 0
+
+    with machine.nested("waiting for process ${pk} to finish"):
+        retry(process_finished, timeout_seconds = 900)
+  '';
+
+in
+{
+  # ==========================================================================
+  # Test 1: the default configuration — local PostgreSQL, the ZeroMQ broker,
+  # a localhost computer, one worker.
+  #
+  # Verifies:
+  #   - aiida-init.service creates the profile and its storage
+  #   - aiida-daemon.service reaches active state under Type=forking
+  #   - the PostgreSQL role and database exist
+  #   - `verdi status` reports storage and daemon healthy
+  #   - the daemon survives a restart, which is what proves the pid file the
+  #     unit names is really the one circus writes
+  # ==========================================================================
+  daemon-local-db = pkgs.testers.nixosTest {
+    name = "aiida-daemon-local-db";
+
+    nodes.machine =
+      { ... }:
+      {
+        imports = [
+          minimalVM
+          aiidaModule
+        ];
+
+        services.aiida = {
+          enable = true;
+          # Distinctive values, so the assertions below prove the profile the
+          # daemon loaded is the one this module created rather than a default.
+          profileName = "main";
+          userEmail = "vm-test@localhost";
+          # Exercise the migration unit.  On a freshly created profile the
+          # storage is already at the Alembic head, so this must be a
+          # successful no-op — the property worth checking, since with
+          # autoMigrate set it runs on every boot.
+          database.autoMigrate = true;
+          configOptions = {
+            "warnings.development_version" = false;
+          };
+          # Defaults elsewhere: createLocally = true, peer auth over the Unix
+          # socket, broker.backend = "core.zeromq", setupLocalhost = true.
+        };
+      };
+
+    testScript = ''
+      machine.start()
+      machine.wait_for_unit("multi-user.target")
+
+      machine.wait_for_unit("aiida-init.service")
+      machine.wait_for_unit("aiida-storage-migrate.service")
+      machine.wait_for_unit("aiida-daemon.service")
+
+      # Reaching a oneshot unit is not the same as it having succeeded.
+      machine.succeed(
+          "systemctl show -p Result --value aiida-storage-migrate.service | grep -x success"
+      )
+
+      # PostgreSQL role and database.  Unlike the qcfractal module this one
+      # creates both; see the comment on services.postgresql in
+      # nixos-modules/aiida.nix for why the two differ.
+      machine.succeed("sudo -u postgres psql -c '\\du' | grep aiida")
+      machine.succeed("sudo -u postgres psql -c '\\l' | grep aiida")
+
+      # `verdi status` exits non-zero if any component is unreachable, so this
+      # single call covers the profile, the storage connection and the daemon.
+      status = machine.succeed(${builtins.toJSON (asAiida "${verdi} status")})
+      print(status)
+      assert "Daemon is running" in status, f"daemon not running: {status}"
+
+      # The profile really is ours, not an implicit default.
+      profile = machine.succeed(${builtins.toJSON (asAiida "${verdi} profile show main")})
+      assert "vm-test@localhost" in profile, f"unexpected profile: {profile}"
+
+      # A restart has to work.  Type=forking means systemd tracks the circus
+      # arbiter through the pid file built by Config.filepaths(); if that path
+      # were wrong the unit would come up looking active once and never
+      # restart cleanly.
+      machine.succeed("systemctl restart aiida-daemon.service")
+      machine.wait_for_unit("aiida-daemon.service")
+      status = machine.succeed(${builtins.toJSON (asAiida "${verdi} status")})
+      assert "Daemon is running" in status, f"daemon did not come back: {status}"
+    '';
+  };
+
+  # ==========================================================================
+  # Test 2: a real process, submitted to the daemon and run to completion on
+  # the localhost computer.  Nothing but bash is needed, which makes this the
+  # cheap end-to-end check of the whole chain.
+  # ==========================================================================
+  workchain-arithmetic = pkgs.testers.nixosTest {
+    name = "aiida-workchain-arithmetic";
+
+    nodes.machine =
+      { ... }:
+      {
+        imports = [
+          minimalVM
+          aiidaModule
+        ];
+
+        services.aiida.enable = true;
+      };
+
+    testScript = ''
+      machine.start()
+      machine.wait_for_unit("aiida-daemon.service")
+
+      machine.succeed(${builtins.toJSON createBashCode})
+
+      pk = machine.succeed(${builtins.toJSON (runScript submitWorkchain)}).strip().splitlines()[-1]
+      print(f"submitted MultiplyAddWorkChain as {pk}")
+
+      ${awaitProcess checkResult "pk"}
+
+      result = int(
+          machine.succeed(
+              ${builtins.toJSON (runScript checkResult)} + f" {pk}"
+          ).strip().splitlines()[-1]
+      )
+
+      # 3 * 5 + 4.  Exact, because this is integer arithmetic done by the shell.
+      assert result == 19, f"expected 19, got {result}"
+    '';
+  };
+
+  # ==========================================================================
+  # Test 3: the plugin round trip — a real CP2K single-point energy submitted
+  # through aiida-cp2k, run by a daemon worker.
+  #
+  # This is also where aiida-cp2k's examples/ are covered.  The package's own
+  # checkPhase deliberately restricts collection to test/, because the examples
+  # need a running daemon and a broker; here there is one.  The inputs below
+  # are examples/single_calculations/example_dft.py, reading its basis set,
+  # pseudopotentials and geometry straight out of ${aiida-cp2k.src}.
+  #
+  # CP2K rather than Quantum ESPRESSO: this example ships everything it needs as
+  # files in the repository, where a QE run would have to fetch SSSP pseudos
+  # over the network.
+  # ==========================================================================
+  plugin-cp2k = pkgs.testers.nixosTest {
+    name = "aiida-plugin-cp2k";
+
+    nodes.machine =
+      { ... }:
+      {
+        imports = [
+          minimalVM
+          aiidaModule
+        ];
+
+        # A DFT calculation, even a three-atom one, wants more than the daemon
+        # alone; and the CP2K closure is large.
+        virtualisation.memorySize = 4096; # MiB
+        virtualisation.diskSize = 8192; # MiB
+
+        services.aiida = {
+          enable = true;
+          # The plugin goes in `plugins`, so it lands in the same Python
+          # environment as aiida-core and its entry points become visible.
+          plugins = [ pkgs.python313Packages.aiida-cp2k ];
+          # The program goes in `extraPackages`, so it lands on the daemon's
+          # PATH — a different thing entirely, and the distinction the two
+          # options exist to make.
+          extraPackages = [ pkgs.cp2k ];
+        };
+      };
+
+    testScript =
+      let
+        exampleFiles = "${pkgs.python313Packages.aiida-cp2k.src}/examples/files";
+
+        submitDft = pkgs.writeText "submit-cp2k-dft.py" ''
+          import ase.io
+          from aiida import orm
+          from aiida.engine import submit
+
+          structure = orm.StructureData(ase=ase.io.read("${exampleFiles}/h2o.xyz"))
+          basis = orm.SinglefileData(file="${exampleFiles}/BASIS_MOLOPT")
+          pseudo = orm.SinglefileData(file="${exampleFiles}/GTH_POTENTIALS")
+
+          parameters = orm.Dict(
+              {
+                  "FORCE_EVAL": {
+                      "METHOD": "Quickstep",
+                      "DFT": {
+                          "BASIS_SET_FILE_NAME": "BASIS_MOLOPT",
+                          "POTENTIAL_FILE_NAME": "GTH_POTENTIALS",
+                          "QS": {"EPS_DEFAULT": 1.0e-12},
+                          "MGRID": {"NGRIDS": 4, "CUTOFF": 280, "REL_CUTOFF": 30},
+                          "XC": {"XC_FUNCTIONAL": {"_": "LDA"}},
+                          "POISSON": {"PERIODIC": "none", "PSOLVER": "MT"},
+                      },
+                      "SUBSYS": {
+                          "KIND": [
+                              {"_": "O", "BASIS_SET": "DZVP-MOLOPT-SR-GTH", "POTENTIAL": "GTH-LDA-q6"},
+                              {"_": "H", "BASIS_SET": "DZVP-MOLOPT-SR-GTH", "POTENTIAL": "GTH-LDA-q1"},
+                          ]
+                      },
+                  }
+              }
+          )
+
+          builder = orm.load_code("cp2k@localhost").get_builder()
+          builder.structure = structure
+          builder.parameters = parameters
+          builder.file = {"basis": basis, "pseudo": pseudo}
+          builder.metadata.options.resources = {
+              "num_machines": 1,
+              "num_mpiprocs_per_machine": 1,
+          }
+          builder.metadata.options.max_wallclock_seconds = 600
+          builder.metadata.options.withmpi = False
+
+          print(submit(builder).pk)
+        '';
+
+        checkEnergy = checkProcess ''node.outputs.output_parameters["energy"]'';
+
+        createCp2kCode = asAiida ''
+          ${verdi} code create core.code.installed \
+            --non-interactive \
+            --label cp2k \
+            --computer localhost \
+            --default-calc-job-plugin cp2k \
+            --filepath-executable ${pkgs.cp2k}/bin/cp2k.psmp
+        '';
+      in
+      ''
+        machine.start()
+        machine.wait_for_unit("aiida-daemon.service")
+
+        # The plugin must be visible to the daemon's interpreter.  Checking
+        # this first turns an entry-point regression into a clear failure here
+        # rather than an "Unknown entry point" fifteen minutes into a DFT run.
+        plugins = machine.succeed(${builtins.toJSON (asAiida "${verdi} plugin list aiida.calculations")})
+        assert "cp2k" in plugins, f"aiida-cp2k entry points not visible: {plugins}"
+
+        machine.succeed(${builtins.toJSON createCp2kCode})
+
+        pk = machine.succeed(${builtins.toJSON (runScript submitDft)}).strip().splitlines()[-1]
+        print(f"submitted Cp2kCalculation as {pk}")
+
+        ${awaitProcess checkEnergy "pk"}
+
+        energy = float(
+            machine.succeed(
+                ${builtins.toJSON (runScript checkEnergy)} + f" {pk}"
+            ).strip().splitlines()[-1]
+        )
+        print(f"CP2K LDA/DZVP-MOLOPT energy for H2O: {energy} Ha")
+
+        # Bracket the known result (about -17.1 Ha) loosely enough to tolerate
+        # a CP2K version bump, tightly enough that a wrong molecule, basis set
+        # or unit would fail.
+        assert -18.0 < energy < -16.0, f"energy out of range: {energy}"
+      '';
+  };
+
+  # ==========================================================================
+  # Test 4: the same deployment on RabbitMQ instead of ZeroMQ.  This is the
+  # only coverage of broker.backend = "core.rabbitmq", broker.createLocally,
+  # and the `verdi profile configure-broker` step in aiida-init that goes with
+  # them.
+  # ==========================================================================
+  daemon-rabbitmq = pkgs.testers.nixosTest {
+    name = "aiida-daemon-rabbitmq";
+
+    nodes.machine =
+      { ... }:
+      {
+        imports = [
+          minimalVM
+          aiidaModule
+        ];
+
+        # An Erlang VM alongside PostgreSQL and the daemon.
+        virtualisation.memorySize = 3072; # MiB
+
+        services.aiida = {
+          enable = true;
+          broker.backend = "core.rabbitmq";
+          # Default: createLocally = true, so services.rabbitmq is enabled here
+          # and the daemon is ordered after it.
+          configOptions = {
+            # aiida/brokers/rabbitmq/broker.py accepts 3.6.0 <= v < 3.8.15 and
+            # nixpkgs is far past that, so without this every `verdi`
+            # invocation in this test would print an unsupported-version
+            # warning.  Silencing it keeps a real complaint visible.
+            "warnings.rabbitmq_version" = false;
+          };
+        };
+      };
+
+    testScript = ''
+      machine.start()
+      machine.wait_for_unit("multi-user.target")
+      machine.wait_for_unit("rabbitmq.service")
+      machine.wait_for_unit("aiida-init.service")
+      machine.wait_for_unit("aiida-daemon.service")
+
+      status = machine.succeed(${builtins.toJSON (asAiida "${verdi} status")})
+      print(status)
+      assert "Daemon is running" in status, f"daemon not running: {status}"
+
+      # The profile must name RabbitMQ.  Without this the test would pass
+      # against a profile that silently fell back to no broker at all, which is
+      # exactly what detect_rabbitmq_config() does on a failed probe — and the
+      # reason aiida-init pins the connection parameters explicitly.
+      profile = machine.succeed(${builtins.toJSON (asAiida "${verdi} profile show main")})
+      assert "core.rabbitmq" in profile, f"broker not configured: {profile}"
+
+      # And a process has to actually get through it.
+      machine.succeed(${builtins.toJSON createBashCode})
+      pk = machine.succeed(${builtins.toJSON (runScript submitWorkchain)}).strip().splitlines()[-1]
+
+      ${awaitProcess checkResult "pk"}
+
+      result = int(
+          machine.succeed(
+              ${builtins.toJSON (runScript checkResult)} + f" {pk}"
+          ).strip().splitlines()[-1]
+      )
+      assert result == 19, f"expected 19, got {result}"
+    '';
+  };
+}

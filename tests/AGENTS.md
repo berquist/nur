@@ -8,15 +8,27 @@ no list to remember to update.
 ```
 tests/qcarchive/default.nix   eval tests for the QCFractal NixOS modules
 tests/qcarchive/vm.nix        NixOS VM integration tests for the same
+tests/aiida/default.nix       eval tests for the AiiDA NixOS module
+tests/aiida/vm.nix            NixOS VM integration tests for the same
 tests/dotdrop/default.nix     integration tests for the dotdrop package
+tests/harmonwig/default.nix   integration tests for the harmonwig package
 ```
 
-Three properties worth preserving, each explained at the code:
+Four properties worth preserving, each explained at the code:
 
-- The qcarchive suite stubs `qcfractal`/`qcfractalcompute`, so it cannot see overlay
-  regressions. The `overlay-*` tests at the top of the file deliberately bypass the stubs —
-  anything about how the modules *find* or *launch* their package belongs there.
-- Its `check{}` helper bakes the verdict into the derivation's `buildCommand`, which is what
-  lets `just check-no-daemon` report PASS/FAIL without building anything.
+- The qcarchive and aiida suites stub their packages, so they cannot see overlay regressions.
+  The `overlay-*` tests at the top of each file deliberately bypass the stubs — anything about
+  how the modules *find* or *launch* their package belongs there.
+- Their `check{}` helper bakes the verdict into the derivation's `buildCommand`, which is what
+  lets `just check-no-daemon` report PASS/FAIL without building anything. It follows that
+  nothing in those files may trigger import-from-derivation: read a `writeShellScript`'s `.text`
+  rather than `builtins.readFile`-ing its store path.
 - The VM tests are **not** reachable from `all` (KVM, minutes), and their `pkgs` must arrive
   already overlaid.
+- `harmonwig` is not dispatched from `tests/default.nix` at all, and its `pkgs` argument throws
+  rather than defaulting: its cclib comes from a flake input, so only the flake can build a
+  working one. Reach it as `nix build .#checks.<system>.harmonwig`, or `just harmonwig-tests`.
+
+The eval suites are the fast loop and should stay that way. A new assertion about a module
+belongs in `<subject>/default.nix`; only something that genuinely needs a booted system —
+a service actually starting, a real calculation running — earns a place in `vm.nix`.

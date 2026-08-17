@@ -7,3 +7,8 @@ result-*
 /.pre-commit-config.yaml
 
 .direnv/
+
+# Upstream checkouts of the projects packaged under pkgs/, cloned here so their
+# pyproject.toml, conftest.py and uv.lock can be read while packaging.  They are
+# other people's repositories, each with its own .git — not content of this one.
+/wc/
