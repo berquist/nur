@@ -123,7 +123,7 @@
   aiida = final: prev: {
     pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
       (
-        pself: _psuper:
+        pself: psuper:
         let
           # nixpkgs carries `disabled = pythonAtLeast "3.13"` on pymatgen, so
           # `pkgs.python313Packages.pymatgen` throws at evaluation rather than
@@ -149,6 +149,26 @@
           });
         in
         {
+          # Not a package of ours, and not optional: nixpkgs' aiormq fetches
+          # upstream's 9.6.4 tag, whose pyproject.toml still says 6.9.2 — an
+          # upstream tagging slip — and pythonMetadataCheckPhase turns that
+          # mismatch into a hard build failure.  That takes down aio-pika, and
+          # with it kiwipy[rmq], plumpy, aiida-core and every AiiDA VM test.
+          # pyprojectVersionPatchHook rewrites the version to match the
+          # derivation, which is what nixpkgs' own error message recommends.
+          #
+          # Unlike the pymatgen override below this one has to live in the
+          # package set rather than in a `let`: the broken derivation is two
+          # levels down and nothing here constructs it, so aio-pika can only
+          # pick up the fix through pself.  Overriding it for a consumer of
+          # overlays.aiida is a repair rather than a surprise — without it the
+          # attribute does not build at all.
+          #
+          # Remove once nixpkgs carries the fix.
+          aiormq = psuper.aiormq.overridePythonAttrs (old: {
+            build-system = (old.build-system or [ ]) ++ [ pself.pyprojectVersionPatchHook ];
+          });
+
           # Dependencies missing from nixpkgs.  Not re-exported at the top level
           # or from ../default.nix: they are implementation detail, and every
           # top-level attribute is another thing ci.nix builds.

@@ -20,7 +20,10 @@
 
 buildPythonPackage rec {
   pname = "basis-set-exchange";
-  version = "0.12-unstable-2026-08-07";
+  # PEP 440 rather than the usual `-unstable-YYYY-MM-DD`: this string is handed
+  # to setuptools-scm as SETUPTOOLS_SCM_PRETEND_VERSION below, and it rejects
+  # anything the packaging library cannot parse.
+  version = "0.12.dev20260807";
   pyproject = true;
 
   src = fetchFromGitHub {
