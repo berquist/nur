@@ -49,7 +49,51 @@
   # do are in cheminformatics-cclib below, for the reason spelled out there.
   cheminformatics = final: prev: {
     pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
-      (pself: _psuper: {
+      (pself: psuper: {
+        # A repair of a nixpkgs package, not one of ours, in the same spirit as
+        # aiormq and aio-pika in the aiida overlay below — and in the package
+        # set rather than in a `let` binding for the same reason: nothing here
+        # constructs rdkit, so its dependants can only pick the fix up through
+        # pself.
+        #
+        # nixpkgs builds rdkit with CMake and `pyproject = false`, so what lands
+        # in site-packages is a bare `rdkit/` tree with no `.dist-info` beside
+        # it.  The package imports perfectly; it is simply invisible to
+        # `importlib.metadata`, which is what pythonRuntimeDepsCheckHook uses to
+        # resolve a wheel's Requires-Dist.  So every dependant that declares
+        # rdkit in its own metadata fails the check with
+        #
+        #     Checking runtime dependencies for qmzyme-…-py3-none-any.whl
+        #       - rdkit not installed
+        #
+        # while rdkit sits in the closure, importable.  qmzyme is the one that
+        # bites today; aqme and digichem-core declare it too and are latent.
+        # ../pkgs/ccreg only escapes because upstream hides rdkit in
+        # `[tool.pixi.dependencies]`, where the wheel metadata never sees it.
+        #
+        # METADATA alone is enough, and is all this writes: the hook goes
+        # through `importlib.metadata.distribution()`, which needs a
+        # `<name>-<version>.dist-info` directory with a Name and a Version and
+        # reads nothing else.  A RECORD would have to list real hashes to be
+        # worth anything, and nothing here would read it.
+        #
+        # Note the cost: this rebuilds rdkit from source rather than
+        # substituting it, and rdkit is a large C++ build.  The cheap
+        # alternative is `pythonRemoveDeps = [ "rdkit" ]` on each dependant,
+        # which keeps the cached rdkit and drops the declaration instead — see
+        # ../pkgs/ccreg/default.nix for that shape.  Fixing rdkit once was
+        # judged the better trade because the failure is upstream's and every
+        # dependant would otherwise carry the same workaround.  Drop this when
+        # nixpkgs installs rdkit as a wheel.
+        rdkit = psuper.rdkit.overridePythonAttrs (old: {
+          postInstall = (old.postInstall or "") + ''
+            distInfo="$out/${pself.python.sitePackages}/rdkit-${old.version}.dist-info"
+            mkdir -p "$distInfo"
+            printf 'Metadata-Version: 2.1\nName: rdkit\nVersion: %s\n' \
+              "${old.version}" >"$distInfo/METADATA"
+          '';
+        });
+
         # Dependencies missing from nixpkgs.  Not re-exported at the top level
         # or from ../default.nix: they are implementation detail, and every
         # top-level attribute is another thing ci.nix builds.
@@ -313,22 +357,48 @@
           # and crest it *is* a top-level nixpkgs attribute, so the qchem
           # spelling is only a fallback for a set that has replaced it.
           #
-          # `enableMpi = false` is the load-bearing part.  nixpkgs builds
-          # octopus with MPI by default, and OpenMPI cannot initialise inside a
-          # nix build sandbox: there is no /sys, so hwloc aborts topology
-          # discovery, UCX fails scanning /sys/class/net, and octopus exits
-          # non-zero having printed nothing at all.  Every one of the 68 tests
-          # that runs it errored with "Failed to run `octopus`" and no output to
-          # say why.  postopus invokes the binary directly rather than through
-          # mpirun — see tests/utils/octopus_runner.py — so a serial build is
-          # what the fixtures actually want, and this affects nothing but the
-          # check phase.
+          # `enableMpi = false` is the first of two things this build needs.
+          # nixpkgs builds octopus with MPI by default, and OpenMPI cannot
+          # initialise inside a nix build sandbox: there is no /sys, so hwloc
+          # aborts topology discovery and UCX fails scanning /sys/class/net.
+          # postopus invokes the binary directly rather than through mpirun —
+          # see tests/utils/octopus_runner.py — so a serial build is what the
+          # fixtures actually want, and this affects nothing but the check phase.
+          #
+          # netcdffortran is the second, and turning MPI off is what uncovered
+          # it.  Every generating input in tests/data asks for
+          # `OutputFormat = netcdf + vtk + plane_z + xcrysden`, and the octopus
+          # nixpkgs builds answers that with
+          #
+          #     * Octopus was compiled without NetCDF support.
+          #     * It is not possible to write output in NetCDF format.
+          #
+          # then exits 1, so all 68 tests downstream of a calculation error with
+          # "Failed to run `octopus`".  nixpkgs puts the *C* library `netcdf` in
+          # octopus' buildInputs, but CMakeLists.txt asks for
+          # `find_package(netCDF-Fortran MODULE)`, whose find module resolves
+          # `netcdf-fortran` through pkg-config.  That is a different derivation
+          # — pkgs.netcdffortran — so it is never found, HAVE_NETCDF is never
+          # set, and there is no OCTOPUS_NetCDF flag to force the issue.  Adding
+          # it to buildInputs is the whole fix; pkg-config is already in
+          # nativeBuildInputs.  Drop this once nixpkgs carries it.
+          #
+          # Neither failure prints anything to the build log, which is what made
+          # both expensive to find: the inputs set `stdout = "gs_stdout.txt"` and
+          # `stderr = "gs_stderr.txt"`, so octopus' own diagnostics go to files
+          # in the run directory that pytest never reads.  To see them, run the
+          # binary by hand in a copy of tests/data/methane with inp_gs as `inp`.
           postopus = pself.callPackage ../pkgs/postopus {
             octopus =
               let
                 octopus' = final.octopus or final.qchem.octopus or null;
               in
-              if octopus' == null then null else octopus'.override { enableMpi = false; };
+              if octopus' == null then
+                null
+              else
+                (octopus'.override { enableMpi = false; }).overrideAttrs (old: {
+                  buildInputs = old.buildInputs ++ [ final.netcdffortran ];
+                });
           };
           aiida-testing = pself.callPackage ../pkgs/aiida-testing { };
 

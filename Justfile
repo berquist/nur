@@ -146,6 +146,33 @@ check-no-daemon:
 build pkg:
     nix-build -A {{ pkg }} --no-out-link
 
+# The flake counterpart, and not a stylistic alternative to `build` above: the
+# five cclib dependants are `meta.broken` on the NUR path and flake.nix's
+# `packages` replaces them with the cclibPkgs ones, so `just build harmonwig`
+# stops at "Package is marked as broken" and only this recipe can build them.
+# See the cclib split in AGENTS.md.
+#
+# -L for the same reason ci-build uses it: the whole builder output, so the run
+# can be redirected to a file and read back with `just demux-log`.
+
+# Build one package through the flake, e.g. `just build-flake harmonwig`.
+build-flake pkg:
+    nix build -L --no-link .#{{ pkg }}
+
+# `--keep-going` interleaves every concurrent build line by line, so a redirected
+# ci-build log is a dozen derivations shuffled together and no single failure
+# reads straight through.  This undoes that:
+#
+#   just ci-build 2>&1 | tee log_ci
+#   just demux-log -l log_ci        # which derivations spoke, and how much
+#   just demux-log -o postopus log_ci
+#
+# `-o '(nix)'` gets nix's own lines — the build plan and the failure summary.
+
+# Regroup a redirected `nix build -L` log so each derivation reads as one block.
+demux-log +args:
+    ./scripts/demux-build-log.sh {{ args }}
+
 # Builds qcportal against a channel's *default* interpreter rather than the
 # python313 the repo pins.
 #

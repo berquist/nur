@@ -1,0 +1,44 @@
+From: Eric Berquist <eric.berquist@gmail.com>
+Subject: [PATCH] python313Packages.aio-pika: fix version metadata
+
+aio-pika does not build: the 9.6.2 tag's pyproject.toml still declares
+9.6.0, so the wheel's METADATA disagrees with the derivation and
+pythonMetadataCheckPhase refuses it.
+
+    The 'aio-pika' derivation has version '9.6.2' but .dist-info/METADATA
+    specifies version '9.6.0'.
+
+Upstream stopped bumping the version file after 9.6.0: both the 9.6.1
+and 9.6.2 tags still carry `version = "9.6.0"`. The tags themselves are
+real and distinct, so the version here is right and only the metadata is
+wrong -- pyprojectVersionPatchHook rewrites it, as the error message
+itself recommends.
+
+This is the same slip as in aiormq, by the same upstream author, tagged
+on the same day.
+
+---
+diff --git a/pkgs/development/python-modules/aio-pika/default.nix b/pkgs/development/python-modules/aio-pika/default.nix
+index c795828..f9bd5c5 100644
+--- a/pkgs/development/python-modules/aio-pika/default.nix
++++ b/pkgs/development/python-modules/aio-pika/default.nix
+@@ -3,6 +3,7 @@
+   aiormq,
+   buildPythonPackage,
+   fetchFromGitHub,
++  pyprojectVersionPatchHook,
+   uv-build,
+   yarl,
+ }:
+@@ -24,7 +25,10 @@ buildPythonPackage rec {
+       --replace-fail "uv_build>=0.9.26,<0.10.0" uv_build
+   '';
+ 
+-  build-system = [ uv-build ];
++  build-system = [
++    pyprojectVersionPatchHook
++    uv-build
++  ];
+ 
+   dependencies = [
+     aiormq

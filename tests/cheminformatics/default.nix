@@ -152,6 +152,29 @@ lib.fix (self: {
     ) internalDependencies
   );
 
+  # The rdkit repair in ../../overlays/default.nix has to land in every package
+  # set a dependant is built from, and it fails silently if it does not: the
+  # unrepaired rdkit builds and imports perfectly, so nothing goes wrong until
+  # some dependant's pythonRuntimeDepsCheck says "rdkit not installed" — at
+  # build time, for a reason that points at the wrong package.
+  #
+  # Three sets rather than one, because the dependants disagree about where
+  # they look.  qmzyme finds rdkit through python313Packages; aqme and
+  # digichem-core are `final.python3.pkgs.callPackage`s, and on the flake path
+  # that is the set cclib's overlay has rebuilt — the same "which set am I in"
+  # trap the cclib tests below exist for.
+  #
+  # Asserting on postInstall rather than comparing derivations: rdkit differs
+  # between these sets anyway, because they do not all share an interpreter, so
+  # an inequality would pass whether the repair applied or not.
+  cheminformatics-rdkit-repair-applies = check "cheminformatics-rdkit-repair-applies" (
+    lib.all (set: lib.hasInfix ".dist-info" (set.rdkit.postInstall or "")) [
+      overlaidPkgs.python313Packages
+      overlaidPkgs.python3.pkgs
+      cclibPkgs.python3.pkgs
+    ]
+  );
+
   # ==========================================================================
   # The cclib split
   # ==========================================================================
