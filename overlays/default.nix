@@ -146,8 +146,49 @@
           # aiida-gaussian, which depends on pymatgen directly.  The
           # aiida-overlay-pymatgen-override-is-local eval test asserts it stays
           # invisible from outside.
-          pymatgen = pself.pymatgen.overridePythonAttrs (_: {
+          #
+          # Nine tests are deselected on top of that, none of them ours and none
+          # of them about the interpreter.  They are pymatgen 2025.10.7 against
+          # dependency versions newer than it was released for, in three
+          # groups:
+          #
+          #   pandas 3.0 removed DataFrame.swapaxes, which is what made
+          #   `np.array_split` return DataFrames rather than plain arrays.  The
+          #   LammpsData writers slice the result with `.iloc` immediately
+          #   afterwards.
+          #
+          #   The thermal-displacement eigenvectors come back complex, and
+          #   `np.degrees` refuses a complex argument.  Upstream assumes a real
+          #   result from the diagonalisation.
+          #
+          #   The Heisenberg mapper's least-squares fit does not converge here,
+          #   so `ex_params` stays None and both tests that read it fail.
+          #   nixpkgs already deselects `test_mean_field` on aarch64-linux for
+          #   this exact error; the fit is evidently sensitive to which BLAS it
+          #   finds, and x86_64 with our overlay is another such combination.
+          #
+          #   `pmg view` opens a viewer and takes the xdist worker down with it
+          #   when there is no display.  nixpkgs deselects the neighbouring
+          #   tests/cli/test_pmg_plot.py on darwin for the same reason.
+          #
+          # Node ids rather than bare names: `disabledTests` becomes a `-k`
+          # expression, and `test_get_str` and `test_write_file` are common
+          # enough in a suite this size to take unrelated tests with them.  An
+          # entry containing `::` is passed to pytest as `--deselect`, which is
+          # exact.
+          pymatgen = pself.pymatgen.overridePythonAttrs (old: {
             disabled = false;
+            disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
+              "tests/io/lammps/test_data.py::TestLammpsData::test_get_str"
+              "tests/io/lammps/test_data.py::TestLammpsData::test_write_file"
+              "tests/io/lammps/test_data.py::TestCombinedData::test_get_str"
+              "tests/io/lammps/test_data.py::TestCombinedData::test_as_lammpsdata"
+              "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_compute_directionality_quality_criterion"
+              "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_visualization_directionality_criterion"
+              "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_mean_field"
+              "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_get_igraph"
+              "tests/cli/test_pmg.py::test_pmg_view"
+            ];
           });
         in
         {
@@ -201,16 +242,42 @@
           });
 
           # monty is a third nixpkgs package that does not build, reached here
-          # through pymatgen.  Its MontyEncoder grew a pandas branch that the
-          # pandas in nixpkgs no longer matches, so two of its 202 tests fail
-          # with "Object of type DataFrame is not JSON serializable".
+          # through pymatgen, and its failure is a real bug rather than a test
+          # artefact.  MontyEncoder recognises pandas objects by walking the MRO
+          # and comparing `f"{cls.__module__}.{cls.__qualname__}"` against a
+          # literal — `_check_type` says as much in its docstring.  pandas 3.0
+          # decorates DataFrame and Series with `@set_module("pandas")`, so that
+          # string is now "pandas.DataFrame", not "pandas.core.frame.DataFrame",
+          # and the branch is simply never taken.
           #
-          # Only those two, and only the pandas path — which nothing in the
-          # AiiDA closure uses, since pymatgen reaches monty for its JSON and
-          # file helpers.  Skipping them is narrower than the alternative of
-          # pinning pandas for one leaf of the graph.
+          # An earlier revision of this file skipped monty's two `test_pandas`
+          # tests on the claim that nothing in the AiiDA closure uses the pandas
+          # path.  That was wrong: pymatgen's LammpsData.as_dict serialises
+          # DataFrames through MontyEncoder, and four of its tests failed with
+          # "Object of type DataFrame is not JSON serializable" as soon as monty
+          # built.  Skipping a test that is reporting a defect only moves the
+          # failure downstream.
+          #
+          # Both spellings are accepted rather than replacing one with the
+          # other, so the override stays correct against pandas 2 as well.  The
+          # `jsanitize` path needs nothing: it already matches on
+          # pandas.core.base.PandasObject, a base class that keeps its real
+          # module, and _check_type walks the whole MRO.  The one test asserting
+          # the old spelling directly is updated to the new one.
           monty = psuper.monty.overridePythonAttrs (old: {
-            disabledTests = (old.disabledTests or [ ]) ++ [ "test_pandas" ];
+            postPatch = (old.postPatch or "") + ''
+              substituteInPlace src/monty/json.py \
+                --replace-fail '_check_type(o, "pandas.core.frame.DataFrame")' \
+                               '_check_type(o, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
+                --replace-fail '_check_type(o, "pandas.core.series.Series")' \
+                               '_check_type(o, ("pandas.core.series.Series", "pandas.Series"))'
+
+              substituteInPlace tests/test_json.py \
+                --replace-fail 'assert _check_type(df, "pandas.core.frame.DataFrame")' \
+                               'assert _check_type(df, "pandas.DataFrame")' \
+                --replace-fail 'assert _check_type(series, "pandas.core.series.Series")' \
+                               'assert _check_type(series, "pandas.Series")'
+            '';
           });
 
           # Dependencies missing from nixpkgs.  Not re-exported at the top level
@@ -236,11 +303,27 @@
           cp2k-input-tools = pself.callPackage ../pkgs/cp2k-input-tools { };
           cp2k-output-tools = pself.callPackage ../pkgs/cp2k-output-tools { };
           # octopus is threaded in the same way xtb and crest are for aqme
-          # above: it is `qchem.octopus` on the NixOS-QChem set and absent from
-          # nixpkgs, and postopus runs it to generate its test fixtures.  Null
-          # here just means a smaller suite, not a broken package.
+          # above, and postopus runs it to generate its test fixtures.  Null
+          # here just means a smaller suite, not a broken package.  Unlike xtb
+          # and crest it *is* a top-level nixpkgs attribute, so the qchem
+          # spelling is only a fallback for a set that has replaced it.
+          #
+          # `enableMpi = false` is the load-bearing part.  nixpkgs builds
+          # octopus with MPI by default, and OpenMPI cannot initialise inside a
+          # nix build sandbox: there is no /sys, so hwloc aborts topology
+          # discovery, UCX fails scanning /sys/class/net, and octopus exits
+          # non-zero having printed nothing at all.  Every one of the 68 tests
+          # that runs it errored with "Failed to run `octopus`" and no output to
+          # say why.  postopus invokes the binary directly rather than through
+          # mpirun — see tests/utils/octopus_runner.py — so a serial build is
+          # what the fixtures actually want, and this affects nothing but the
+          # check phase.
           postopus = pself.callPackage ../pkgs/postopus {
-            octopus = final.octopus or final.qchem.octopus or null;
+            octopus =
+              let
+                octopus' = final.octopus or final.qchem.octopus or null;
+              in
+              if octopus' == null then null else octopus'.override { enableMpi = false; };
           };
           aiida-testing = pself.callPackage ../pkgs/aiida-testing { };
 

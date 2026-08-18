@@ -38,9 +38,18 @@ buildPythonPackage rec {
   };
 
   # See ../mda-xdrlib for why the versioningit fallback has to be rewritten.
+  #
+  # The `~=2.0` pin beside it has to go too.  nixpkgs carries versioningit 3.3.0,
+  # and a build-system requirement is checked before anything else runs, so the
+  # build stops at "Unmet dependencies ... wanted: ~=2.0, found: 3.3.0" — this is
+  # `[build-system] requires`, which pythonRelaxDeps does not reach; it rewrites
+  # the built distribution's runtime metadata.  Nothing here uses an API
+  # versioningit changed in 3.0: the only thing this project asks of it is the
+  # `default-version` fallback rewritten on the line above.
   postPatch = ''
     substituteInPlace pyproject.toml \
-      --replace-fail 'default-version = "0.0.0"' 'default-version = "${version}"'
+      --replace-fail 'default-version = "0.0.0"' 'default-version = "${version}"' \
+      --replace-fail '"versioningit~=2.0"' '"versioningit"'
   '';
 
   build-system = [

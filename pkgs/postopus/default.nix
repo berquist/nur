@@ -26,12 +26,13 @@
   # reads back — tests/utils/octopus_runner.py shells out to `octopus`.  It is
   # not a runtime dependency: postopus post-processes files that already exist.
   #
-  # Defaulted because no single spelling resolves everywhere.  Octopus comes
-  # from NixOS-QChem as `qchem.octopus`, and overlays/ is imported without
-  # flakes by default.nix, overlay.nix and ci.nix, so it cannot reach that
-  # input — the same constraint that makes cclib a flake-only dependency here.
-  # ../../overlays/default.nix picks whichever spelling the package set has and
-  # this falls back to running fewer tests.
+  # Defaulted because no single spelling resolves everywhere: nixpkgs has it at
+  # the top level, NixOS-QChem replaces it as `qchem.octopus`, and overlays/ is
+  # imported without flakes by default.nix, overlay.nix and ci.nix, so it cannot
+  # reach that input — the same constraint that makes cclib a flake-only
+  # dependency here.  ../../overlays/default.nix picks whichever spelling the
+  # package set has, and builds it without MPI so it can run in a sandbox; this
+  # falls back to running fewer tests when there is none.
   octopus ? null,
 }:
 

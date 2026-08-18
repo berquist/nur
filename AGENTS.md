@@ -92,8 +92,13 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does the AiiDA eval suite need a second, broken-allowing package set? | `tests/aiida/default.nix` (`brokenPkgs`) |
 | Why do eight packages come from a git tag rather than PyPI? | `pkgs/kiwipy/default.nix` (the `src` comment) |
 | Why do the two cp2k-\*-tools packages rewrite their build backend? | `pkgs/cp2k-output-tools/default.nix` (`postPatch`) |
-| Why does `mrcfile` patch five `.dtype` assignments instead of pinning NumPy? | `pkgs/mrcfile/default.nix` (`postPatch`) |
-| Why is `octopus` a defaulted argument to `postopus`? | `pkgs/postopus/default.nix` (the `octopus` argument) |
+| Why does `mrcfile` patch eight `.dtype` assignments instead of pinning NumPy? | `pkgs/mrcfile/default.nix` (`postPatch`) |
+| Why is `octopus` a defaulted argument to `postopus`, and why `enableMpi = false`? | `pkgs/postopus/default.nix` (the `octopus` argument), `overlays/default.nix` (the `postopus` callPackage) |
+| Why does `cp2k-input-tools` declare no `lsp` extra, and drop one console script? | `pkgs/cp2k-input-tools/default.nix` (`postPatch`) |
+| Why is `monty` patched rather than having its pandas tests skipped? | `overlays/default.nix` (the `monty` binding) |
+| Why are nine `pymatgen` tests deselected by node id rather than by name? | `overlays/default.nix` (the `pymatgen` binding) |
+| Why does `pgtest` need `enabledTestPaths` when its tests are right there? | `pkgs/pgtest/default.nix` (`enabledTestPaths`) |
+| Why does `disk-objectstore` want `rsync` and `openssh` as check inputs? | `pkgs/disk-objectstore/default.nix` (`nativeCheckInputs`) |
 
 ### The sdist-has-no-tests trap
 
@@ -105,7 +110,16 @@ looking tested when nothing ran. It turns loud only by accident — `pgtest` exi
 collection, and `kiwipy` aborted because a `disabledTestPaths` glob matched nothing.
 
 When adding a `buildPythonPackage` here, check that the suite actually ran before believing it.
-`disabledTestPaths` is a useful canary precisely because a glob matching nothing is fatal.
+`disabledTestPaths` is a useful canary precisely because a glob matching nothing is fatal. So is
+`enabledTestPaths`, which the hook expands as a glob and aborts on — `pgtest` needs it, because
+its one test module is named `test.py` and pytest's default `python_files` matches neither
+`test_*.py` nor `*_test.py` against that.
+
+**Expect the fix to reveal the next layer, not to finish the job.** Every package whose suite was
+recovered this way then failed on something the missing tests had been hiding, and each of those
+failures hid the one behind it: `mrcfile` building unblocked `mdanalysis`, which unblocked
+`qmzyme`, which then failed on its own `versioningit~=2.0` build pin. Budget for several rounds,
+and run the build with `--keep-going` so one round reports every leaf rather than the first.
 
 ## Architecture
 
