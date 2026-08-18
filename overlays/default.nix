@@ -151,24 +151,66 @@
           });
         in
         {
-          # Not a package of ours, and not optional: nixpkgs' aiormq fetches
-          # upstream's 9.6.4 tag, whose pyproject.toml still says 6.9.2 — an
-          # upstream tagging slip — and pythonMetadataCheckPhase turns that
-          # mismatch into a hard build failure.  That takes down aio-pika, and
-          # with it kiwipy[rmq], plumpy, aiida-core and every AiiDA VM test.
-          # pyprojectVersionPatchHook rewrites the version to match the
-          # derivation, which is what nixpkgs' own error message recommends.
+          # Two nixpkgs packages, neither of them ours, that the AiiDA closure
+          # cannot be built without.  Both are `mosquito` projects and both
+          # carry the same upstream slip: the release was tagged without
+          # bumping the version in pyproject.toml, so the built wheel's METADATA
+          # disagrees with what nixpkgs declares and pythonMetadataCheckPhase
+          # refuses it.  pyprojectVersionPatchHook rewrites the project file to
+          # match `version`, which is what nixpkgs' own error message
+          # recommends.
           #
-          # Unlike the pymatgen override below this one has to live in the
-          # package set rather than in a `let`: the broken derivation is two
-          # levels down and nothing here constructs it, so aio-pika can only
-          # pick up the fix through pself.  Overriding it for a consumer of
-          # overlays.aiida is a repair rather than a surprise — without it the
-          # attribute does not build at all.
+          # Both overrides have to live in the package set rather than in a
+          # `let` binding, unlike pymatgen above: the broken derivations are
+          # below us in the graph and nothing here constructs them, so aio-pika
+          # and kiwipy can only pick the fixes up through pself.  Overriding
+          # them for a consumer of overlays.aiida is a repair rather than a
+          # surprise — without it neither attribute builds at all.
           #
-          # Remove once nixpkgs carries the fix.
+          # Remove both once nixpkgs carries the fixes; for aiormq see
+          # ../.scratch/nixpkgs-aiormq-fix.patch.
+
+          # aiormq is the worse of the two, because it has never released a
+          # 9.6.4 at all: upstream pushed 6.9.4 and 9.6.4 on the same day,
+          # pointing at the same commit, and nixpkgs picked up the
+          # transposed-digit duplicate.  Two things then go wrong, and both have
+          # to be fixed together — fixing either alone still fails:
+          #
+          #   1. That commit's pyproject.toml still says 6.9.2, so
+          #      pythonMetadataCheckPhase rejects the mismatch outright.
+          #      pyprojectVersionPatchHook rewrites it to `version`.
+          #   2. aio-pika requires `aiormq<7,>=6.8`, which 9.6.4 does not
+          #      satisfy.  So `version` has to become 6.9.4 as well — patching
+          #      the metadata to say 9.6.4 merely moves the failure downstream.
+          #
+          # src is deliberately left alone.  It still fetches the 9.6.4 tag,
+          # which is the same tree as 6.9.4 — identical NAR hash — so there is
+          # nothing to gain from re-pointing it and a hash to get wrong.
           aiormq = psuper.aiormq.overridePythonAttrs (old: {
+            version = "6.9.4";
             build-system = (old.build-system or [ ]) ++ [ pself.pyprojectVersionPatchHook ];
+          });
+
+          # aio-pika is the ordinary case of the same slip: nixpkgs declares
+          # 9.6.2 and fetches that tag, but the tree there still says 9.6.0.
+          # No version change, unlike aiormq above — 9.6.2 is a real release in
+          # the right series, and kiwipy's `aio-pika~=9.4` accepts it — so the
+          # hook alone is the whole fix.
+          aio-pika = psuper.aio-pika.overridePythonAttrs (old: {
+            build-system = (old.build-system or [ ]) ++ [ pself.pyprojectVersionPatchHook ];
+          });
+
+          # monty is a third nixpkgs package that does not build, reached here
+          # through pymatgen.  Its MontyEncoder grew a pandas branch that the
+          # pandas in nixpkgs no longer matches, so two of its 202 tests fail
+          # with "Object of type DataFrame is not JSON serializable".
+          #
+          # Only those two, and only the pandas path — which nothing in the
+          # AiiDA closure uses, since pymatgen reaches monty for its JSON and
+          # file helpers.  Skipping them is narrower than the alternative of
+          # pinning pandas for one leaf of the graph.
+          monty = psuper.monty.overridePythonAttrs (old: {
+            disabledTests = (old.disabledTests or [ ]) ++ [ "test_pandas" ];
           });
 
           # Dependencies missing from nixpkgs.  Not re-exported at the top level
@@ -191,8 +233,15 @@
           qe-tools = pself.callPackage ../pkgs/qe-tools { };
           aiida-pseudo = pself.callPackage ../pkgs/aiida-pseudo { };
           aiida-gaussian-datatypes = pself.callPackage ../pkgs/aiida-gaussian-datatypes { };
+          cp2k-input-tools = pself.callPackage ../pkgs/cp2k-input-tools { };
           cp2k-output-tools = pself.callPackage ../pkgs/cp2k-output-tools { };
-          postopus = pself.callPackage ../pkgs/postopus { };
+          # octopus is threaded in the same way xtb and crest are for aqme
+          # above: it is `qchem.octopus` on the NixOS-QChem set and absent from
+          # nixpkgs, and postopus runs it to generate its test fixtures.  Null
+          # here just means a smaller suite, not a broken package.
+          postopus = pself.callPackage ../pkgs/postopus {
+            octopus = final.octopus or final.qchem.octopus or null;
+          };
           aiida-testing = pself.callPackage ../pkgs/aiida-testing { };
 
           # See the `pymatgen` binding above for why this one argument is

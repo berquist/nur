@@ -1,7 +1,7 @@
 {
   lib,
   buildPythonPackage,
-  fetchPypi,
+  fetchFromGitHub,
 
   # build-system
   setuptools,
@@ -12,6 +12,8 @@
   # tests
   pytestCheckHook,
   postgresql,
+  psycopg2,
+  sqlalchemy,
 }:
 
 buildPythonPackage rec {
@@ -19,9 +21,13 @@ buildPythonPackage rec {
   version = "1.3.2";
   pyproject = true;
 
-  src = fetchPypi {
-    inherit pname version;
-    hash = "sha256-7bte1fXEaub2pY7v/Pny7xRnv+5Ot1PwvKSrLLMC7pE=";
+  # The sdist has no `test/`, so pytestCheckPhase collected zero items and
+  # exited 5.  Upstream's tag has no `v` prefix.
+  src = fetchFromGitHub {
+    owner = "jamesnunn";
+    repo = "pgtest";
+    tag = version;
+    hash = "sha256-iqrx/U3tjmggQS2aWORjHscqSn0e+8ognCZnTTNZ4vI=";
   };
 
   build-system = [ setuptools ];
@@ -37,9 +43,15 @@ buildPythonPackage rec {
   # nativeCheckInputs.  Without it pgtest fails with "Could not find PostgreSQL
   # executables", because the paths it searches (/usr/lib/postgresql/*/bin and
   # friends) exist on no NixOS machine.
+  #
+  # The suite itself connects three different ways — psycopg2, pg8000 and
+  # SQLAlchemy — because that is the compatibility pgtest promises, so all
+  # three are check inputs even though only pg8000 is a runtime dependency.
   nativeCheckInputs = [
     pytestCheckHook
     postgresql
+    psycopg2
+    sqlalchemy
   ];
 
   pythonImportsCheck = [ "pgtest" ];

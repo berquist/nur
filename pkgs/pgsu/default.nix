@@ -1,10 +1,10 @@
 {
   lib,
   buildPythonPackage,
-  fetchPypi,
+  fetchFromGitHub,
 
   # build-system
-  setuptools,
+  flit-core,
 
   # dependencies
   click,
@@ -12,6 +12,7 @@
 
   # tests
   pytestCheckHook,
+  pgtest,
   postgresql,
   postgresqlTestHook,
 }:
@@ -21,12 +22,18 @@ buildPythonPackage rec {
   version = "0.3.0";
   pyproject = true;
 
-  src = fetchPypi {
-    inherit pname version;
-    hash = "sha256-Udu48ict6swo9UavRCoUEesmCx2lPhHU+T6pDysaz1A=";
+  # As with ../kiwipy, the sdist carries no `tests/`.  It also carries no
+  # setup.py, which is the more urgent half: the build failed outright with
+  # "Cannot import 'flit_core.buildapi'" because the build-system below said
+  # setuptools while upstream's pyproject.toml has always said flit_core.
+  src = fetchFromGitHub {
+    owner = "aiidateam";
+    repo = "pgsu";
+    tag = "v${version}";
+    hash = "sha256-BdJVJPc7y61hGXDQe9ewXlGsYl+pa15xepqxpd+4sac=";
   };
 
-  build-system = [ setuptools ];
+  build-system = [ flit-core ];
 
   # Upstream asks for `psycopg[binary]`, which on PyPI means a prebuilt wheel
   # bundling libpq.  The Nix equivalent is the `c` extra, which compiles the
@@ -42,9 +49,13 @@ buildPythonPackage rec {
   # over a Unix socket in $NIX_BUILD_TOP and exports PGHOST for it.
   nativeCheckInputs = [
     pytestCheckHook
+    pgtest
     postgresql
     postgresqlTestHook
   ];
+
+  # Upstream's addopts carry `--cov=pgsu`, and pytest-cov is not here.
+  pytestFlags = [ "--override-ini=addopts=" ];
 
   # The hook's default PGUSER is an unprivileged `test_user`; pgsu needs the
   # superuser role that initdb created.

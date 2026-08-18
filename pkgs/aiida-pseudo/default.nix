@@ -1,7 +1,7 @@
 {
   lib,
   buildPythonPackage,
-  fetchPypi,
+  fetchFromGitHub,
 
   # build-system
   flit-core,
@@ -14,6 +14,7 @@
 
   # tests
   pytestCheckHook,
+  numpy,
   pgtest,
   postgresql,
 }:
@@ -25,10 +26,15 @@ buildPythonPackage rec {
 
   # The lower bound aiida-quantumespresso pins (`>=1.7.2,<2`); aiida-cp2k asks
   # for `~=1.2`, which this satisfies.
-  src = fetchPypi {
-    pname = "aiida_pseudo";
-    inherit version;
-    hash = "sha256-nmzFv1mjaGM77Sx9GehPiaKfwdcqgDG5d0Bix8AY+bs=";
+  #
+  # From git rather than PyPI so that `tests/` is present at all — the sdist
+  # excludes it, as with ../kiwipy and ../plumpy.  Here that only makes the
+  # situation legible rather than fixing it; see the checkPhase note below.
+  src = fetchFromGitHub {
+    owner = "aiidateam";
+    repo = "aiida-pseudo";
+    tag = "v${version}";
+    hash = "sha256-DkEQ3sVMaKjES2U6oha6FdjgPGFLM80tyPIgEH7hR1U=";
   };
 
   build-system = [ flit-core ];
@@ -45,8 +51,12 @@ buildPythonPackage rec {
     requests
   ];
 
+  # tests/conftest.py sets `pytest_plugins = 'aiida.tools.pytest_fixtures'`, so
+  # the suite needs a working AiiDA profile — hence pgtest and postgresql, as
+  # in ../aiida-core.  numpy is imported directly by the family tests.
   nativeCheckInputs = [
     pytestCheckHook
+    numpy
     pgtest
     postgresql
   ];

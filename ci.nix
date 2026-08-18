@@ -15,6 +15,12 @@
 
 with builtins;
 let
+  # Keep in sync with the same predicate in ./overlay.nix.
+  #
+  # python313Packages is the whole 3.13 set, exposed so that nix-update can
+  # reach the dependencies ./default.nix does not re-export.  It carries
+  # dontRecurseIntoAttrs, so flattenPkgs below would skip it anyway; naming it
+  # here says so on purpose rather than by accident.
   isReserved =
     n:
     n == "lib"
@@ -22,7 +28,8 @@ let
     || n == "nixosModules"
     || n == "homeModules"
     || n == "darwinModules"
-    || n == "flakeModules";
+    || n == "flakeModules"
+    || n == "python313Packages";
   isDerivation = p: isAttrs p && p ? type && p.type == "derivation";
   isBuildable =
     p:

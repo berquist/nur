@@ -90,6 +90,22 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why do three packages rewrite a `default-version` in `postPatch`? | `pkgs/mda-xdrlib/default.nix` (`postPatch`) |
 | Why does MDAnalysis run no tests, and why is that not `doCheck = false`? | `pkgs/mdanalysis/default.nix` (the note above `pythonImportsCheck`) |
 | Why does the AiiDA eval suite need a second, broken-allowing package set? | `tests/aiida/default.nix` (`brokenPkgs`) |
+| Why do eight packages come from a git tag rather than PyPI? | `pkgs/kiwipy/default.nix` (the `src` comment) |
+| Why do the two cp2k-\*-tools packages rewrite their build backend? | `pkgs/cp2k-output-tools/default.nix` (`postPatch`) |
+| Why does `mrcfile` patch five `.dtype` assignments instead of pinning NumPy? | `pkgs/mrcfile/default.nix` (`postPatch`) |
+| Why is `octopus` a defaulted argument to `postopus`? | `pkgs/postopus/default.nix` (the `octopus` argument) |
+
+### The sdist-has-no-tests trap
+
+Eight packages here take `src` from `fetchFromGitHub` purely because their sdist ships no test
+directory — flit's `[tool.flit.sdist] exclude` naming `tests/` is the usual cause, and poetry
+projects that publish wheels only are the other. The failure is normally **silent**:
+`pytestCheckPhase` collects zero items and the build goes green, so a package can sit for months
+looking tested when nothing ran. It turns loud only by accident — `pgtest` exited 5 on an empty
+collection, and `kiwipy` aborted because a `disabledTestPaths` glob matched nothing.
+
+When adding a `buildPythonPackage` here, check that the suite actually ran before believing it.
+`disabledTestPaths` is a useful canary precisely because a glob matching nothing is fatal.
 
 ## Architecture
 
@@ -109,9 +125,18 @@ overlays itself, so `legacyPackages` must use it as-is. The separate `pkgs'` in 
 overlaid set, and is what the eval and VM tests need.
 
 **Reserved keys** (`lib`, `overlays`, `nixosModules`, `homeModules`, `darwinModules`,
-`flakeModules`) are attrs in `default.nix` that must not be lifted into a nixpkgs overlay. The
-`isReserved` predicate is duplicated in both `overlay.nix` and `ci.nix` — adding a new reserved
-key means editing both.
+`flakeModules`, `python313Packages`) are attrs in `default.nix` that must not be lifted into a
+nixpkgs overlay. The `isReserved` predicate is duplicated in both `overlay.nix` and `ci.nix` —
+adding a new reserved key means editing both.
+
+`python313Packages` is the one that is ours rather than the NUR template's, and the one where
+getting it wrong does real damage: it is the whole overlaid 3.13 set, exposed so that the
+twenty-odd dependencies this repo carries but does not re-export have an attribute path —
+`nix-update --flake python313Packages.mdanalysis`. Leaking it into the overlay would replace a
+consumer's `python313Packages` with the one `default.nix` builds from its own `pkgs'`. It also
+carries `dontRecurseIntoAttrs`, which is what keeps `nix-env -f . -qa '*'` and `ci.nix`'s
+`flattenPkgs` from descending into ten thousand nixpkgs packages; both honour
+`recurseForDerivations`, and neither would otherwise stop.
 
 ### Adding a Python package takes three edits
 

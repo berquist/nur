@@ -1,7 +1,7 @@
 {
   lib,
   buildPythonPackage,
-  fetchPypi,
+  fetchFromGitHub,
 
   # build-system
   flit-core,
@@ -18,8 +18,6 @@
 
   # tests
   pytestCheckHook,
-  pytest-asyncio,
-  pytest-notebook,
 }:
 
 buildPythonPackage rec {
@@ -27,9 +25,17 @@ buildPythonPackage rec {
   version = "0.9.0";
   pyproject = true;
 
-  src = fetchPypi {
-    inherit pname version;
-    hash = "sha256-PcWiy+S/cSfaLIpsIEdt2tMISbMvoStJXGIgWcYz208=";
+  # fetchFromGitHub rather than fetchPypi because upstream's
+  # `[tool.flit.sdist]` exclude lists `test/` outright, so the sdist carries no
+  # suite at all.  That is normally silent — pytestCheckPhase just collects
+  # nothing — but here `disabledTestPaths` turned it into a hard error,
+  # "Disabled tests path glob "test/rmq" does not match any paths".  Same as
+  # ../qe-tools, ../disk-objectstore and ../archive-path.
+  src = fetchFromGitHub {
+    owner = "aiidateam";
+    repo = "kiwipy";
+    tag = "v${version}";
+    hash = "sha256-CNe3Vec7vSzKyzM1zN1VjI9etsUlArs0AEmfHpvyNpU=";
   };
 
   build-system = [ flit-core ];
@@ -51,12 +57,16 @@ buildPythonPackage rec {
     ];
   };
 
-  # aiida-core depends on `kiwipy[rmq]`, so the extra has to be installed
-  # wherever kiwipy is, not merely declared.
+  # The rmq extra is here because pythonImportsCheck imports `kiwipy.rmq`,
+  # which needs aio_pika and pamqp present at check time.
+  #
+  # Upstream's `tests` extra also lists pytest-asyncio, pytest-notebook,
+  # pytest-benchmark, pika, msgpack and ipykernel.  Every one of those belongs
+  # to `test/rmq`, which is disabled below — the suite that does run here is
+  # test/test_local.py and test/utils.py, and between them they import nothing
+  # but pytest and kiwipy itself.
   nativeCheckInputs = [
     pytestCheckHook
-    pytest-asyncio
-    pytest-notebook
   ]
   ++ optional-dependencies.rmq;
 

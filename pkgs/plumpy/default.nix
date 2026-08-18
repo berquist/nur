@@ -1,7 +1,7 @@
 {
   lib,
   buildPythonPackage,
-  fetchPypi,
+  fetchFromGitHub,
 
   # build-system
   flit-core,
@@ -15,9 +15,7 @@
   # tests
   pytestCheckHook,
   pytest-asyncio,
-  pytest-cov,
-  pytest-notebook,
-  ipykernel,
+  shortuuid,
 }:
 
 buildPythonPackage rec {
@@ -25,9 +23,12 @@ buildPythonPackage rec {
   version = "0.26.0";
   pyproject = true;
 
-  src = fetchPypi {
-    inherit pname version;
-    hash = "sha256-XQu0Q8OYP0MpW+UwauyX0J6ABaJ9HWRd6s8I2oSvtuE=";
+  # `[tool.flit.sdist]` excludes `tests/`, as in ../kiwipy.
+  src = fetchFromGitHub {
+    owner = "aiidateam";
+    repo = "plumpy";
+    tag = "v${version}";
+    hash = "sha256-dxd0gDe0pvte84U/gfSrp40fTvymzhPqNh8a2dsYpg4=";
   };
 
   build-system = [ flit-core ];
@@ -40,18 +41,26 @@ buildPythonPackage rec {
   ]
   ++ kiwipy.optional-dependencies.rmq;
 
+  # Upstream's `tests` extra also lists pytest-cov, which only the coverage
+  # addopts below want.  pytest-notebook and ipykernel were never in it at all.
   nativeCheckInputs = [
     pytestCheckHook
     pytest-asyncio
-    pytest-cov
-    pytest-notebook
-    ipykernel
+    shortuuid
   ];
+
+  # `--cov-report xml --cov-append` without pytest-cov is an "unrecognized
+  # arguments" abort, the same one ../disk-objectstore hit.
+  pytestFlags = [ "--override-ini=addopts=" ];
 
   # The RabbitMQ-backed communicator tests need a live broker on localhost.
   # Everything else — the process state machine, which is what aiida-core
   # actually depends on — runs in-process and is exercised here.
-  disabledTestPaths = [ "test/rmq" ];
+  #
+  # Note `tests/`, not `test/`: plumpy names the directory differently from
+  # ../kiwipy, and a glob that matches nothing aborts the phase outright rather
+  # than being ignored.
+  disabledTestPaths = [ "tests/rmq" ];
 
   pythonImportsCheck = [
     "plumpy"

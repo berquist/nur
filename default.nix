@@ -35,6 +35,30 @@ in
   nixosModules = import ./nixos-modules;
   inherit overlays;
 
+  # The overlaid 3.13 package set, exposed so that the twenty-odd dependencies
+  # this repo carries but does not re-export at the top level — mdanalysis,
+  # griddataformats, lwreg, kiwipy, plumpy and the rest — have an attribute path
+  # something can point at:
+  #
+  #   nix run nixpkgs#nix-update -- --flake python313Packages.mdanalysis
+  #
+  # Without it those packages are reachable only from inside a derivation, and
+  # nothing can be automated against them.
+  #
+  # **Reserved, and it must stay that way.**  Lifting a `python313Packages` key
+  # into a nixpkgs overlay would replace the consumer's own python313Packages
+  # with this one — computed from *our* pkgs', with our overlays already baked
+  # in.  The isReserved predicate is spelled out in both ./overlay.nix and
+  # ./ci.nix; adding a reserved key means editing both.
+  #
+  # dontRecurseIntoAttrs is the other half.  This is the *whole* 3.13 set, some
+  # ten thousand packages, and both `nix-env -f . -qa '*'` (what `just ci-eval`
+  # runs) and ci.nix's flattenPkgs descend into an attrset only when it carries
+  # recurseForDerivations.  Clearing it keeps a named lookup working while
+  # keeping every traversal out — otherwise CI would try to build all of
+  # nixpkgs' Python packages, and the eval pass would force the broken ones.
+  python313Packages = pkgs'.lib.dontRecurseIntoAttrs py;
+
   # Python *applications*: reached through the overlay rather than
   # callPackage'd here, so that pkgs.dotdrop and this attribute are the same
   # derivation.  Built against the default python3, not the 3.13 pin below.
