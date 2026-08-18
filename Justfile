@@ -64,7 +64,7 @@ ci-eval:
 
 # Build everything ci.nix reports as buildable and cacheable.
 ci-build:
-    nix build -L --no-link -f ci.nix cacheOutputs
+    nix build -L --no-link --keep-going -f ci.nix cacheOutputs
 
 # Full CI sequence against one channel, e.g. `just ci nixos-26.05`.
 ci channel=default_channel:
