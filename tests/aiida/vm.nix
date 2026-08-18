@@ -389,7 +389,138 @@ in
   };
 
   # ==========================================================================
-  # Test 4: the same deployment on RabbitMQ instead of ZeroMQ.  This is the
+  # Test 4: aiida-core's own SSH transport suite, against a real sshd.
+  #
+  # Unlike every other test in this file, this one is not about the NixOS
+  # module.  It exists because these tests cannot run where the rest of
+  # aiida-core's suite does — ../../pkgs/aiida-core/default.nix keeps
+  # tests/transports/test_all_plugins.py in disabledTestPaths, and this is
+  # where it actually runs.
+  #
+  # The obstacle is not the sshd itself but the *account*.  Nix's build sandbox
+  # writes an /etc/passwd giving every user `/noshell` as their login shell,
+  # and it is a read-only bind mount that no derivation can amend.  sshd
+  # resolves the target user's shell through getpwnam and execs it, and AiiDA's
+  # transport runs shell commands rather than only SFTP, so a correctly
+  # configured sshd in a check phase would accept the connection and then fail
+  # every command.  A booted VM has real accounts, which is the whole fix.
+  #
+  # The client binaries are a different problem and are solved in the package:
+  # 78 of the failures here were a bare `FileNotFoundError: 'ssh'` with no
+  # connection attempted, so openssh is a nativeCheckInput there.  What is left
+  # for this test is the part that genuinely needs something listening.
+  # ==========================================================================
+  transports-ssh =
+    let
+      # tests/conftest.py registers `sphinx.testing.fixtures` as a root pytest
+      # plugin and pulls in aiida.tools.pytest_fixtures, so the interpreter
+      # running the suite needs the same set ../../pkgs/aiida-core/default.nix
+      # lists in nativeCheckInputs — not merely aiida-core.
+      pythonEnv = pkgs.python313.withPackages (ps: [
+        ps.aiida-core
+        ps.pytest
+        ps.pytest-asyncio
+        ps.pytest-timeout
+        ps.pytest-regressions
+        ps.pytest-rerunfailures
+        ps.pytest-xdist
+        ps.psutil
+        ps.sphinx
+      ]);
+
+      # The suite is not installed with the package — buildPythonPackage keeps
+      # tests out of $out — so it comes from the same src the derivation built
+      # from.  Taking it from the package rather than re-fetching is what keeps
+      # the two from drifting to different revisions.
+      testSrc = pkgs.python313Packages.aiida-core.src;
+
+      # Upstream's addopts wants pytest-cov and pytest-instafail and writes
+      # coverage outside the build; cleared for the same reason the package
+      # clears it.
+      pytest = "${pythonEnv}/bin/pytest --override-ini=addopts= -p no:cacheprovider";
+    in
+    pkgs.testers.nixosTest {
+      name = "aiida-transports-ssh";
+
+      nodes.machine = {
+        imports = [ minimalVM ];
+
+        services.openssh = {
+          enable = true;
+          settings = {
+            # The suite authenticates with a key it generates below.  Password
+            # auth off keeps a misconfigured key from silently passing by
+            # falling back to a prompt.
+            PasswordAuthentication = false;
+            PermitRootLogin = "no";
+          };
+        };
+
+        users.users.tester = {
+          isNormalUser = true;
+          home = "/home/tester";
+        };
+
+        environment.systemPackages = [
+          pythonEnv
+          pkgs.openssh
+        ];
+      };
+
+      testScript = ''
+        machine.start()
+        machine.wait_for_unit("multi-user.target")
+        machine.wait_for_unit("sshd.service")
+        machine.wait_for_open_port(22)
+
+        # The keypair is generated in the VM rather than committed here: the
+        # tests connect as `tester` to localhost, so the account has to trust
+        # itself, and a checked-in private key would be a private key in a
+        # public repository for no gain.
+        machine.succeed("sudo -u tester mkdir -p /home/tester/.ssh")
+        # Single-quoted on the Python side so the empty passphrase can be
+        # written with double quotes: a pair of single quotes anywhere in here,
+        # in code or in a comment, would close this Nix indented string.
+        machine.succeed(
+            'sudo -u tester ssh-keygen -t ed25519 -N "" -f /home/tester/.ssh/id_ed25519'
+        )
+        machine.succeed(
+            "sudo -u tester cp /home/tester/.ssh/id_ed25519.pub"
+            " /home/tester/.ssh/authorized_keys"
+        )
+        machine.succeed("sudo -u tester chmod 600 /home/tester/.ssh/authorized_keys")
+
+        # Pre-seed known_hosts.  paramiko is told AutoAddPolicy by the fixture,
+        # but the `core.ssh_async` openssh backend shells out to `ssh`, which
+        # would sit at an interactive host-key prompt instead, and the asyncssh
+        # backend validates against known_hosts by default.
+        machine.succeed(
+            "sudo -u tester sh -c 'ssh-keyscan -H localhost"
+            " >> /home/tester/.ssh/known_hosts'"
+        )
+        machine.succeed("sudo -u tester chmod 600 /home/tester/.ssh/known_hosts")
+
+        # Prove the account can reach itself before blaming AiiDA for anything.
+        machine.succeed(
+            "sudo -u tester ssh -o BatchMode=yes localhost true"
+        )
+
+        machine.succeed("cp -r ${testSrc} /home/tester/aiida-core")
+        machine.succeed("chown -R tester:users /home/tester/aiida-core")
+
+        # -p no:randomly is not needed, but xdist is: the suite is slow enough
+        # serially that the default test driver timeout becomes a factor.
+        output = machine.succeed(
+            "cd /home/tester/aiida-core && sudo -u tester env HOME=/home/tester"
+            " ${pytest} -n 4 tests/transports/"
+            " 2>&1 | tail -40"
+        )
+        print(output)
+      '';
+    };
+
+  # ==========================================================================
+  # Test 5: the same deployment on RabbitMQ instead of ZeroMQ.  This is the
   # only coverage of broker.backend = "core.rabbitmq", broker.createLocally,
   # and the `verdi profile configure-broker` step in aiida-init that goes with
   # them.

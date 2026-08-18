@@ -402,6 +402,12 @@
           };
           aiida-testing = pself.callPackage ../pkgs/aiida-testing { };
 
+          # Test-only, and only aiida-core's: the archive fixtures its
+          # migration suite reads.  Like the other dependencies here it stops
+          # at this step — no top-level alias, nothing in ../default.nix — so
+          # ci.nix does not build it in its own right.
+          aiida-export-migration-tests = pself.callPackage ../pkgs/aiida-export-migration-tests { };
+
           # See the `pymatgen` binding above for why this one argument is
           # threaded in by hand rather than resolved through pself.
           aiida-core = pself.callPackage ../pkgs/aiida-core { inherit pymatgen; };

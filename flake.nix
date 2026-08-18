@@ -395,6 +395,11 @@
           #   nix build .#checks.x86_64-linux.vm-aiida-daemon-rabbitmq
           #   nix build .#checks.x86_64-linux.vm-aiida-plugin-cp2k
           #
+          # And aiida-core's own SSH transport suite, which needs a real sshd
+          # and a real login shell, so it cannot run in the package's check
+          # phase — see the comment on the test:
+          #   nix build .#checks.x86_64-linux.vm-aiida-transports-ssh
+          #
           # VM integration tests (require KVM and real packages):
           #   nix build .#checks.x86_64-linux.vm-server-local-db
           #   nix build .#checks.x86_64-linux.vm-server-open-firewall
@@ -441,6 +446,7 @@
             vm-aiida-daemon-local-db = aiidaVmTests.daemon-local-db;
             vm-aiida-workchain-arithmetic = aiidaVmTests.workchain-arithmetic;
             vm-aiida-daemon-rabbitmq = aiidaVmTests.daemon-rabbitmq;
+            vm-aiida-transports-ssh = aiidaVmTests.transports-ssh;
           }
           // lib.optionalAttrs (nwchem != null) {
             vm-compute-nwchem-singlepoint = vmTests.compute-nwchem-singlepoint;
