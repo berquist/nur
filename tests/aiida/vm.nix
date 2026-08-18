@@ -426,6 +426,11 @@ in
         ps.pytest-xdist
         ps.psutil
         ps.sphinx
+
+        # tests/engine/test_memory_leaks.py measures live objects through
+        # pympler.muppy; without it the module fails to import rather than
+        # skipping, which would take the whole file down.
+        ps.pympler
       ]);
 
       # The suite is not installed with the package — buildPythonPackage keeps
@@ -437,7 +442,13 @@ in
       # Upstream's addopts wants pytest-cov and pytest-instafail and writes
       # coverage outside the build; cleared for the same reason the package
       # clears it.
-      pytest = "${pythonEnv}/bin/pytest --override-ini=addopts= -p no:cacheprovider";
+      # tests/conftest.py defaults to the `rmq` broker, and the four non-transport
+      # files added below launch processes, so they need one that exists.  This
+      # VM runs no RabbitMQ, so it takes the same in-process ZeroMQ broker the
+      # package's check phase uses.  Storage stays on conftest's sqlite default:
+      # unlike the build there is no pgtest cluster here, and none of these
+      # files is about the storage backend.
+      pytest = "${pythonEnv}/bin/pytest --override-ini=addopts= -p no:cacheprovider --broker-backend zmq";
     in
     pkgs.testers.nixosTest {
       name = "aiida-transports-ssh";
@@ -510,9 +521,20 @@ in
 
         # -p no:randomly is not needed, but xdist is: the suite is slow enough
         # serially that the default test driver timeout becomes a factor.
+        #
+        # These are exactly the paths ../../pkgs/aiida-core/default.nix holds
+        # back, and they are run *unfiltered* — the four files after
+        # tests/transports/ keep their local-transport parametrizations there
+        # and give up only their SSH ones, so running them whole here means the
+        # VM is a superset of the build rather than a patch over its gaps.
         output = machine.succeed(
             "cd /home/tester/aiida-core && sudo -u tester env HOME=/home/tester"
-            " ${pytest} -n 4 tests/transports/"
+            " ${pytest} -n 4"
+            " tests/transports/"
+            " tests/engine/daemon/test_execmanager.py"
+            " tests/engine/test_memory_leaks.py"
+            " tests/orm/nodes/data/test_remote.py"
+            " tests/tools/pytest_fixtures/test_orm.py"
             " 2>&1 | tail -40"
         )
         print(output)

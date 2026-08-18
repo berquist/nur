@@ -454,7 +454,54 @@ buildPythonPackage rec {
     "psql"
     "--broker-backend"
     "zmq"
-  ];
+  ]
+  # The rest of the sshd story that disabledTestPaths below could not tell.
+  # These four files each hold local-transport coverage worth keeping here, so
+  # they cannot be relocated wholesale; only their SSH parametrizations move to
+  # the `transports-ssh` VM test, which runs all four files unfiltered.
+  #
+  # tests/engine/daemon/test_execmanager.py drives every test through the
+  # `node_and_calc_info` fixture, whose four params are (core.local, core.ssh,
+  # core.ssh_async/asyncssh, core.ssh_async/openssh).  Only param 0 works
+  # without a server, and the other three accounted for 108 of the 131 SSH
+  # failures — 36 tests times three transports.  The params are tuples, so
+  # pytest names them by index rather than by content; if upstream reorders or
+  # adds one, the indices here shift silently.  The canary is the failure
+  # count, since a wrongly-kept param fails loudly on connection refused.
+  # The three params themselves are in `disabledTests` below rather than here:
+  # pytestCheckHook builds one `-k` from that list *before* appending
+  # pytestFlags, and pytest keeps only the last `-k` it is given, so a second
+  # one here would silently discard every name in `disabledTests`.
+  #
+  # The remaining fifteen are enumerable, so they are deselected by exact node
+  # id rather than by a `not ssh` name filter — that filter would also drop the
+  # SSH tests that pass here precisely because they never open a connection.
+  ++
+    lib.concatMap
+      (id: [
+        "--deselect"
+        id
+      ])
+      [
+        "tests/engine/test_memory_leaks.py::test_leak_ssh_calcjob"
+        "tests/tools/pytest_fixtures/test_orm.py::test_aiida_computer_fixtures[aiida_computer_ssh-BlockingTransport-core.ssh]"
+        "tests/tools/pytest_fixtures/test_orm.py::test_aiida_computer_fixtures_async[asyncssh-_AsyncSSH]"
+        "tests/orm/nodes/data/test_remote.py::test_clean[ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_du[ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_stat[ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_excs[ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_params[setup0-results0-ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_params[setup1-results1-ssh]"
+        # These two reported a fixture error rather than a connection failure
+        # only because they lost a race for the `localhost` computer row first;
+        # they are SSH-parametrized like the four above and belong in the VM.
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_params[setup2-results2-ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_params[setup3-results3-ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[1-byte-ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[10-bytes-ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[1000-bytes-ssh]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[1e6-bytes-ssh]"
+      ];
 
   disabledTestPaths = [
     # Not skipped — relocated.  These run in the `transports-ssh` VM test in
@@ -466,10 +513,16 @@ buildPythonPackage rec {
     # the commands AiiDA's transport runs.  An sshd here would accept the
     # connection and fail every command after it.
     #
-    # Note how little this covers: the openssh nativeCheckInput above is what
-    # fixed the bulk of the SSH failures, because most of them never reached a
-    # connection.  Only what needs something listening is down here.
+    # Note how little of the *suite* this covers: the openssh nativeCheckInput
+    # above is what fixed the bulk of the SSH failures, because most of them
+    # never reached a connection.  Only what needs something listening is here.
+    #
+    # All three of these files are about the SSH transports end to end, so
+    # moving them wholesale costs no coverage that stays behind — everything in
+    # them runs in the VM, including the handful that would pass here.
     "tests/transports/test_all_plugins.py"
+    "tests/transports/test_ssh.py"
+    "tests/transports/test_asyncssh_plugin.py"
   ];
 
   disabledTests = [
@@ -480,6 +533,14 @@ buildPythonPackage rec {
     "test_cod"
     "test_icsd"
     "test_materialsproject"
+
+    # The three SSH params of tests/engine/daemon/test_execmanager.py's
+    # `node_and_calc_info` fixture — see the note in pytestFlags for why they
+    # are named by index, and why they have to be expressed here rather than as
+    # a `-k` of their own.
+    "node_and_calc_info1"
+    "node_and_calc_info2"
+    "node_and_calc_info3"
   ];
 
   pythonImportsCheck = [
