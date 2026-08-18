@@ -15,6 +15,7 @@
 
   # tests
   pytestCheckHook,
+  openbabel,
 
   # cclib arrives from a flake input and is absent on the bare NUR path; see
   # ../harmonwig/default.nix for the mechanism.  Unlike harmonwig this package
@@ -57,11 +58,24 @@ buildPythonPackage rec {
     versioningit
   ];
 
-  # `openbabel>=3.2.0` is declared but never imported: a grep for openbabel or
-  # pybel across the whole source tree returns nothing.  Its comment in
-  # pyproject.toml ("used to write various chemical structure files formats")
-  # describes an intention, and leaving the requirement in place would make
-  # pythonRuntimeDepsCheckHook demand a distribution nothing uses.
+  # `openbabel>=3.2.0` is never imported — a grep for openbabel or pybel across
+  # the whole source tree returns nothing — so there is no Python distribution
+  # for pythonRuntimeDepsCheckHook to find, and the requirement has to go.
+  #
+  # It does not follow that Open Babel is unused, and an earlier version of this
+  # comment drew exactly that wrong conclusion.  QMzyme shells out to the
+  # *program*: QMzyme/aqme/qprep.py — a vendored copy of AQME — reaches
+  # `model.write_input()` and runs
+  #
+  #     subprocess.run(["obabel", "-ipdb", "…", "-osdf", "-O…"])
+  #
+  # resolved from PATH.  Six tests failed on `FileNotFoundError: 'obabel'` once
+  # the rdkit metadata fix let the suite run at all.  ../../overlays supplies it
+  # through nativeCheckInputs below.
+  #
+  # Nothing wraps it in for a consumer, because there is nothing to wrap:
+  # qmzyme ships no console scripts, so `obabel` has to be on PATH in whatever
+  # environment calls write_input().  That is upstream's design, not ours.
   pythonRemoveDeps = [ "openbabel" ];
 
   dependencies = [
@@ -71,8 +85,13 @@ buildPythonPackage rec {
     rdkit
   ];
 
+  # openbabel is unconditional, unlike cclib and unlike aqme's xtb and crest:
+  # it is a plain top-level nixpkgs attribute on every package set this is
+  # built against, so there is no absence to fall back from and no tests to
+  # skip.  See the pythonRemoveDeps note above for what wants it.
   nativeCheckInputs = [
     pytestCheckHook
+    openbabel
   ]
   ++ lib.optional (cclib != null) cclib;
 

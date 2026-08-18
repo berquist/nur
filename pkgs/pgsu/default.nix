@@ -83,7 +83,25 @@ buildPythonPackage rec {
 
   # The hook's default PGUSER is an unprivileged `test_user`; pgsu needs the
   # superuser role that initdb created.
+  #
+  # postgresqlEnableTCP is what tests/test_sql.py::test_grant_priv needs, and
+  # it is the layer the locale fix above uncovered — with the two database
+  # tests no longer erroring, this one got far enough to fail on its own:
+  #
+  #   conninfo = 'host=localhost port=5432 … hostaddr=127.0.0.1'
+  #   psycopg.OperationalError: connection to server at "127.0.0.1", port 5432
+  #   failed: Connection refused
+  #
+  # The test creates a role, grants it privileges, then reconnects *as that
+  # role* to check the grant took — and it builds that second DSN from
+  # `pgsu.dsn.get('host') or 'localhost'`.  pgsu connected over the Unix
+  # socket, so its dsn carries no host, the fallback wins, and the reconnect
+  # goes over TCP.  postgresqlTestHook writes `listen_addresses = ''` unless
+  # this is set, because TCP ports are a problem in some sandboxes; ours is not
+  # one of them, and nothing else in the suite is affected.  nixpkgs' own
+  # psycopg sets it the same way, in the same env block.
   env.PGUSER = "postgres";
+  env.postgresqlEnableTCP = 1;
 
   pythonImportsCheck = [ "pgsu" ];
 
