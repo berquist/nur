@@ -292,6 +292,11 @@
           upf-to-json = pself.callPackage ../pkgs/upf-to-json { };
           pgtest = pself.callPackage ../pkgs/pgtest { };
 
+          # Here for one reason only: disk-objectstore ships
+          # disk_objectstore/examples/example_objectstore.py, which imports it at
+          # module scope, and nixpkgs does not carry it.
+          profilehooks = pself.callPackage ../pkgs/profilehooks { };
+
           # Plugin dependencies, likewise missing from nixpkgs and likewise not
           # re-exported.  aiida-testing is test-only — it is what supplies
           # aiida-psi4's mock_code fixture — but it lives here rather than in a

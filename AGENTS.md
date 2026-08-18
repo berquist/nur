@@ -99,6 +99,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why are nine `pymatgen` tests deselected by node id rather than by name? | `overlays/default.nix` (the `pymatgen` binding) |
 | Why does `pgtest` need `enabledTestPaths` when its tests are right there? | `pkgs/pgtest/default.nix` (`enabledTestPaths`) |
 | Why does `disk-objectstore` want `rsync` and `openssh` as check inputs? | `pkgs/disk-objectstore/default.nix` (`nativeCheckInputs`) |
+| Why is `profilehooks` here at all, and why does it keep upstream's `addopts`? | `pkgs/profilehooks/default.nix` |
+| Why does `pgsu` need `glibcLocalesUtf8` and a `LOCALE_ARCHIVE` export? | `pkgs/pgsu/default.nix` (`preCheck`) |
 
 ### The sdist-has-no-tests trap
 

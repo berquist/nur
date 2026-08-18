@@ -13,8 +13,10 @@
   # tests
   pytestCheckHook,
   h5py,
+  memory-profiler,
   numpy,
   openssh,
+  profilehooks,
   psutil,
   pytest-benchmark,
   rsync,
@@ -57,6 +59,13 @@ buildPythonPackage rec {
   #               bar when it is missing, so without it that whole branch of the
   #               command never runs during the check
   #
+  # memory-profiler and profilehooks are the `examples` extra, and they are what
+  # tests/test_examples.py needs: it runs the two scripts under
+  # disk_objectstore/examples as subprocesses, and each imports its profiler at
+  # module scope.  Those scripts are installed as part of the package rather than
+  # left in the source tree, so this is a gap in what the wheel can import and
+  # not only a test input.  profilehooks is not in nixpkgs; see ../profilehooks.
+  #
   # rsync and openssh are programs rather than modules, and BackupManager shells
   # out to both: it refuses to construct at all without rsync — "Input
   # validation failed: rsync not accessible" — which took out fourteen tests in
@@ -67,8 +76,10 @@ buildPythonPackage rec {
   nativeCheckInputs = [
     pytestCheckHook
     h5py
+    memory-profiler
     numpy
     openssh
+    profilehooks
     psutil
     pytest-benchmark
     rsync
@@ -98,11 +109,6 @@ buildPythonPackage rec {
   # needs a reachable sshd.  A build sandbox has no network and no daemon, so
   # these cannot pass here however much of openssh is present; the local half of
   # the same parametrisation covers the code that is not about transport.
-  #
-  # tests/test_examples.py runs the two scripts in disk_objectstore/examples as
-  # subprocesses.  example_objectstore.py imports profilehooks at module scope,
-  # which nixpkgs does not carry, so the whole file goes rather than half of it.
-  # Reinstate it if profilehooks is ever packaged here.
   disabledTestPaths = [
     "tests/test_cli.py::test_main_command_missing_command"
     "tests/test_cli.py::test_main_command_no_params"
@@ -110,7 +116,6 @@ buildPythonPackage rec {
     "tests/test_cli.py::test_validate[True]"
     "tests/test_cli.py::test_backup[True-None]"
     "tests/test_cli.py::test_backup_repeated[True]"
-    "tests/test_examples.py"
   ];
 
   pythonImportsCheck = [
