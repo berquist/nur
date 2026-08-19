@@ -107,6 +107,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `aiida-pseudo` put its own `$out/bin` on PATH for the check phase? | `pkgs/aiida-pseudo/default.nix` (`preCheck`) |
 | Why does `aiida-gaussian-datatypes` list `aiida-core` twice, once as a dependency and once as a check input? | `pkgs/aiida-gaussian-datatypes/default.nix` (`preCheck`) |
 | Why does `aiida-octopus` need `procps` when the failure is a `KeyError`? | `pkgs/aiida-octopus/default.nix` (`nativeCheckInputs`) |
+| Why are `test_gs_molecule`'s reference numbers rewritten rather than the test deselected? | `pkgs/aiida-octopus/default.nix` (`postPatch`) |
+| Why does `aiida-testing` add one comma to `setup.cfg`, and why can `pythonRelaxDeps` not do it? | `pkgs/aiida-testing/default.nix` (`postPatch`) |
+| Why does `aiida-quantumespresso` need `which`, and why do the *negative* tests need it too? | `pkgs/aiida-quantumespresso/default.nix` (`nativeCheckInputs`) |
+| Why does the `matdyn` regression reference gain three `pbc` keys? | `pkgs/aiida-quantumespresso/default.nix` (`postPatch`) |
 | Why is aiida-core's `jq` threaded in from `final` instead of resolved through the Python set? | `overlays/default.nix` (the `aiida-core` callPackage) |
 | Which aiida-core failures are retried rather than deselected, and what makes that sound? | `pkgs/aiida-core/default.nix` (the `--only-rerun` block in `pytestFlags`) |
 | Why does `cp2k-input-tools` declare no `lsp` extra, and drop one console script? | `pkgs/cp2k-input-tools/default.nix` (`postPatch`) |

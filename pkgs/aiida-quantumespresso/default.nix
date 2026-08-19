@@ -23,6 +23,7 @@
   pytest-regressions,
   pgtest,
   postgresql,
+  which,
 }:
 
 buildPythonPackage rec {
@@ -85,12 +86,67 @@ buildPythonPackage rec {
     # lists pgtest, so a fixture that opts into the psql profile can find it.
     pgtest
     postgresql
+
+    # tools/setup.py's `get_executable_paths` runs
+    # `. /dev/stdin > /dev/null && which <exe>` over the transport, so the eight
+    # tests in tests/tools/test_code_setup.py need the program.  Three of them
+    # look for a pw.x the fixture just created and get "which: command not
+    # found" instead; the other five are the negative cases, and they fail on
+    # the message rather than on the outcome — they assert the text "the `which`
+    # command returned an empty output", which is the branch a *present* which
+    # takes when it finds nothing.  See ../aiida-octopus for the same argument.
+    which
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.
   preBuild = ''
     export HOME="$(mktemp -d)"
     export AIIDA_PATH="$HOME"
+  '';
+
+  # tests/cli/test_commands.py walks the click group and runs every subcommand
+  # as `subprocess.run(['aiida-quantumespresso', ..., '--help'])`, twice over
+  # for the two spellings of the flag — 48 parametrizations, all of which fail
+  # with FileNotFoundError naming the program.  See ../aiida-pseudo/default.nix,
+  # which has the identical test and the identical reason: a package's own
+  # $out/bin is never added to PATH, because a package is not a build input of
+  # itself.
+  preCheck = ''
+    export PATH="$out/bin:$PATH"
+  '';
+
+  # aiida-core has been on `main` since ../aiida-core needed the ZeroMQ broker,
+  # and pytest-regressions references recorded against a release do not always
+  # survive that.  This is the one that does not.
+  #
+  # `BandsData.set_kpointsdata` copies `pbc` off the KpointsData it is given,
+  # and until aiida-core#6990 (the pydantic model rework, May 2026) the
+  # `KpointsData.pbc` getter read the three attributes with no default.  It now
+  # reads them with `False`, so a KpointsData that never had a cell — which is
+  # what the matdyn parser builds — yields (False, False, False) instead, and
+  # the setter writes all three onto the BandsData:
+  #
+  #     @@ -10,4 +10,7 @@
+  #        labels: []
+  #     +  pbc1: false
+  #     +  pbc2: false
+  #     +  pbc3: false
+  #        units: THz
+  #
+  # The parser is unchanged and the three values are aiida-core's own documented
+  # default, so the recorded file is what is stale.  Adding the keys is the fix;
+  # `--force-regen` is not, since it would rewrite every reference in the suite
+  # and hide any of them that had drifted for a real reason.
+  postPatch = ''
+    substituteInPlace tests/parsers/test_matdyn/test_matdyn_default.yml \
+      --replace-fail \
+        "  labels: []
+      units: THz" \
+        "  labels: []
+      pbc1: false
+      pbc2: false
+      pbc3: false
+      units: THz"
   '';
 
   # No Quantum ESPRESSO binary is needed: codes come from `aiida_code_installed`

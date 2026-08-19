@@ -310,20 +310,30 @@ buildPythonPackage rec {
   # aiida-core from main is that this build sandbox could never host one.
   #
   # Declaring one is worse than declaring none.  Manager.create_runner asks for
-  # a communicator inside a `try: ... except ConfigurationError: pass`, so a
-  # profile with no process_control yields a runner with `communicator=None` and
-  # every in-process test works — which is exactly how ../aiida-octopus, on the
-  # modern plugin, runs a real calcjob here.  A profile that names RabbitMQ
-  # instead gets as far as opening the socket and raises
-  # AMQPConnectionError, which is not a ConfigurationError and so is not caught:
+  # a communicator inside a `try: ... except ConfigurationError: pass`, and with
+  # `process_control.backend` None, get_broker returns None and get_communicator
+  # raises exactly that — so the runner is built with `communicator=None` and
+  # every in-process test works, which is how ../aiida-octopus, on the modern
+  # plugin, runs a real calcjob here.  A profile that names RabbitMQ instead
+  # gets as far as opening the socket and raises AMQPConnectionError, which is
+  # not a ConfigurationError and so is not caught:
   #
   #     FAILED tests/calculations/test_orca.py::test_default
   #       - aiormq.exceptions.AMQPConnectionError: [Errno 111] Connect call failed
   #
-  # Deleting the block gives the deprecated plugin the same default the
-  # supported one has had since it replaced it — `broker_backend: str | None =
-  # None` in tools/pytest_fixtures/configuration.py, which omits the key.  A
-  # plugin test that genuinely needs a broker still fails, just with the
+  # `backend: None`, not a deleted key.  Deleting it was tried first, on the
+  # reading that `broker_backend: str | None = None` in
+  # tools/pytest_fixtures/configuration.py means the supported fixture omits
+  # process_control — it does not.  That default is threaded into
+  # Config.create_profile, which always writes the key and puts the None
+  # *inside* it, and Profile.REQUIRED_KEYS is ('storage', 'process_control'), so
+  # the whole of aiida-orca and aiida-gaussian-datatypes went from a handful of
+  # failures to every test erroring in setup:
+  #
+  #     ConfigurationError: profile '1a96b9fb-…' configuration does not contain
+  #     all required keys: ('storage', 'process_control')
+  #
+  # A plugin test that genuinely needs a broker still fails, now with the
   # ConfigurationError that says so.
   #
   # This one patches an installed module rather than tests/, unlike the
@@ -478,7 +488,11 @@ buildPythonPackage rec {
                     },
                 },
                 'options': {" \
-        "            'options': {"
+        "            'process_control': {
+                    'backend': None,
+                    'config': None,
+                },
+                'options': {"
   '';
 
   # The locked nixpkgs sits above eight of upstream's upper bounds.  These are

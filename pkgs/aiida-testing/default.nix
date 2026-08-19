@@ -40,6 +40,25 @@ buildPythonPackage {
 
   build-system = [ setuptools ];
 
+  # setup.cfg writes `aiida-core>=1.0.0<2.0.0`, with no comma between the two
+  # specifiers.  packaging accepted that for years and 26.2 does not, so the
+  # build dies inside pypaBuildPhase, before any of this package's own code
+  # runs, in setuptools' _normalize_requires:
+  #
+  #     packaging.requirements.InvalidRequirement: Expected comma (within
+  #     version specifier), semicolon (after version specifier) or end
+  #         aiida-core>=1.0.0<2.0.0
+  #                   ~~~~~~~^
+  #
+  # `pythonRelaxDeps` below cannot help: that hook rewrites Requires-Dist lines
+  # in the built wheel's METADATA, and the failure is that there is no wheel.
+  # Adding the comma is the smallest edit that lets the metadata parse at all;
+  # the relaxation then drops the bound, as it was always going to.
+  postPatch = ''
+    substituteInPlace setup.cfg \
+      --replace-fail "aiida-core>=1.0.0<2.0.0" "aiida-core>=1.0.0,<2.0.0"
+  '';
+
   # The pin is from 2021 and names aiida-core 1.x; the fixtures themselves use
   # the plugin API that survived into 2.x.  This is the riskiest relaxation in
   # the repo — if aiida-testing turns out not to import against 2.10 at all,
