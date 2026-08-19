@@ -73,6 +73,7 @@
   which,
   rsync,
   vim,
+  procps,
   stdenv,
   glibcLocalesUtf8,
 }:
@@ -474,6 +475,21 @@ buildPythonPackage rec {
     # aiida.common.utils and several cmdline tests shell out to `which`.
     which
 
+    # `ps`, for the `core.direct` scheduler every calcjob test runs under.
+    # aiida/schedulers/plugins/direct.py polls the job list with
+    # `ps -xo pid,stat,user,time`, so without procps the scheduler never learns
+    # that a job finished.  It fails quietly — the transport reports the
+    # command's stderr as a *warning* and carries on with an empty job list:
+    #
+    #     Warning in _parse_joblist_output, non-empty (filtered)
+    #     stderr='bash: line 1: ps: command not found
+    #
+    # What surfaces instead is a spray of unrelated-looking symptoms across the
+    # engine suites: ExitCode(320) "The output file contains invalid output",
+    # `assert False` on process states, and `verdi process kill` timing out
+    # waiting for a state change that can never be observed.
+    procps
+
     # aiida.storage.psql_dos.backend's backup implementation resolves `rsync`
     # through is_exe_found() and refuses to start without it, so all eight
     # backup tests across tests/orm/implementation, tests/storage/psql_dos,
@@ -568,6 +584,44 @@ buildPythonPackage rec {
         "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[10-bytes-ssh]"
         "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[1000-bytes-ssh]"
         "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[1e6-bytes-ssh]"
+
+        # ------------------------------------------------------------------
+        # Not an SSH matter, and not something a dependency can fix: these
+        # thirteen assert byte counts that only hold on a filesystem which
+        # allocates in 4096-byte blocks and does so immediately.
+        #
+        # `_get_size_on_disk_du` runs `du -s --block-size=1`, and upstream's
+        # own comment above that call says the tests "assume a disk block size
+        # of 4096 bytes", justified as "the default for Linux's ext4, as well
+        # as macOS".  On ZFS — which is what this repo builds on — `du` charges
+        # 1024 bytes per directory and *nothing at all* for file contents until
+        # the transaction group commits some seconds later, so the numbers come
+        # back constant regardless of what was written:
+        #
+        #     3 dirs + 3 files of 1 byte    got 3072, expected   24576
+        #     3 dirs + 3 files of 1 MB      got 3072, expected 3022848
+        #     2 dirs + 2 files of 1 MB      got 2048, expected 2015232
+        #
+        # btrfs delalloc gives the same shape.  Only the `du` assertions are
+        # affected: test_get_size_on_disk_stat and _excs measure apparent size
+        # and pass, which is why they are not listed.
+        #
+        # These stay enabled in the `transports-ssh` VM test, which runs this
+        # file unfiltered on an ext4 root — the one place here where the
+        # 4096-byte assumption actually holds.
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_du[local]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_params[setup0-results0-local]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_params[setup1-results1-local]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[1-byte-local]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[10-bytes-local]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[1000-bytes-local]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_sizes[1e6-bytes-local]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_nested[1-.-sizes0]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_nested[100-.-sizes1]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_nested[1000000-.-sizes2]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_nested[1-subdir1-sizes3]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_nested[100-subdir1-sizes4]"
+        "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_nested[1000000-subdir1-sizes5]"
       ];
 
   disabledTestPaths = [
