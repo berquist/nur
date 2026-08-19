@@ -402,6 +402,11 @@
           };
           aiida-testing = pself.callPackage ../pkgs/aiida-testing { };
 
+          # Test-only twice over: aiida-testing's own suite needs it, because
+          # the `diff` entry points are what its mock_code tests mock.  Stops
+          # here like the rest of them.
+          aiida-diff = pself.callPackage ../pkgs/aiida-diff { };
+
           # Test-only, and only aiida-core's: the archive fixtures its
           # migration suite reads.  Like the other dependencies here it stops
           # at this step — no top-level alias, nothing in ../default.nix — so

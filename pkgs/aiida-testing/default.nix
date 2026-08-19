@@ -16,8 +16,11 @@
 
   # tests
   pytestCheckHook,
+  aiida-diff,
+  diffutils,
   pgtest,
   postgresql,
+  procps,
   pytest-datadir,
   stdenv,
   glibcLocalesUtf8,
@@ -82,12 +85,70 @@ buildPythonPackage {
   # on the argument check every one of its callers goes through.  `import
   # collections` is enough to reach `collections.abc`, so the module's existing
   # import needs no companion.
+  #
+  # The third is the repository's own .aiida-testing-config.yml, which maps the
+  # code label `diff` to the absolute path /usr/bin/diff.  A build sandbox has
+  # no /usr/bin, and `mock_code_factory` reads that path straight out of the
+  # file — nothing consults PATH — so putting diffutils in nativeCheckInputs
+  # does not reach it.
+  #
+  # What that costs is invisible from the outside.  When the mock code finds no
+  # cached result for the hash it computed, it runs the configured executable;
+  # `subprocess.call` on a path that does not exist raises, so the mock code
+  # dies and writes nothing.  But the submit script has already created
+  # patch.diff by redirecting stdout into it, and aiida-diff's parser is happy
+  # with a file that exists, so the calculation is `finished_ok` with
+  # exit_status 0 and the assertion that fails is the one about the *contents*:
+  #
+  #     AssertionError: assert () == ('1,2c1', '< ...silly walks.')
+  #
+  # Only the label `diff` is rewritten.  `diff-broken` has no entry on purpose —
+  # test_broken_code_require asserts that a missing entry raises — so the file
+  # keeps saying nothing about it.
+  #
+  # The fourth hunk renames the two recorded fixture directories.  The mock code
+  # looks for its cached result under `mock-{label}-{md5}`, where the md5 is over
+  # the working directory — the two input files and `_aiidasubmit.sh`, the latter
+  # stripped of the mock-code exports and of its own absolute path.  aiida-core
+  # 2.10 does not generate the 2021 submit script byte for byte, so the digest
+  # recorded in 2021 no longer describes anything and both directories miss.
+  #
+  # Only test_broken_code says so.  A miss falls through to running the
+  # configured executable, which the other five can do and it cannot — the label
+  # `diff-broken` has no entry in the config file on purpose.  "Works also when
+  # no executable is given, if the result exists already" is exactly the case a
+  # stale digest breaks, and the sibling tests going green on the fallback is
+  # what hid it.  Renaming also puts test_basic back to testing what it says it
+  # does: take the data from cache, rather than quietly recompute it.
+  #
+  # The digest is a fact about a build rather than something derivable here, and
+  # the build is what produces it: on its own miss, test_basic writes the fresh
+  # result back as `tests/mock_code/data/mock-diff-<digest>`.  It does not depend
+  # on the label — upstream's two directories sharing one suffix is the evidence,
+  # and these two do too.  When a future aiida-core changes the submit script
+  # again, test_broken_code will fail alone once more, and
+  #
+  #     nix build -L --keep-failed .#python313Packages.aiida-testing
+  #     ls <kept build dir>/source/tests/mock_code/data
+  #
+  # names the replacement.  `mv` rather than a copy, so a digest that has moved
+  # on fails the build instead of leaving the old directory to be found.
   postPatch = ''
     substituteInPlace setup.cfg \
       --replace-fail "aiida-core>=1.0.0<2.0.0" "aiida-core>=1.0.0,<2.0.0"
 
     substituteInPlace aiida_testing/mock_code/_fixtures.py \
       --replace-fail "collections.Iterable" "collections.abc.Iterable"
+
+    substituteInPlace .aiida-testing-config.yml \
+      --replace-fail "diff: /usr/bin/diff" "diff: ${diffutils}/bin/diff"
+
+    recorded=4b5ca93b23993979a24f795147487f1c
+    current=6386440b94ffb782bb19e6b2f19283c8
+    for label in diff diff-broken; do
+      mv "tests/mock_code/data/mock-$label-$recorded" \
+         "tests/mock_code/data/mock-$label-$current"
+    done
   '';
 
   # The pin is from 2021 and names aiida-core 1.x; the fixtures themselves use
@@ -117,16 +178,33 @@ buildPythonPackage {
   # "fixture 'datadir' not found", which is a missing dependency wearing the
   # costume of a broken test.
   #
-  # The third is not here, and those six tests cannot pass until it is: every
-  # one of them builds a code with `entry_point='diff'` and calls
-  # `CalculationFactory('diff')`.  aiida-diff is the AiiDA plugin-template
-  # example package, in neither nixpkgs nor this repo.  Packaging it is the fix;
-  # tests/mock_code/test_ignore_paths.py is what runs in the meantime.
+  # The third registers the `diff` entry points that all six tests in
+  # tests/mock_code/test_diff.py build a code against; it is in nixpkgs no more
+  # than this package is, so ../aiida-diff packages it.
+  #
+  # `diffutils` is not in that extra and is needed anyway: test_inexistent_data
+  # deliberately gives the mock code an empty data directory, which is the path
+  # where it stops mocking and runs the real executable.
+  #
+  # `procps` is the same again.  Every one of these four tests runs a real
+  # calcjob through the `direct` scheduler, cached or not, and without `ps` the
+  # joblist comes back empty and the retrieval happens before anything has been
+  # written.  It does not fail — it hands the parser an empty file, and what
+  # lands is
+  #
+  #     AssertionError: assert () == ('1,2c1', '< ...silly walks.')
+  #
+  # which reads like a diff that produced the wrong text rather than a job that
+  # was never waited for.  ../aiida-cp2k and ../aiida-octopus each lost a
+  # calculation to this.
   nativeCheckInputs = [
     pytestCheckHook
     pgtest
     postgresql
     pytest-datadir
+    aiida-diff
+    diffutils
+    procps
   ];
 
   preBuild = ''
