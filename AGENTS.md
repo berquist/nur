@@ -109,6 +109,13 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `aiida-octopus` need `procps` when the failure is a `KeyError`? | `pkgs/aiida-octopus/default.nix` (`nativeCheckInputs`) |
 | Why are `test_gs_molecule`'s reference numbers rewritten rather than the test deselected? | `pkgs/aiida-octopus/default.nix` (`postPatch`) |
 | Why does `aiida-testing` add one comma to `setup.cfg`, and why can `pythonRelaxDeps` not do it? | `pkgs/aiida-testing/default.nix` (`postPatch`) |
+| Why is `fastentrypoints` a build-system input when `setup.py` only warns without it? | `pkgs/aiida-testing/default.nix` (`build-system`) |
+| Why does `aiida-testing` rewrite `collections.Iterable`, and what still blocks `test_diff.py`? | `pkgs/aiida-testing/default.nix` (`postPatch`, `nativeCheckInputs`) |
+| Why are the per-worker role, port and `_close` fixes applied to *two* fixture modules? | `pkgs/aiida-core/default.nix` (the deprecated-plugin note above `postPatch`) |
+| Why does `aiida-cp2k` need `procps` when the failure is `assert 303 == 0`? | `pkgs/aiida-cp2k/default.nix` (`nativeCheckInputs`) |
+| Why does `aiida-cp2k` need `glibcLocalesUtf8` when it creates no database of its own? | `pkgs/aiida-cp2k/default.nix` (`preCheck`) |
+| Why do three `which` tests still fail with `which` installed? | `pkgs/aiida-quantumespresso/default.nix` (`postPatch`) |
+| Why does `aiida-quantumespresso` use `--dist worksteal` rather than xdist's default? | `pkgs/aiida-quantumespresso/default.nix` (`pytestFlags`) |
 | Why does `aiida-quantumespresso` need `which`, and why do the *negative* tests need it too? | `pkgs/aiida-quantumespresso/default.nix` (`nativeCheckInputs`) |
 | Why does the `matdyn` regression reference gain three `pbc` keys? | `pkgs/aiida-quantumespresso/default.nix` (`postPatch`) |
 | Why is aiida-core's `jq` threaded in from `final` instead of resolved through the Python set? | `overlays/default.nix` (the `aiida-core` callPackage) |

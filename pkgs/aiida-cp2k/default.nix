@@ -20,6 +20,9 @@
   pgtest,
   postgresql,
   cp2k,
+  procps,
+  stdenv,
+  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -82,12 +85,44 @@ buildPythonPackage rec {
     pgtest
     postgresql
     cp2k
+
+    # The five tests in test/test_gaussian_datatypes.py are the only ones here
+    # that run a real CP2K, and they need the `direct` scheduler to be able to
+    # poll it: without `ps` the joblist comes back empty, the job is declared
+    # finished about two seconds in, and the parser is handed a file CP2K was
+    # still writing.  What that looks like is not a scheduler error but
+    #
+    #     [WARNING] Warning in _parse_joblist_output, non-empty (filtered)
+    #       stderr='bash: line 1: ps: command not found'
+    #     [WARNING] output parser returned exit code<303>: The output file was
+    #       incomplete.
+    #     assert 303 == 0
+    #
+    # ../aiida-octopus lost a whole ground state to the same missing program.
+    procps
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.
   preBuild = ''
     export HOME="$(mktemp -d)"
     export AIIDA_PATH="$HOME"
+  '';
+
+  # conftest.py names `aiida.manage.tests.pytest_fixtures`, so the profile is
+  # core.psql_dos and every test wants a database.  aiida-core's Postgres helper
+  # creates it with `LC_COLLATE 'en_US.UTF-8'`, which a cluster built from
+  # nixpkgs' glibc does not have, and all 37 tests error in setup with
+  #
+  #     psycopg.errors.WrongObjectType: invalid LC_COLLATE locale name:
+  #     "en_US.UTF-8"
+  #
+  # ../pgsu/default.nix has the long version of why the locale is supplied
+  # rather than the constant rewritten, and why the export is what matters:
+  # nixpkgs' glibc reads LOCALE_ARCHIVE from the environment, and it is the
+  # postgres server that calls setlocale, not pytest.  ../aiida-orca and
+  # ../aiida-gaussian-datatypes carry the same three lines.
+  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
+    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
   '';
 
   # `test`, singular, is the unit-test directory.  Restricting to it is a
@@ -97,7 +132,9 @@ buildPythonPackage rec {
   # AiiDA daemon.  A checkPhase has no daemon and no broker.  Those examples are
   # covered instead by the plugin-cp2k VM test in ../../tests/aiida/vm.nix,
   # where a daemon does exist.
-  pytestFlags = [ "test" ];
+  pytestFlags = [
+    "test"
+  ];
 
   pythonImportsCheck = [
     "aiida_cp2k"

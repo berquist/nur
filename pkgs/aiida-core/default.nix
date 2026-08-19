@@ -336,7 +336,17 @@ buildPythonPackage rec {
   # A plugin test that genuinely needs a broker still fails, now with the
   # ConfigurationError that says so.
   #
-  # This one patches an installed module rather than tests/, unlike the
+  # The same file gets the per-worker role, the per-worker port and the _close
+  # tolerance described above, because the deprecated plugin does not share the
+  # supported one's fixtures — it carries its own `postgres_cluster`, with its
+  # own `PGTest()` and its own hardcoded `guest`.  Nothing needed that while the
+  # plugins ran serially.  ../aiida-cp2k now asks for `--dist worksteal`, which
+  # makes every race in the note above live again for it, ../aiida-orca,
+  # ../aiida-gaussian-datatypes and ../aiida-testing, and those four are exactly
+  # the packages on the deprecated plugin.  Two copies of the same three fixes
+  # is the price of upstream keeping two copies of the fixtures.
+  #
+  # These patch an installed module rather than tests/, unlike the
   # /bin/bash rewrite above, and that is deliberate: the module only ever runs
   # under pytest, and the consumers being fixed are the six AiiDA plugins in
   # this repo, which are built from this same package set.
@@ -492,7 +502,34 @@ buildPythonPackage rec {
                     'backend': None,
                     'config': None,
                 },
-                'options': {"
+                'options': {" \
+      --replace-fail \
+        "            'database_username': database_username or 'guest'," \
+        "            'database_username': database_username or 'guest_' + os.environ.get('PYTEST_XDIST_WORKER', 'master')," \
+      --replace-fail \
+        "    cluster = None
+        try:
+            cluster = PGTest()
+            cluster.create_database = create_database
+            yield cluster
+        finally:
+            if cluster is not None:
+                cluster.close()" \
+        "    worker = os.environ.get('PYTEST_XDIST_WORKER', ''')
+        port = 45000 + int(worker[2:]) if worker[:2] == 'gw' and worker[2:].isdigit() else None
+
+        cluster = None
+        try:
+            cluster = PGTest(port=port)
+            cluster.create_database = create_database
+            yield cluster
+        finally:
+            if cluster is not None:
+                try:
+                    cluster.close()
+                except RuntimeError as exception:
+                    if 'Is server running?' not in str(exception):
+                        raise"
   '';
 
   # The locked nixpkgs sits above eight of upstream's upper bounds.  These are

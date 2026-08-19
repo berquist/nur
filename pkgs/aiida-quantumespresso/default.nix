@@ -21,6 +21,7 @@
   # tests
   pytestCheckHook,
   pytest-regressions,
+  pytest-xdist,
   pgtest,
   postgresql,
   which,
@@ -80,6 +81,16 @@ buildPythonPackage rec {
     pytestCheckHook
     pytest-regressions
 
+    # 109s serially, and almost all of it is the same shape: a few hundred
+    # parser tests replaying stored pw.x output, and 48 CLI tests that each pay
+    # for a fresh interpreter.  Nothing here is shared between tests the way
+    # ../aiida-core's PostgreSQL clusters are — the profile is core.sqlite_dos
+    # under tmp_path_factory, which xdist already gives each worker its own of —
+    # so the suite parallelises without any of the per-worker patching that one
+    # needed.  nixpkgs' setup hook supplies `--numprocesses=$NIX_BUILD_CORES`
+    # from preInstallCheckHooks; see pytestFlags below for the distribution.
+    pytest-xdist
+
     # tests/conftest.py names `aiida.tools.pytest_fixtures`, the modern module,
     # which defaults to core.sqlite_dos with no broker and needs no services at
     # all.  pgtest and postgresql are here only because upstream's `tests` extra
@@ -115,6 +126,22 @@ buildPythonPackage rec {
     export PATH="$out/bin:$PATH"
   '';
 
+  # `worksteal` rather than xdist's default `load`.  Both hand out work up
+  # front, but `load` commits every test to a worker at the start and leaves an
+  # unlucky worker to finish its queue alone; `worksteal` lets an idle worker
+  # take the tail of a busy one's.  That is worth having when the durations are
+  # as uneven as they are here — a CLI test forks an interpreter and takes the
+  # better part of a second, a parser test reads a file and takes milliseconds —
+  # and it costs nothing when they are even.
+  #
+  # Two entries, not one string: pytestFlags reaches pytestCheckHook through
+  # `concatTo`, which word-splits, so "--dist worksteal" would arrive as a
+  # single unrecognised argument.
+  pytestFlags = [
+    "--dist"
+    "worksteal"
+  ];
+
   # aiida-core has been on `main` since ../aiida-core needed the ZeroMQ broker,
   # and pytest-regressions references recorded against a release do not always
   # survive that.  This is the one that does not.
@@ -137,7 +164,41 @@ buildPythonPackage rec {
   # default, so the recorded file is what is stale.  Adding the keys is the fix;
   # `--force-regen` is not, since it would rewrite every reference in the suite
   # and hide any of them that had drifted for a real reason.
+  # `which` in nativeCheckInputs above got five of the eight code-setup tests
+  # green; these are the other three, and no package can fix them because they
+  # assert on a branch that GNU which cannot reach.  `get_executable_paths`
+  # builds its message as
+  #
+  #     if stderr:      msg += f'Error: {stderr}'
+  #     elif not stdout.strip():
+  #                     msg += 'Error: the `which` command returned an empty
+  #                             output.'
+  #
+  # and the three parametrizations that expect the second sentence are the ones
+  # where the program is genuinely not on PATH.  Debian's which — what upstream's
+  # CI has — says nothing at all in that case, so stderr is empty and the elif
+  # fires.  GNU which, which is what nixpkgs packages, writes
+  # `which: no pw.x in (...)` to stderr, so the first branch wins and the
+  # assertion fails on the wording:
+  #
+  #     AssertionError: Regex pattern did not match.
+  #
+  # Relaxing the three expectations to the sentence both spellings share keeps
+  # what the tests are for — a program that is not on PATH must raise
+  # FileNotFoundError naming it — and drops only the claim about which of two
+  # equivalent explanations got appended.  The fourth negative case, which
+  # expects `expoat: command not found` from bash, is untouched and still
+  # passes: that one really is asserting on stderr.
+  #
+  # The backslashes before the backticks are for bash, not for Nix: a backtick
+  # inside a double-quoted shell word is command substitution, and a lone
+  # backslash in a Nix indented string is already literal.
   postPatch = ''
+    substituteInPlace tests/tools/test_code_setup.py \
+      --replace-fail \
+        "'Error: the \`which\` command returned an empty output.'" \
+        "'Failed to determine the path of executable'"
+
     substituteInPlace tests/parsers/test_matdyn/test_matdyn_default.yml \
       --replace-fail \
         "  labels: []
