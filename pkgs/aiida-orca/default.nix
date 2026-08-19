@@ -16,6 +16,7 @@
   pytest-regressions,
   pgtest,
   postgresql,
+  bash,
   stdenv,
   glibcLocalesUtf8,
 }:
@@ -71,6 +72,11 @@ buildPythonPackage rec {
   preBuild = ''
     export HOME="$(mktemp -d)"
     export AIIDA_PATH="$HOME"
+  '';
+
+  postBuild = ''
+    substituteInPlace tests/conftest.py \
+      --replace-fail "/bin/bash" "/${bash}/bin/bash"
   '';
 
   # No ORCA binary is needed: the calculation tests build their code node with
