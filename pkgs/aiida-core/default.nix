@@ -159,9 +159,76 @@ buildPythonPackage rec {
   # guaranteed; requesting the fixture as an argument is the documented way to
   # say the same thing, and is what upstream will have to do. `aiida_profile_clean`
   # goes first in the signature so it still runs before the other fixtures.
+  #
+  # The next three hunks are all the bill for relaxing click's upper bound just
+  # above, and are worth reading together: upstream's `<8.3` is not
+  # bookkeeping, it is load-bearing, and lifting it costs twelve tests in three
+  # unrelated-looking clusters.
+  #
+  # aiida/transports/cli.py is the library half, so it is patched rather than
+  # worked around in the tests — anyone running this package against click 8.3
+  # hits it, not just the suite.  Eight tests, all of
+  # TestVerdiComputerConfigure plus one transport parametrization, die on a
+  # single line there.
+  #
+  # The editor rewrites are the test half.  Four tests spell their editor as
+  # `sleep 1 ; vim ...`, which worked
+  # while click ran it through a shell; click 8.3 runs
+  # `subprocess.Popen(shlex.split(editor) + [filename])` with no shell, so the
+  # `;` becomes a literal argument and the whole line executes as `sleep`:
+  #
+  #     sleep: invalid option -- 'c'
+  #     click.exceptions.ClickException: sleep 1 ; vim ...: Editing failed
+  #
+  # That is precisely what upstream's `<8.3` guards, so it is ours to fix.
+  # Dropping the delay rather than restoring a shell keeps what the tests are
+  # actually about — they assert on text a real vim edited.  The delay existed
+  # for click's `require_save` check, which compares the file's mtime across
+  # the edit and returns None when it has not moved; that only needs a whole
+  # second on a filesystem with one-second mtime granularity, and the build
+  # runs on tmpfs.  The sibling parametrizations that already spell the editor
+  # as a bare `vim -cwq` pass here, which is the evidence that the mtime check
+  # succeeds without the sleep.
+  #
+  # tests/cmdline/commands/test_code.py spells its editor the same broken way
+  # in three places and is deliberately left alone: those tests supply every
+  # option non-interactively, so click never launches the editor and the string
+  # is never split.  They would start failing the moment one of them became
+  # interactive, and this is the note that says why.
   postPatch = ''
     substituteInPlace pyproject.toml \
       --replace-fail "'click>=8.1.0,<8.3'" "'click>=8.1.0'"
+
+    substituteInPlace src/aiida/transports/cli.py \
+      --replace-fail \
+        "        user = ctx.params.get('user', None) or orm.User.collection.get_default()
+            computer = ctx.params.get('computer', None)" \
+        "        def resolved(name):
+                # click 8.3 seeds ctx.params with an UNSET sentinel for options
+                # it has not processed yet, where 8.2 left the key absent.  The
+                # sentinel is truthy and is not None, so it defeats both the
+                # `or` fallback below and the `is None` test, and surfaces as
+                # AttributeError: 'Sentinel' object has no attribute 'pk'.
+                value = ctx.params.get(name, None)
+                return value if isinstance(value, orm.Entity) else None
+
+            user = resolved('user') or orm.User.collection.get_default()
+            computer = resolved('computer')"
+
+    substituteInPlace tests/cmdline/utils/test_multiline.py \
+      --replace-fail \
+        "COMMAND = 'sleep 1 ; vim" \
+        "COMMAND = 'vim"
+
+    substituteInPlace tests/cmdline/commands/test_computer.py \
+      --replace-fail \
+        "os.environ['VISUAL'] = 'sleep 1; vim -cwq'
+        os.environ['EDITOR'] = 'sleep 1; vim -cwq'" \
+        "os.environ['VISUAL'] = 'vim -cwq'
+        os.environ['EDITOR'] = 'vim -cwq'" \
+      --replace-fail \
+        "('sleep 1; vim -cwq',)" \
+        "('vim -cwq',)"
 
     substituteInPlace tests/manage/configuration/test_profile.py \
       --replace-fail \
