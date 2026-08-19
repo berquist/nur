@@ -75,6 +75,7 @@
   vim,
   procps,
   bash,
+  jq,
   stdenv,
   glibcLocalesUtf8,
 }:
@@ -218,9 +219,11 @@ buildPythonPackage rec {
   #
   # tests/ only, deliberately.  The same default sits in
   # src/aiida/tools/pytest_fixtures/orm.py, which is installed and used by
-  # downstream plugins, and every test that fails here passes the executable
-  # explicitly — so patching the shipped fixture would buy nothing and would
-  # pin real users, who do have /bin/bash, to whichever bash this build used.
+  # downstream plugins, so patching it would pin real users — who do have
+  # /bin/bash — to whichever bash this build happened to use.  Exactly one call
+  # site in the suite leans on that default rather than passing a path, and it
+  # gets the argument spelled out instead; `rg "aiida_code_installed\(" tests |
+  # rg -v filepath_executable` is the check that it is still only one.
   #
   # tests/cmdline/commands/test_code.py spells its editor the same broken way
   # in three places and is deliberately left alone: those tests supply every
@@ -270,6 +273,11 @@ buildPythonPackage rec {
     find tests -type f \( -name '*.py' -o -name '*.sh' \) \
       -exec sed -i "s|'/bin/bash'|'${bash}/bin/bash'|g" {} + \
       -exec sed -i 's|"/bin/bash"|"${bash}/bin/bash"|g' {} +
+
+    substituteInPlace tests/engine/daemon/test_worker.py \
+      --replace-fail \
+        "code = aiida_code_installed('add')" \
+        "code = aiida_code_installed('add', filepath_executable='${bash}/bin/bash')"
 
     substituteInPlace tests/calculations/test_stash.py \
       --replace-fail "#!/bin/bash" "#!${bash}/bin/bash"
@@ -541,6 +549,14 @@ buildPythonPackage rec {
     # aiida.common.utils and several cmdline tests shell out to `which`.
     which
 
+    # tests/calculations/test_stash.py writes its own shell script as the code
+    # for a StashCalculation and pipes the calculation's JSON through `jq` to
+    # read source_path, source_list and target_base out of it.  Without jq the
+    # three variables come back empty, the copy loop runs zero times, and the
+    # test fails on `PosixPath(.../target/dummy.txt).exists()` being False —
+    # with nothing anywhere naming jq.
+    jq
+
     # `ps`, for the `core.direct` scheduler every calcjob test runs under.
     # aiida/schedulers/plugins/direct.py polls the job list with
     # `ps -xo pid,stat,user,time`, so without procps the scheduler never learns
@@ -603,6 +619,29 @@ buildPythonPackage rec {
     "psql"
     "--broker-backend"
     "zmq"
+
+    # Contention, not correctness.  With 128 xdist workers this build starts
+    # 128 PostgreSQL clusters and a great many short-lived subprocesses, and a
+    # handful of tests lose races that have nothing to do with what they test:
+    # a cluster not up yet ("pg_ctl: PID file ... does not exist"), a
+    # subprocess not yet reaped (psutil.ZombieProcess), a process that did not
+    # reach its state inside a fixed timeout ("Process loading was too slow").
+    # Which tests it hits varies run to run, which is what marks them as
+    # scheduling artefacts rather than failures.
+    #
+    # `--only-rerun` is why this is not a blanket retry: it takes a regex
+    # matched against the *exception message*, so anything failing for any
+    # other reason still fails on the first attempt.  Widening these patterns
+    # would start hiding real bugs, so keep them specific.  pytest-rerunfailures
+    # is already a nativeCheckInput because upstream declares it.
+    "--reruns"
+    "2"
+    "--only-rerun"
+    "pg_ctl: PID file"
+    "--only-rerun"
+    "ZombieProcess"
+    "--only-rerun"
+    "Process loading was too slow"
   ]
   # The rest of the sshd story that disabledTestPaths below could not tell.
   # These four files each hold local-transport coverage worth keeping here, so
@@ -719,6 +758,40 @@ buildPythonPackage rec {
         # KeyError rather than a mismatch.  ../upf-to-json explains why 1.0.0
         # rather than the pinned 0.9.5 — 0.9.x ships no tests at all.
         "tests/orm/nodes/data/test_upf.py::TestUpfParser::test_upf2_to_json_barium"
+
+        # pytz ships its own tz database, so this is a pytz-version difference
+        # rather than a missing system one: the test hashes a datetime made
+        # tz-aware with Europe/Amsterdam and compares against a literal digest.
+        # The US/Eastern assertion two lines above it passes, which is what
+        # rules out the hashing itself.
+        "tests/common/test_hashing.py::TestMakeHashTest::test_datetime"
+
+        # `verdi presto` autodetects a PostgreSQL server at 127.0.0.1:5432 and
+        # /run/postgresql; pgtest gives each xdist worker a throwaway cluster on
+        # a random port instead, so autodetection cannot succeed.  Supplying one
+        # would mean a second, differently-configured server per worker.
+        "tests/cmdline/commands/test_presto.py::test_presto_use_postgres"
+
+        # `verdi process repair` counts connections to the profile's database
+        # and, finding any it cannot attribute, asks for confirmation via
+        # click.confirm(abort=True).  The pgtest cluster here always has one, so
+        # the prompt fires, no input is supplied and the command aborts.  The
+        # test is about `-v INFO` output and never meant to reach that branch;
+        # passing --force instead is not an option, since it would terminate
+        # the connection the test session itself is using.
+        "tests/cmdline/commands/test_process.py::test_process_repair_verbosity"
+
+        # The click 8.3 residue.  Both drive a command through a --config file
+        # and end in `Aborted!` because an InteractiveOption prompts with no
+        # input to consume.  Unlike the twelve fixed above, this one did not
+        # reduce to a single line: --config is is_eager and click 8.3 keeps
+        # 8.2's `(not is_eager, idx)` processing order, its consume_value still
+        # honours default_map, and the config values do reach it — so the usual
+        # suspects are ruled out and the actual trigger is still unidentified.
+        # Worth revisiting whenever nixpkgs carries a click 8.2, which would
+        # retire this whole family rather than these two.
+        "tests/cmdline/commands/test_computer.py::TestVerdiComputerConfigure::test_local_from_config"
+        "tests/cmdline/commands/test_setup.py::TestVerdiSetup::test_quicksetup_from_config_file"
       ];
 
   disabledTestPaths = [
