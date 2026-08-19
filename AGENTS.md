@@ -103,6 +103,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why do the pytest-xdist workers each need their own PostgreSQL role? | `pkgs/aiida-core/default.nix` (the `storage.py` hunk in `postPatch`) |
 | Why does `PostgresCluster` pin its port to the xdist worker index, and why does `_close` still tolerate a postmaster that was never running? | `pkgs/aiida-core/default.nix` (the `_create`/`_close` note above `postPatch`) |
 | Why is RabbitMQ deleted from the *deprecated* pytest fixture plugin, and which packages does that fix? | `pkgs/aiida-core/default.nix` (the last note above `postPatch`) |
+| Why does `TestLaunchersDryRun` need its own working directory? | `pkgs/aiida-core/default.nix` (the `test_launch.py` note above `postPatch`) |
 | Why does `aiida-pseudo` put its own `$out/bin` on PATH for the check phase? | `pkgs/aiida-pseudo/default.nix` (`preCheck`) |
 | Why does `aiida-gaussian-datatypes` list `aiida-core` twice, once as a dependency and once as a check input? | `pkgs/aiida-gaussian-datatypes/default.nix` (`preCheck`) |
 | Why does `aiida-octopus` need `procps` when the failure is a `KeyError`? | `pkgs/aiida-octopus/default.nix` (`nativeCheckInputs`) |

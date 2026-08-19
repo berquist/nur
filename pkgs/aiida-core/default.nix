@@ -193,6 +193,27 @@ buildPythonPackage rec {
   # message rather than on RuntimeError, so a cluster that fails to stop for any
   # other reason still fails the build.
   #
+  # TestLaunchersDryRun is the third of these, and the one that does not involve
+  # a server at all: the shared resource is the working directory.  A dry run
+  # writes its submit script to `submit_test/<date>-<counter>` *relative to the
+  # current directory*, and all 128 workers have the same one, /build/source.
+  # The four tests in that class each clean up afterwards with
+  #
+  #     shutil.rmtree(os.path.join(os.getcwd(), CALC_JOB_DRY_RUN_BASE_PATH))
+  #
+  # which takes the whole tree, not the subfolder they made.  SubmitTestFolder
+  # itself is race-safe — it mkdirs in a loop and retries on EEXIST — so the
+  # directory really is created; a neighbour's teardown then removes it between
+  # that mkdir and the write, and presubmit lands on:
+  #
+  #     FileNotFoundError: [Errno 2] No such file or directory:
+  #       '/build/source/submit_test/20260819-00002/_aiidasubmit.sh'
+  #
+  # `monkeypatch.chdir(tmp_path)` in the fixture gives each test its own working
+  # directory, so the rmtree can only reach what that test created.  Nothing in
+  # the class asserts on the path: the one test that inspects the folder reads
+  # the absolute path back out of `node.dry_run_info`.
+  #
   # The three fixture rewrites are a separate matter: a pytest 9
   # incompatibility, not a packaging choice.  Upstream pins `pytest~=7.0`; nixpkgs carries 9.1.1, which
   # turned "applying a mark to a fixture" from a deprecation warning into a
@@ -393,6 +414,16 @@ buildPythonPackage rec {
         "@pytest.mark.usefixtures('aiida_profile_clean')
     def profile_with_actual_data(generate_calculation_node_io, generate_workchain_node_io):" \
         "def profile_with_actual_data(aiida_profile_clean, generate_calculation_node_io, generate_workchain_node_io):"
+
+    substituteInPlace tests/engine/test_launch.py \
+      --replace-fail \
+        "    def init_profile(self, aiida_localhost):" \
+        "    def init_profile(self, aiida_localhost, tmp_path, monkeypatch):" \
+      --replace-fail \
+        "        from aiida.common.folders import CALC_JOB_DRY_RUN_BASE_PATH" \
+        "        from aiida.common.folders import CALC_JOB_DRY_RUN_BASE_PATH
+
+            monkeypatch.chdir(tmp_path)"
 
     substituteInPlace tests/orm/nodes/process/test_process.py \
       --replace-fail \
