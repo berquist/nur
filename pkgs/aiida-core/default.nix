@@ -74,6 +74,7 @@
   rsync,
   vim,
   procps,
+  bash,
   stdenv,
   glibcLocalesUtf8,
 }:
@@ -191,6 +192,36 @@ buildPythonPackage rec {
   # as a bare `vim -cwq` pass here, which is the evidence that the mtime check
   # succeeds without the sleep.
   #
+  # The /bin/bash rewrite is what stood between the engine suites and green
+  # after `procps` fixed the scheduler.  Roughly fourteen tests run a real
+  # calcjob whose *code* is the absolute path `/bin/bash`, and a Nix build
+  # sandbox does not have one — it provides `/bin/sh` and nothing else.  The
+  # failure is indirect enough to be worth spelling out: the submit script
+  # itself runs fine, because schedulers/plugins/direct.py invokes it as
+  # `bash <script>` and its `#!/bin/bash` shebang is never consulted.  Only the
+  # line *inside* it, `'/bin/bash' < aiida.in > aiida.out`, fails, so the job
+  # is reported as finished with an empty output file and the parser rejects
+  # it:
+  #
+  #     ExitCode(status=320, message='The output file contains invalid output.')
+  #
+  # The sed matches the quoted form only, which is exactly the code path: the
+  # shebang literals in tests/schedulers (`'#!/bin/bash'`) and the one
+  # `/usr/bin/bash` have no quote before the slash, so they are left alone —
+  # and they must be, since those tests assert on generated script *text* and
+  # never execute anything.  Both .py and .sh are swept because the .sh files
+  # under tests/engine/.../test_calc_job/ are pytest-regressions references for
+  # scripts the .py files generate; rewriting one side only would break the
+  # comparison.  The two substituteInPlace calls after it handle the other
+  # half: those two tests write their own executable and then run it, so their
+  # shebang is live rather than decorative.
+  #
+  # tests/ only, deliberately.  The same default sits in
+  # src/aiida/tools/pytest_fixtures/orm.py, which is installed and used by
+  # downstream plugins, and every test that fails here passes the executable
+  # explicitly — so patching the shipped fixture would buy nothing and would
+  # pin real users, who do have /bin/bash, to whichever bash this build used.
+  #
   # tests/cmdline/commands/test_code.py spells its editor the same broken way
   # in three places and is deliberately left alone: those tests supply every
   # option non-interactively, so click never launches the editor and the string
@@ -208,7 +239,7 @@ buildPythonPackage rec {
                 # click 8.3 seeds ctx.params with an UNSET sentinel for options
                 # it has not processed yet, where 8.2 left the key absent.  The
                 # sentinel is truthy and is not None, so it defeats both the
-                # `or` fallback below and the `is None` test, and surfaces as
+                # 'or' fallback below and the 'is None' test, and surfaces as
                 # AttributeError: 'Sentinel' object has no attribute 'pk'.
                 value = ctx.params.get(name, None)
                 return value if isinstance(value, orm.Entity) else None
@@ -222,12 +253,12 @@ buildPythonPackage rec {
                 return super().process_value(ctx, value)" \
         "        try:
                 if self.required and value is None:
-                    # The `!` above turns into None, and click 8.2 counted None
+                    # The '!' above turns into None, and click 8.2 counted None
                     # as missing, so a required option re-prompted.  8.3's
-                    # ``value_is_missing`` answers True only for its new UNSET
+                    # value_is_missing() answers True only for its new UNSET
                     # sentinel, and UNSET cannot be used here: click converts it
                     # back to None before the callback, which would break the
-                    # non-required case that asserts on a literal `None`.
+                    # non-required case that asserts on a literal 'None'.
                     raise click.MissingParameter(ctx=ctx, param=self)
                 return super().process_value(ctx, value)"
 
@@ -235,6 +266,16 @@ buildPythonPackage rec {
       --replace-fail \
         "        assert result.output.strip() == '\n'.join(expected_projections)" \
         "        assert [line.strip() for line in result.output.strip().splitlines()] == expected_projections"
+
+    find tests -type f \( -name '*.py' -o -name '*.sh' \) \
+      -exec sed -i "s|'/bin/bash'|'${bash}/bin/bash'|g" {} + \
+      -exec sed -i 's|"/bin/bash"|"${bash}/bin/bash"|g' {} +
+
+    substituteInPlace tests/calculations/test_stash.py \
+      --replace-fail "#!/bin/bash" "#!${bash}/bin/bash"
+
+    substituteInPlace tests/orm/models/test_models.py \
+      --replace-fail "#!/bin/bash" "#!${bash}/bin/bash"
 
     substituteInPlace tests/storage/psql_dos/test_backend.py \
       --replace-fail \
