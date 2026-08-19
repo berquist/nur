@@ -16,6 +16,8 @@
   pytest-regressions,
   pgtest,
   postgresql,
+  stdenv,
+  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -48,6 +50,10 @@ buildPythonPackage rec {
     ase
     periodictable
   ];
+
+  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
+    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
+  '';
 
   nativeCheckInputs = [
     pytestCheckHook

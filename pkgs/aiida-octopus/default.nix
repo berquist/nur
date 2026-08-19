@@ -14,6 +14,7 @@
   pytestCheckHook,
   numpy,
   octopus,
+  which,
 }:
 
 buildPythonPackage {
@@ -50,6 +51,8 @@ buildPythonPackage {
     # postgresql.  What it does want is the binary: the `octopus_executable`
     # fixture runs `which octopus` and raises if it is absent.
     octopus
+
+    which
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.

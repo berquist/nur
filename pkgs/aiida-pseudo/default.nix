@@ -9,6 +9,7 @@
   # dependencies
   aiida-core,
   click,
+  pint,
   pydantic,
   requests,
 
@@ -42,11 +43,16 @@ buildPythonPackage rec {
   # aiida-core here is a 2.10.0.dev0 snapshot, and a pre-release does not
   # satisfy a `>=2.x` specifier under PEP 440 unless pre-releases are opted in.
   # Every AiiDA plugin in this repo needs this for the same reason.
-  pythonRelaxDeps = [ "aiida-core" ];
+  pythonRelaxDeps = [
+    "aiida-core"
+    "click"
+    "pint"
+  ];
 
   dependencies = [
     aiida-core
     click
+    pint
     pydantic
     requests
   ];

@@ -16,6 +16,8 @@
   pytestCheckHook,
   pgtest,
   postgresql,
+  stdenv,
+  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -54,6 +56,10 @@ buildPythonPackage rec {
     click
     tabulate
   ];
+
+  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
+    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
+  '';
 
   nativeCheckInputs = [
     pytestCheckHook
