@@ -26,11 +26,18 @@ buildPythonPackage rec {
   # the sdist for 0.9.5 does not carry it either.  Packaging 0.9.5 therefore
   # meant a pytestCheckPhase that collected zero items and reported success.
   #
-  # The bump is safe: the public surface is `from .upf_to_json import
-  # upf_to_json` at both tags, and aiida-core's only call site
+  # The bump is safe at the API: the public surface is `from .upf_to_json
+  # import upf_to_json` at both tags, and aiida-core's only call site
   # (src/aiida/orm/nodes/data/upf.py) passes exactly the
   # `upf_to_json(text, fname=...)` signature the 1.0.0 suite exercises.  The
   # diff between the two is a rewrite of the two parsers, not an API change.
+  #
+  # It is *not* byte-identical in output, which an earlier version of this note
+  # claimed too broadly.  1.0.0 emits an extra `label` ('5S', '5P', ...) on
+  # each chi entry, and aiida-core carries a reference Ba.json generated with
+  # 0.9.x, so its `test_upf2_to_json_barium` sees a key the reference lacks.
+  # That one test is deselected in ../aiida-core, where the reason is spelled
+  # out; nothing in aiida's own code reads the field.
   #
   # It does need ../aiida-core to relax `upf_to_json~=0.9.2`; see the
   # pythonRelaxDeps list there.

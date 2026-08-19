@@ -216,6 +216,31 @@ buildPythonPackage rec {
             user = resolved('user') or orm.User.collection.get_default()
             computer = resolved('computer')"
 
+    substituteInPlace src/aiida/cmdline/params/options/interactive.py \
+      --replace-fail \
+        "        try:
+                return super().process_value(ctx, value)" \
+        "        try:
+                if self.required and value is None:
+                    # The `!` above turns into None, and click 8.2 counted None
+                    # as missing, so a required option re-prompted.  8.3's
+                    # ``value_is_missing`` answers True only for its new UNSET
+                    # sentinel, and UNSET cannot be used here: click converts it
+                    # back to None before the callback, which would break the
+                    # non-required case that asserts on a literal `None`.
+                    raise click.MissingParameter(ctx=ctx, param=self)
+                return super().process_value(ctx, value)"
+
+    substituteInPlace tests/cmdline/commands/test_node.py \
+      --replace-fail \
+        "        assert result.output.strip() == '\n'.join(expected_projections)" \
+        "        assert [line.strip() for line in result.output.strip().splitlines()] == expected_projections"
+
+    substituteInPlace tests/storage/psql_dos/test_backend.py \
+      --replace-fail \
+        "def test_get_info(monkeypatch):" \
+        "def test_get_info(monkeypatch, aiida_profile_clean):"
+
     substituteInPlace tests/cmdline/utils/test_multiline.py \
       --replace-fail \
         "COMMAND = 'sleep 1 ; vim" \
@@ -622,6 +647,37 @@ buildPythonPackage rec {
         "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_nested[1-subdir1-sizes3]"
         "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_nested[100-subdir1-sizes4]"
         "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_nested[1000000-subdir1-sizes5]"
+
+        # One more that needs a live sshd, missed when the SSH suites moved
+        # because it fails on an *assertion* rather than on a connection error:
+        # it expects "The provided remote absolute path ... does not exist on
+        # the computer" and gets "Could not connect to the configured computer
+        # to determine whether the specified executable exists."  It runs in
+        # the VM alongside the others.
+        "tests/orm/data/code/test_installed.py::test_validate_filepath_executable[core.ssh]"
+
+        # Reaches the network, like the five names in `disabledTests`.  These
+        # two are deselected by node id instead because the file's *other*
+        # tests are local-only and worth keeping: both of these fetch a v0.4
+        # archive from raw.githubusercontent.com, which the build sandbox
+        # resolves to `FileNotFoundError: [Errno 2] ... 'https://raw.github...'`.
+        "tests/cmdline/commands/test_archive_import.py::test_import_old_url_archives"
+        "tests/cmdline/commands/test_archive_import.py::test_import_url_and_local_archives"
+
+        # sphinx 9.1 against a reference built with sphinx 7.2.  This is the
+        # gap the `sphinx` nativeCheckInput above warns about, and it has now
+        # come due: the test is a pytest-regressions file comparison of
+        # generated doctree XML, so any markup change upstream of it fails.
+        # Nothing here is wrong with aiida; nixpkgs simply has no sphinx 7.
+        "tests/sphinxext/test_workchain.py::test_workchain_build"
+
+        # upf_to_json 1.0.0 emits a `label` ('5S', '5P', ...) on each chi entry
+        # that the 0.9-era reference Ba.json shipped in aiida's test fixtures
+        # does not carry, and the test's `compare` helper walks
+        # `set(dd1) | set(dd2)` and indexes *both*, so the extra key is a
+        # KeyError rather than a mismatch.  ../upf-to-json explains why 1.0.0
+        # rather than the pinned 0.9.5 — 0.9.x ships no tests at all.
+        "tests/orm/nodes/data/test_upf.py::TestUpfParser::test_upf2_to_json_barium"
       ];
 
   disabledTestPaths = [

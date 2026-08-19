@@ -535,6 +535,7 @@ in
             " tests/engine/test_memory_leaks.py"
             " tests/orm/nodes/data/test_remote.py"
             " tests/tools/pytest_fixtures/test_orm.py"
+            " tests/orm/data/code/test_installed.py"
             " 2>&1 | tail -40"
         )
         print(output)
