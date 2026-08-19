@@ -146,13 +146,13 @@ buildPythonPackage rec {
   # aiida.tools.pytest_fixtures gets the same fix — and, when not under xdist,
   # a role named guest_master rather than guest.  Both are throwaway clusters.
   #
-  # The second storage.py rewrite, PostgresCluster._close, is the same story at
-  # the other end of the session.  pgtest finds a free port by binding a socket,
-  # reading the number back and closing it again — its own docstring warns that
-  # "another process will steal the port between this function getting the port
-  # and your intended process using it" — and with 128 workers starting clusters
-  # at once, two of them eventually get the same number.  The loser's postmaster
-  # dies at startup:
+  # The other two storage.py rewrites, PostgresCluster._create and
+  # PostgresCluster._close, are one race seen from its two ends.  pgtest finds a
+  # free port by binding a socket, reading the number back and closing it again
+  # — its own docstring warns that "another process will steal the port between
+  # this function getting the port and your intended process using it" — and
+  # with 128 workers starting clusters at once, two of them eventually get the
+  # same number.  The loser's postmaster dies at startup:
   #
   #     LOG:  could not bind IPv4 address "127.0.0.1": Address already in use
   #     HINT: Is another postmaster already running on port 47967?
@@ -162,19 +162,36 @@ buildPythonPackage rec {
   # connects anyway and reports success.  That worker then spends the whole
   # session on its neighbour's cluster, which works — the databases are uuid4s
   # and the roles are per-worker, per the rewrite above — and every test passes.
-  # Only the teardown notices, when `pg_ctl stop` looks for a PID file its own
-  # cluster directory never had:
+  #
+  # Which of the two symptoms you get depends on which worker finishes first,
+  # and neither of them names a port.  If the loser finishes first, its
+  # `pg_ctl stop` looks for a PID file its own cluster directory never had:
   #
   #     RuntimeError: b'pg_ctl: PID file ".../data/postmaster.pid" does not
   #     exist\nIs server running?\n'
   #
-  # That is a session fixture, so it surfaces as an ERROR rather than a failure,
-  # and the --only-rerun patterns below cannot reach it — one worker in 128 then
-  # fails a build in which nothing went wrong.  Tolerating it loses nothing:
-  # pgtest's own `except` clause removes the temporary directory before
-  # re-raising, so the only thing suppressed is the re-raise.  The match is on
-  # the message rather than on RuntimeError, so a cluster that fails to stop for
-  # any other reason still fails the build.
+  # If the winner finishes first, it stops the postmaster out from under a
+  # worker that is still using it, and that worker dies mid-test instead, in
+  # whatever query it happened to be running:
+  #
+  #     FAILED tests/cmdline/commands/test_run.py::TestAutoGroups
+  #       ::test_autogroup_filter_class - AssertionError:
+  #       psycopg.errors.AdminShutdown: terminating connection due to
+  #       administrator command
+  #
+  # PGTest accepts an explicit `port`, so `_create` hands each worker the one
+  # derived from its own index and the race has nowhere left to happen.  A Nix
+  # build gets a private network namespace containing nothing but loopback, so
+  # 45000 + n cannot collide with anything outside the build either.
+  #
+  # `_close` keeps its tolerance as the backstop for the case the port pinning
+  # does not cover: no xdist, so no worker index, so pgtest choosing for itself
+  # again.  That first symptom comes from a session fixture, which surfaces as
+  # an ERROR rather than a failure, and the --only-rerun patterns below cannot
+  # reach it.  Suppressing it loses nothing — pgtest's own `except` clause
+  # removes the temporary directory before re-raising.  The match is on the
+  # message rather than on RuntimeError, so a cluster that fails to stop for any
+  # other reason still fails the build.
   #
   # The three fixture rewrites are a separate matter: a pytest 9
   # incompatibility, not a packaging choice.  Upstream pins `pytest~=7.0`; nixpkgs carries 9.1.1, which
@@ -260,6 +277,38 @@ buildPythonPackage rec {
   # option non-interactively, so click never launches the editor and the string
   # is never split.  They would start failing the moment one of them became
   # interactive, and this is the note that says why.
+  #
+  # The last hunk is not for this package's own suite at all — it is for the
+  # plugins.  src/aiida/manage/tests/pytest_fixtures.py is the *deprecated*
+  # fixture plugin, the one that prints "please use aiida.tools.pytest_fixtures
+  # instead" on import, and its `aiida_profile_factory` hardcodes a
+  # process_control block naming RabbitMQ on 127.0.0.1:5672.  Every plugin here
+  # whose conftest still says `pytest_plugins =
+  # ['aiida.manage.tests.pytest_fixtures']` therefore gets a profile that
+  # *declares* a broker nothing is serving, and the whole point of taking
+  # aiida-core from main is that this build sandbox could never host one.
+  #
+  # Declaring one is worse than declaring none.  Manager.create_runner asks for
+  # a communicator inside a `try: ... except ConfigurationError: pass`, so a
+  # profile with no process_control yields a runner with `communicator=None` and
+  # every in-process test works — which is exactly how ../aiida-octopus, on the
+  # modern plugin, runs a real calcjob here.  A profile that names RabbitMQ
+  # instead gets as far as opening the socket and raises
+  # AMQPConnectionError, which is not a ConfigurationError and so is not caught:
+  #
+  #     FAILED tests/calculations/test_orca.py::test_default
+  #       - aiormq.exceptions.AMQPConnectionError: [Errno 111] Connect call failed
+  #
+  # Deleting the block gives the deprecated plugin the same default the
+  # supported one has had since it replaced it — `broker_backend: str | None =
+  # None` in tools/pytest_fixtures/configuration.py, which omits the key.  A
+  # plugin test that genuinely needs a broker still fails, just with the
+  # ConfigurationError that says so.
+  #
+  # This one patches an installed module rather than tests/, unlike the
+  # /bin/bash rewrite above, and that is deliberate: the module only ever runs
+  # under pytest, and the consumers being fixed are the six AiiDA plugins in
+  # this repo, which are built from this same package set.
   postPatch = ''
     substituteInPlace pyproject.toml \
       --replace-fail "'click>=8.1.0,<8.3'" "'click>=8.1.0'"
@@ -362,6 +411,14 @@ buildPythonPackage rec {
         "'database_username': database_username or 'guest'," \
         "'database_username': database_username or 'guest_' + os.environ.get('PYTEST_XDIST_WORKER', 'master')," \
       --replace-fail \
+        "        try:
+                self.cluster = PGTest()" \
+        "        worker = os.environ.get('PYTEST_XDIST_WORKER', ''')
+            port = 45000 + int(worker[2:]) if worker[:2] == 'gw' and worker[2:].isdigit() else None
+
+            try:
+                self.cluster = PGTest(port=port)" \
+      --replace-fail \
         "    def _close(self):
             if self.cluster is not None:
                 self.cluster.close()" \
@@ -372,6 +429,25 @@ buildPythonPackage rec {
                 except RuntimeError as exception:
                     if 'Is server running?' not in str(exception):
                         raise"
+
+    # broker_virtual_host is an empty Python string upstream.  Two apostrophes
+    # would close this whole block eleven hunks early, so it is written below
+    # as three: that is how a Nix indented string escapes a literal pair.
+    substituteInPlace src/aiida/manage/tests/pytest_fixtures.py \
+      --replace-fail \
+        "            'process_control': {
+                    'backend': 'rabbitmq',
+                    'config': {
+                        'broker_protocol': 'amqp',
+                        'broker_username': 'guest',
+                        'broker_password': 'guest',
+                        'broker_host': '127.0.0.1',
+                        'broker_port': 5672,
+                        'broker_virtual_host': ''',
+                    },
+                },
+                'options': {" \
+        "            'options': {"
   '';
 
   # The locked nixpkgs sits above eight of upstream's upper bounds.  These are

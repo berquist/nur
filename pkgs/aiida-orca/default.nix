@@ -74,9 +74,17 @@ buildPythonPackage rec {
     export AIIDA_PATH="$HOME"
   '';
 
-  postBuild = ''
+  # `aiida_local_code_factory('orca.orca', '/bin/bash')` in tests/conftest.py
+  # asks for an executable a Nix build sandbox does not have — it provides
+  # /bin/sh and nothing else.  See ../aiida-core/default.nix for the long form
+  # of why that surfaces as a parse failure rather than as "no such file".
+  #
+  # patchPhase rather than postBuild: the file is source, the change is
+  # unconditional, and postBuild runs late enough that only the check phase
+  # would ever have seen it.
+  postPatch = ''
     substituteInPlace tests/conftest.py \
-      --replace-fail "/bin/bash" "/${bash}/bin/bash"
+      --replace-fail "/bin/bash" "${bash}/bin/bash"
   '';
 
   # No ORCA binary is needed: the calculation tests build their code node with

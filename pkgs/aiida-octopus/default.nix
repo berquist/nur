@@ -14,6 +14,7 @@
   pytestCheckHook,
   numpy,
   octopus,
+  procps,
   which,
 }:
 
@@ -53,6 +54,22 @@ buildPythonPackage {
     octopus
 
     which
+
+    # The `direct` scheduler polls the job it started with
+    # `ps -o pid,stat,user,time`, and a Nix build sandbox has no procps.  The
+    # test does not fail there — schedulers/plugins/direct.py only logs the
+    # empty joblist as a warning — so the run continues, the calculation is
+    # reported finished before it has written anything, and the assertion that
+    # lands is a KeyError on a parsed output the parser never got:
+    #
+    #     WARNING aiida.scheduler.direct: Warning in _parse_joblist_output,
+    #       non-empty (filtered) stderr='bash: line 1: ps: command not found'
+    #     FAILED tests/test_ground_state.py::test_gs_molecule
+    #       - KeyError: 'convergence'
+    #
+    # ../aiida-core carries procps for the same reason and says so at greater
+    # length; this is the plugin half of it.
+    procps
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.

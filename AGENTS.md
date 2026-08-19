@@ -74,6 +74,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `repeated_keys` disabled? Why does the whitespace hook skip `*.patch`? | `statix.toml`, `flake.nix` |
 | Why does `qcfractalcompute` carry a patch? Why is `parsl` built from the sdist? | the respective `pkgs/*/default.nix` |
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
+| Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
 | Why does `verdi` come from a `withPackages` env instead of `lib.getExe cfg.package`? | `nixos-modules/aiida.nix` (`pythonEnv`) |
 | Why does the AiiDA module ensure the *database* when the QCFractal one deliberately does not? | `nixos-modules/aiida.nix` (`services.postgresql`) |
@@ -100,7 +101,11 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | What does relaxing aiida-core's `click<8.3` cost, and why patch the library? | `pkgs/aiida-core/default.nix` (the comment above `postPatch`) |
 | Why are thirteen `test_remote.py` size-on-disk tests deselected on this machine? | `pkgs/aiida-core/default.nix` (the ZFS note in `pytestFlags`) |
 | Why do the pytest-xdist workers each need their own PostgreSQL role? | `pkgs/aiida-core/default.nix` (the `storage.py` hunk in `postPatch`) |
-| Why does `PostgresCluster._close` tolerate a postmaster that was never running? | `pkgs/aiida-core/default.nix` (the second `storage.py` note above `postPatch`) |
+| Why does `PostgresCluster` pin its port to the xdist worker index, and why does `_close` still tolerate a postmaster that was never running? | `pkgs/aiida-core/default.nix` (the `_create`/`_close` note above `postPatch`) |
+| Why is RabbitMQ deleted from the *deprecated* pytest fixture plugin, and which packages does that fix? | `pkgs/aiida-core/default.nix` (the last note above `postPatch`) |
+| Why does `aiida-pseudo` put its own `$out/bin` on PATH for the check phase? | `pkgs/aiida-pseudo/default.nix` (`preCheck`) |
+| Why does `aiida-gaussian-datatypes` list `aiida-core` twice, once as a dependency and once as a check input? | `pkgs/aiida-gaussian-datatypes/default.nix` (`preCheck`) |
+| Why does `aiida-octopus` need `procps` when the failure is a `KeyError`? | `pkgs/aiida-octopus/default.nix` (`nativeCheckInputs`) |
 | Why is aiida-core's `jq` threaded in from `final` instead of resolved through the Python set? | `overlays/default.nix` (the `aiida-core` callPackage) |
 | Which aiida-core failures are retried rather than deselected, and what makes that sound? | `pkgs/aiida-core/default.nix` (the `--only-rerun` block in `pytestFlags`) |
 | Why does `cp2k-input-tools` declare no `lsp` extra, and drop one console script? | `pkgs/cp2k-input-tools/default.nix` (`postPatch`) |
