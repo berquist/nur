@@ -551,10 +551,15 @@ buildPythonPackage rec {
 
     # tests/calculations/test_stash.py writes its own shell script as the code
     # for a StashCalculation and pipes the calculation's JSON through `jq` to
-    # read source_path, source_list and target_base out of it.  Without jq the
-    # three variables come back empty, the copy loop runs zero times, and the
-    # test fails on `PosixPath(.../target/dummy.txt).exists()` being False —
-    # with nothing anywhere naming jq.
+    # read source_path, source_list and target_base out of it, so the script
+    # cannot work without it.
+    #
+    # Honesty about why it is here: it was added to fix
+    # test_submit_custom_code, and it did not.  That test still fails exactly as
+    # before, and no build log has ever contained "jq: command not found" — the
+    # dependency was read off the script rather than off an error, and the real
+    # cause is still open.  jq stays because the script genuinely needs it, not
+    # because it is known to have fixed anything.
     jq
 
     # `ps`, for the `core.direct` scheduler every calcjob test runs under.
@@ -790,7 +795,32 @@ buildPythonPackage rec {
         # test is about `-v INFO` output and never meant to reach that branch;
         # passing --force instead is not an option, since it would terminate
         # the connection the test session itself is using.
+        #
+        # Four siblings share the cause: every test that invokes `verdi process
+        # repair` expecting success, without --force and without feeding the
+        # prompt.  Whether the prompt fires depends on what else is connected to
+        # the worker's cluster at that instant, so they fail in different
+        # combinations run to run — which is why this list grew after the first
+        # one was deselected alone.  test_process_repair_dry_run and
+        # _running_daemon are deliberately not here: --dry-run never reaches the
+        # prompt, and _running_daemon expects a failure regardless.  The
+        # connection-termination feature itself stays covered by
+        # TestProcessRepairUnreferencedConnections, which drives the prompt on
+        # purpose with user_input and --force.
         "tests/cmdline/commands/test_process.py::test_process_repair_verbosity"
+        "tests/cmdline/commands/test_process.py::test_process_repair_consistent"
+        "tests/cmdline/commands/test_process.py::test_process_repair_duplicate_tasks"
+        "tests/cmdline/commands/test_process.py::test_process_repair_additional_tasks"
+        "tests/cmdline/commands/test_process.py::test_process_repair_missing_tasks"
+
+        # A consequence of the `--broker-backend zmq` chosen above.  The test
+        # monkeypatches the runner's controller to None to reach the "runner
+        # does not have a process controller" branch of aiida.engine.launch,
+        # but with a zeromq profile an earlier guard fires first and raises
+        # "Cannot submit because the daemon is not running.  The ZeroMQ broker
+        # is bundled into the daemon for this profile" instead.  The test passes
+        # under RabbitMQ, which the sandbox cannot supply.
+        "tests/engine/test_launch.py::test_submit_no_broker"
 
         # The click 8.3 residue.  Both drive a command through a --config file
         # and end in `Aborted!` because an InteractiveOption prompts with no
