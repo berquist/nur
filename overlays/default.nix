@@ -408,9 +408,24 @@
           # ci.nix does not build it in its own right.
           aiida-export-migration-tests = pself.callPackage ../pkgs/aiida-export-migration-tests { };
 
-          # See the `pymatgen` binding above for why this one argument is
-          # threaded in by hand rather than resolved through pself.
-          aiida-core = pself.callPackage ../pkgs/aiida-core { inherit pymatgen; };
+          # See the `pymatgen` binding above for why that argument is threaded
+          # in by hand rather than resolved through pself.
+          #
+          # `jq` is threaded in for a different reason: name collision.  Inside
+          # a Python package set the name resolves to the *binding*,
+          # python3.13-jq, and pself wins over final, so a defaulted `jq`
+          # argument in the derivation quietly yields a package with no bin/jq.
+          # PATH is then unchanged, and the one test that needs the program —
+          # tests/calculations/test_stash.py, which writes a shell script that
+          # pipes the calculation's JSON through it — fails with an assertion
+          # about a missing output file.  The words "jq: command not found"
+          # exist, but in the calcjob's _scheduler-stderr.txt inside the build
+          # sandbox, never in the build log.  `final.jq` is the C program, whose
+          # first output is `bin`.
+          aiida-core = pself.callPackage ../pkgs/aiida-core {
+            inherit pymatgen;
+            inherit (final) jq;
+          };
 
           # The six plugins.  Each finds its aiida-core through pself, so a
           # plugin and the core it extends are always the same derivation —

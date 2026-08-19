@@ -146,6 +146,36 @@ buildPythonPackage rec {
   # aiida.tools.pytest_fixtures gets the same fix — and, when not under xdist,
   # a role named guest_master rather than guest.  Both are throwaway clusters.
   #
+  # The second storage.py rewrite, PostgresCluster._close, is the same story at
+  # the other end of the session.  pgtest finds a free port by binding a socket,
+  # reading the number back and closing it again — its own docstring warns that
+  # "another process will steal the port between this function getting the port
+  # and your intended process using it" — and with 128 workers starting clusters
+  # at once, two of them eventually get the same number.  The loser's postmaster
+  # dies at startup:
+  #
+  #     LOG:  could not bind IPv4 address "127.0.0.1": Address already in use
+  #     HINT: Is another postmaster already running on port 47967?
+  #     FATAL:  could not create any TCP/IP sockets
+  #
+  # and, because the winner *is* listening there, pgtest's readiness probe
+  # connects anyway and reports success.  That worker then spends the whole
+  # session on its neighbour's cluster, which works — the databases are uuid4s
+  # and the roles are per-worker, per the rewrite above — and every test passes.
+  # Only the teardown notices, when `pg_ctl stop` looks for a PID file its own
+  # cluster directory never had:
+  #
+  #     RuntimeError: b'pg_ctl: PID file ".../data/postmaster.pid" does not
+  #     exist\nIs server running?\n'
+  #
+  # That is a session fixture, so it surfaces as an ERROR rather than a failure,
+  # and the --only-rerun patterns below cannot reach it — one worker in 128 then
+  # fails a build in which nothing went wrong.  Tolerating it loses nothing:
+  # pgtest's own `except` clause removes the temporary directory before
+  # re-raising, so the only thing suppressed is the re-raise.  The match is on
+  # the message rather than on RuntimeError, so a cluster that fails to stop for
+  # any other reason still fails the build.
+  #
   # The three fixture rewrites are a separate matter: a pytest 9
   # incompatibility, not a packaging choice.  Upstream pins `pytest~=7.0`; nixpkgs carries 9.1.1, which
   # turned "applying a mark to a fixture" from a deprecation warning into a
@@ -330,7 +360,18 @@ buildPythonPackage rec {
     import typing as t" \
       --replace-fail \
         "'database_username': database_username or 'guest'," \
-        "'database_username': database_username or 'guest_' + os.environ.get('PYTEST_XDIST_WORKER', 'master'),"
+        "'database_username': database_username or 'guest_' + os.environ.get('PYTEST_XDIST_WORKER', 'master')," \
+      --replace-fail \
+        "    def _close(self):
+            if self.cluster is not None:
+                self.cluster.close()" \
+        "    def _close(self):
+            if self.cluster is not None:
+                try:
+                    self.cluster.close()
+                except RuntimeError as exception:
+                    if 'Is server running?' not in str(exception):
+                        raise"
   '';
 
   # The locked nixpkgs sits above eight of upstream's upper bounds.  These are
@@ -554,12 +595,10 @@ buildPythonPackage rec {
     # read source_path, source_list and target_base out of it, so the script
     # cannot work without it.
     #
-    # Honesty about why it is here: it was added to fix
-    # test_submit_custom_code, and it did not.  That test still fails exactly as
-    # before, and no build log has ever contained "jq: command not found" — the
-    # dependency was read off the script rather than off an error, and the real
-    # cause is still open.  jq stays because the script genuinely needs it, not
-    # because it is known to have fixed anything.
+    # It must be passed in explicitly by ../../overlays/default.nix, because
+    # `jq` in a Python package set is the *binding*, python3.13-jq, which ships
+    # no bin/jq.  Taking the defaulted argument put that in the closure and left
+    # PATH exactly as it was.  See the callPackage site for the whole story.
     jq
 
     # `ps`, for the `core.direct` scheduler every calcjob test runs under.
@@ -634,6 +673,24 @@ buildPythonPackage rec {
     # Which tests it hits varies run to run, which is what marks them as
     # scheduling artefacts rather than failures.
     #
+    # The fourth is a data race inside plumpy rather than a timing margin, but
+    # it behaves the same way and heals the same way.  Process.spec() builds the
+    # spec on the class itself, in three steps that are not atomic:
+    #
+    #     cls._spec = cls._spec_class()
+    #     cls.__called = False
+    #     cls.define(cls._spec)          # sets cls.__called = True
+    #     assert cls.__called, 'Process.define() was not called by ...'
+    #
+    # Two threads entering that block for the same class — the test's own and
+    # the broker communicator's — can interleave so that the second resets
+    # __called to False between the first's define() and its assert.  The
+    # assertion message then names define(), which reads like a plugin that
+    # forgot super().define(spec), and every AiiDA process class does call it.
+    # A rerun is sound here because plumpy's own `except` clause deletes _spec
+    # and clears __called before re-raising, so the retry rebuilds from scratch
+    # rather than from the half-built state that failed.
+    #
     # `--only-rerun` is why this is not a blanket retry: it takes a regex
     # matched against the *exception message*, so anything failing for any
     # other reason still fails on the first attempt.  Widening these patterns
@@ -658,6 +715,8 @@ buildPythonPackage rec {
     "ZombieProcess"
     "--only-rerun"
     "Process.loading.was.too.slow"
+    "--only-rerun"
+    "Process.define...was.not.called"
   ]
   # The rest of the sshd story that disabledTestPaths below could not tell.
   # These four files each hold local-transport coverage worth keeping here, so
