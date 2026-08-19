@@ -17,6 +17,9 @@
   aiida-testing,
   pgtest,
   postgresql,
+  procps,
+  stdenv,
+  glibcLocalesUtf8,
 }:
 
 buildPythonPackage {
@@ -55,6 +58,58 @@ buildPythonPackage {
   # a migration stub that raises on attribute access — but qcelemental's v1
   # models (which AtomicInput is built on) validate through `pydantic.v1`, so
   # the exception the test wants really is the v1 one, just under its new name.
+  #
+  # `codeinfo.withmpi = self.inputs.metadata.options.withmpi` is the third, and
+  # it is a line that has to go rather than be rewritten.  `metadata.options.
+  # withmpi` is `required=False` with no default in aiida-core 2.x, so when
+  # nothing sets it the key is simply absent and reading it raises through
+  # plumpy's AttributesFrozendict:
+  #
+  #     AttributeError: 'AttributesFrozendict' object has no attribute 'withmpi'
+  #     ... PreSubmitException: exception occurred in presubmit call
+  #
+  # Both examples die there, before Psi4 would have been reached.  A plugin is
+  # no longer supposed to ask: CalcJob.presubmit collects the option, the
+  # plugin's own `CodeInfo.withmpi` and the code's `with_mpi`, requires the ones
+  # that are set to agree, and falls back to the option's default otherwise.
+  # Leaving `CodeInfo.withmpi` as None is how a plugin says it does not care,
+  # which for Psi4 — threaded, not MPI — is the truth.  Upstream aiida-diff
+  # deleted the identical line in its own `updates for aiida 2.5`; see
+  # ../aiida-diff for why this package set has that commit and not the tag.
+  #
+  # The last two hunks rename the recorded mock-code fixtures, for the same
+  # reason ../aiida-testing renames its own: aiida-testing keys a cached result
+  # by an md5 of the calculation's working directory, that directory contains
+  # `_aiidasubmit.sh`, and aiida-core 2.10 does not write the 2021 submit script
+  # byte for byte.  Both recorded digests therefore describe nothing, every
+  # lookup misses, and each example retrieves a folder with only the scheduler's
+  # own files in it:
+  #
+  #     QCSchemaParser: [ERROR] Found files '['_scheduler-stderr.txt',
+  #       '_scheduler-stdout.txt']', expected to find '['output.json']'
+  #     KeyError: 'qcschema'
+  #
+  # Nothing here produces the replacement digests for free, which is what makes
+  # this harder than aiida-testing: conftest.py names no executable for the
+  # `psi4-1.4rc2` label — the whole point, since there is no Psi4 — so a miss has
+  # nothing to run and backs nothing up.  These two came from a build with a
+  # `.aiida-testing-config.yml` naming `true` as that executable, which runs,
+  # writes nothing, and backs the empty result up under the digest the lookup
+  # wanted.  The input file left behind in each says which example it belongs
+  # to: `input.json` is the qcschema one, example_01.
+  #
+  # To do that again after an aiida-core bump — the symptom will be these two
+  # examples and nothing else — put the config back for one run:
+  #
+  #     printf 'mock_code:\n  psi4-1.4rc2: "true"\n' > .aiida-testing-config.yml
+  #
+  # written with printf rather than a heredoc, whose body would have to sit at
+  # column 0 and would drag this whole string's indentation down with it, and
+  # with "true" quoted, because YAML reads it as a boolean otherwise and the
+  # config is validated against a voluptuous schema that wants a str.  Then
+  #
+  #     nix build -L --keep-failed .#python313Packages.aiida-psi4
+  #     ls <kept build dir>/source/tests/data
   postPatch = ''
     substituteInPlace setup.json \
       --replace-fail '"setup_requires": ["reentry"],' "" \
@@ -63,6 +118,17 @@ buildPythonPackage {
     substituteInPlace tests/test_data.py \
       --replace-fail 'from pydantic.error_wrappers import ValidationError' \
                      'from pydantic.v1.error_wrappers import ValidationError'
+
+    substituteInPlace aiida_psi4/calculations.py \
+      --replace-fail \
+        "        codeinfo.code_uuid = self.inputs.code.uuid
+            codeinfo.withmpi = self.inputs.metadata.options.withmpi" \
+        "        codeinfo.code_uuid = self.inputs.code.uuid"
+
+    mv tests/data/mock-psi4-1.4rc2-8ee90fe88003087a30e5fa3bc31a1a44 \
+       tests/data/mock-psi4-1.4rc2-24adc79085d1b8f0d854137ffa8076e6
+    mv tests/data/mock-psi4-1.4rc2-2e539a93de20c9dd9464f293bb8bcc85 \
+       tests/data/mock-psi4-1.4rc2-c3d9025f3730994a7ed9c9e7c030eaad
   '';
 
   # setup.json still declares `aiida-core>=1.6.4,<2.0.0`, `sqlalchemy<1.4` and
@@ -82,6 +148,10 @@ buildPythonPackage {
     sqlalchemy
   ];
 
+  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
+    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
+  '';
+
   nativeCheckInputs = [
     pytestCheckHook
 
@@ -94,6 +164,23 @@ buildPythonPackage {
     # real PostgreSQL.  See ../pgtest for why postgresql is listed too.
     pgtest
     postgresql
+
+    # The `direct` scheduler polls with `ps`, and without it the joblist comes
+    # back empty, the job is declared finished at once, and retrieval takes
+    # whatever exists at that instant.  That is the two `_scheduler-*.txt`
+    # files, which the submit script's own `exec >` redirection created before
+    # anything ran, so the parser reports
+    #
+    #     Found files '['_scheduler-stderr.txt', '_scheduler-stdout.txt']',
+    #     expected to find '['output.json']'
+    #
+    # and the example dies on the missing output.  This one is worth knowing by
+    # its second symptom as well: the mock code's copy lands *after* the
+    # retrieval, so the calculation's working directory looks complete when
+    # inspected afterwards, and the whole thing reads like a cache that was
+    # never consulted.  ../aiida-cp2k, ../aiida-octopus and ../aiida-testing
+    # each lost a calculation to the same missing program.
+    procps
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.
