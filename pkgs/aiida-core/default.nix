@@ -634,14 +634,25 @@ buildPythonPackage rec {
     # other reason still fails on the first attempt.  Widening these patterns
     # would start hiding real bugs, so keep them specific.  pytest-rerunfailures
     # is already a nativeCheckInput because upstream declares it.
+    #
+    # No spaces in these patterns, and that is not a style choice.  Every entry
+    # in `pytestFlags` reaches the hook through `concatTo`, which word-splits,
+    # so an element containing a space arrives as several arguments — the `.`
+    # wildcards below stand in for the spaces.  Spelling the middle one
+    # "Process loading was too slow" silently turned `PID`, `file`, `loading`,
+    # `was` and the rest into positional arguments, pytest read them as test
+    # paths, and the whole run collected `0 items` and reported success at the
+    # pytest level.  The `-k` expression a few lines up looks like a
+    # counter-example but is not: pytestCheckHook builds that one into its bash
+    # array itself, where the quoting survives.
     "--reruns"
     "2"
     "--only-rerun"
-    "pg_ctl: PID file"
+    "pg_ctl"
     "--only-rerun"
     "ZombieProcess"
     "--only-rerun"
-    "Process loading was too slow"
+    "Process.loading.was.too.slow"
   ]
   # The rest of the sshd story that disabledTestPaths below could not tell.
   # These four files each hold local-transport coverage worth keeping here, so
