@@ -228,8 +228,21 @@ in
       description = "Name of the AiiDA profile this module creates and runs.";
     };
 
+    # All four of these reach `verdi profile setup` as explicit flags, and
+    # aiida-core types the last three as `NonEmptyStringParamType` -- so an empty
+    # string is rejected outright rather than treated as "unset":
+    #
+    #     Error: Invalid value for '--institution': Empty string is not valid!
+    #
+    # There is no way to say "leave it to aiida-core" while still passing the
+    # flag, and omitting the flag is not the same thing either: each one is
+    # `required=True` with a default that reads `autofill.user.*` out of the
+    # config, which this module has not written yet at that point in the script
+    # -- so it would fall back to upstream's own `John Doe` at `Unknown`.  Hence
+    # `nonEmptyStr` on all three, so setting one to "" fails at evaluation with
+    # the option path named rather than at boot inside aiida-init.service.
     userEmail = lib.mkOption {
-      type = lib.types.str;
+      type = lib.types.nonEmptyStr;
       default = "aiida@localhost";
       description = ''
         Email identifying the profile's default user.
@@ -241,20 +254,22 @@ in
     };
 
     firstName = lib.mkOption {
-      type = lib.types.str;
+      type = lib.types.nonEmptyStr;
       default = "AiiDA";
       description = "First name of the profile's default user.";
     };
 
     lastName = lib.mkOption {
-      type = lib.types.str;
+      type = lib.types.nonEmptyStr;
       default = "Daemon";
       description = "Last name of the profile's default user.";
     };
 
     institution = lib.mkOption {
-      type = lib.types.str;
-      default = "";
+      type = lib.types.nonEmptyStr;
+      # Upstream's own fallback, for want of anything truer about a machine that
+      # is by definition not at one.
+      default = "Unknown";
       description = "Institution of the profile's default user.";
     };
 
