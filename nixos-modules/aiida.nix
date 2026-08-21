@@ -159,6 +159,93 @@ let
     ''}
   '';
 
+  sqlString = s: "'" + lib.replaceStrings [ "'" "\\" ] [ "''" "\\\\" ] s + "'";
+  sqlIdent = s: "\"" + lib.replaceStrings [ "\"" ] [ "\"\"" ] s + "\"";
+
+  dbNameSql = sqlString cfg.database.name;
+  dbUserSql = sqlString cfg.database.user;
+  dbNameIdent = sqlIdent cfg.database.name;
+  dbUserIdent = sqlIdent cfg.database.user;
+
+  dbLocale = "en_US.UTF-8";
+
+  postgresSetupScript = pkgs.writeShellScript "aiida-postgresql-setup" ''
+    set -euo pipefail
+
+    role_exists="$(
+      psql -XAt -d postgres -c \
+        "SELECT 1 FROM pg_roles WHERE rolname = ${dbUserSql}"
+    )"
+
+    if [ "$role_exists" != "1" ]; then
+      pqsl -X -d postgres -v ON_ERROR_STOP=1 -c \
+        "CREATE ROLE ${dbUserIdent} LOGIN"
+    fi
+
+    ${lib.optionalString (cfg.database.passwordFile != null) ''
+      AIIDA_DB_PASSWORD="$(< "$CREDENTIALS_DIRECTORY/db-password")"
+
+      # Use psql's :'var' form so the password is quoted as an SQL string by
+      # psql and never interpolated into the Nix store.
+      psql -X -d postgres -v ON_ERROR_STOP=1 \
+        -v password="$AIIDA_DB_PASSWORD" \
+        -c "ALTER_ ROLE ${dbUserIdent} WITH PASSWORD :'password'"
+    ''}
+
+    db_exists="$(
+      psql -XAt -d postgres -c \
+      "SELECT 1 FROM pg_database WHERE datname = ${dbNameSql}"
+    )"
+
+    if [ "$db_exists" != "1" ]; then
+      createdb \
+        --owner=${lib.escapeShellArg cfg.database.user} \
+        --encoding=UTF8 \
+        --lc-collate=${lib.escapeShellArg dbLocale} \
+        --lc-ctype=${lib.escapeShellArg dbLocale} \
+        --template=template0 \
+        ${lib.escapeShellArg cfg.database.name}
+    else
+      actual_lc_collate="$(
+        psql -XAt -d postgres -c \
+          "SELECT datcollate FROM pg_database WHERE datname = ${dbNameSql}"
+      )"
+
+      actual_lc_ctype="$(
+        psql -XAt -d postgres -c \
+          "SELECT datctype FROM pg_database WHERE datname = ${dbNameSql}"
+      )"
+
+      if [ "$actual_lc_collate" != "${lib.escapeShellArg dbLocale}" ] \
+        || [ "$actual_lc_ctype" != "${lib.escapeShellArg dbLocale}" ]; then
+        echo "AiiDA database ${cfg.database.name} already exists with locale:" >&2
+        echo "  LC_COLLATE=$actual_lc_collate" >&2
+        echo "  LC_CTYPE=$actual_lc_ctype" >&2
+        echo "but this module requires:" >&2
+        echo "  LC_COLLATE=${dbLocale}" >&2
+        echo "  LC_CTYPE=${dbLocale}" >&2
+        echo "PostgreSQL cannot change a database locale in place." >&2
+        echo "Create a new database or dump/recreate this one." >&2
+        exit 1
+      fi
+
+      psql -X -d postgres -v ON_ERROR_STOP=1 -c \
+        "ALTER DATABASE ${dbNameIdent} OWNER TO ${dbUserIdent}"
+    fi
+
+    psql -X -d postgres -v ON_ERROR_STOP=1 -c \
+      "GRANT ALL PRIVILEGES ON DATABASE ${dbNameIdent} TO ${dbUserIdent}"
+
+    # On modern PostgreSQL this is usually covered by database ownership via
+    # pg_database_owner, but doing it explicitly makes the intended AiiDA
+    # ownership model robust across PostgreSQL versions and upgraded clusters.
+    psql -X -d ${lib.escapeShellArg cfg.database.name} -v ON_ERROR_STOP=1 -c \
+      "ALTER SCHEMA public OWNER to ${dbUserIdent}"
+
+    psql -X -d ${lib.escapeShellArg cfg.database.name} -v ON_ERROR_STOP=1 -c \
+      "GRANT ALL PRIVILEGES ON SCHEMA public to ${dbUserIdent}"
+  '';
+
 in
 {
   options.services.aiida = {
@@ -634,13 +721,28 @@ in
     # and it does not create the database.
     services.postgresql = lib.mkIf localDB {
       enable = lib.mkDefault true;
-      ensureDatabases = [ cfg.database.name ];
-      ensureUsers = [
-        {
-          name = cfg.database.user;
-          ensureDBOwnership = true;
-        }
-      ];
+    };
+
+    systemd.services.aiida-postgresql-setup = lib.mkIf localDB {
+      description = "AiiDA - create local PostgreSQL role and database";
+
+      after = [ "postgresql.target" ];
+      requires = [ "postgresql.target" ];
+
+      path = [ config.services.postgresql.package ];
+
+      environment.PGHOST = "/run/postgresql";
+
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        User = "postgres";
+        Group = "postgres";
+        ExecStart = postgresSetupScript;
+      }
+      // lib.optionalAttrs (cfg.database.passwordFile != null) {
+        LoadCredential = [ "db-password:${cfg.database.passwordFile}" ];
+      };
     };
 
     services.rabbitmq = lib.mkIf localRabbit {
@@ -667,9 +769,10 @@ in
       after = [
         "network.target"
       ]
-      ++ lib.optional localDB "postgresql.target"
+      ++ lib.optional localDB "aiida-postgresql-setup.target"
       ++ lib.optional localRabbit "rabbitmq.service";
-      requires = lib.optional localDB "postgresql.target" ++ lib.optional localRabbit "rabbitmq.service";
+      requires =
+        lib.optional localDB "aiida-postgresql-setup.target" ++ lib.optional localRabbit "rabbitmq.service";
 
       environment.AIIDA_PATH = cfg.stateDir;
 
