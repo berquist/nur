@@ -97,6 +97,11 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `octopus` a defaulted argument to `postopus`, and why `enableMpi = false` *and* `netcdffortran`? | `pkgs/postopus/default.nix` (the `octopus` argument), `overlays/default.nix` (the `postopus` callPackage) |
 | Why is nixpkgs' `rdkit` rebuilt just to add a `.dist-info`, and what is the cheaper option? | `overlays/default.nix` (the `rdkit` binding in the `cheminformatics` extension) |
 | Why do aiida-core's SSH transport tests live in a VM test rather than its check phase? | `pkgs/aiida-core/default.nix` (`disabledTestPaths`), `tests/aiida/vm.nix` (`transports-ssh`) |
+| Why does the SSH VM hand itself a `/bin/bash` instead of patching the suite like the build does? | `tests/aiida/vm.nix` (`systemd.tmpfiles.rules` in `transports-ssh`) |
+| Why does the process checker exit 3, and why does the poller raise on it rather than keep polling? | `tests/aiida/vm.nix` (`checkProcess`, `awaitProcess`) |
+| Why does a process that never leaves WAITING dump the daemon log, and where does that path come from? | `tests/aiida/vm.nix` (`daemonLog`, `dump_process_diagnostics` in `awaitProcess`) |
+| Why does the daemon unit put `bash` and `procps` on its PATH, when NixOS already supplies coreutils? | `nixos-modules/aiida.nix` (`path` on `systemd.services.aiida-daemon`) |
+| Why does `plumpy` catch one more exception than upstream, and what does RabbitMQ 4 have to do with it? | `pkgs/plumpy/default.nix` (`postPatch`) |
 | Why does aiida-core want `procps`, `rsync` and `vim` as check inputs? | `pkgs/aiida-core/default.nix` (`nativeCheckInputs`) |
 | What does relaxing aiida-core's `click<8.3` cost, and why patch the library? | `pkgs/aiida-core/default.nix` (the comment above `postPatch`) |
 | Why are thirteen `test_remote.py` size-on-disk tests deselected on this machine? | `pkgs/aiida-core/default.nix` (the ZFS note in `pytestFlags`) |

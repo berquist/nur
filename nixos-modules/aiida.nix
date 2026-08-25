@@ -55,6 +55,10 @@ let
   # needs it to track the circus arbiter under Type=forking.
   circusPidFile = "${configDir}/daemon/circus-${cfg.profileName}.pid";
 
+  # RuntimeDirectory= is relative to /run and must not start with a slash.  See
+  # the TMPDIR note on the daemon unit for what lives here.
+  runtimeDirectory = "aiida";
+
   # `verdi config set` takes strings; booleans have to be spelled the way
   # AiiDA's option parser expects rather than the way Nix prints them.
   configOptionValue = v: if lib.isBool v then (if v then "True" else "False") else toString v;
@@ -92,6 +96,38 @@ let
         AIIDA_BROKER_PASSWORD='${cfg.broker.password}'
       '';
 
+  # A Unix socket directory cannot be spelled as a hostname in a profile.
+  #
+  # create_sqlalchemy_engine() in aiida/storage/psql_dos/utils.py interpolates
+  # `database_hostname` straight into a SQLAlchemy URL:
+  #
+  #   postgresql+psycopg://{user}:{password}@{hostname}:{port}/{name}
+  #
+  # With hostname = "/run/postgresql" that is
+  # `...@/run/postgresql:5432/aiida`, whose authority is empty and whose *path*
+  # is everything after the `@`.  SQLAlchemy parses the database name out of the
+  # path, so the profile comes up asking PostgreSQL for a database literally
+  # named `run/postgresql:5432/aiida` and initialisation dies with
+  #
+  #   FATAL: database "run/postgresql:5432/aiida" does not exist
+  #
+  # Percent-encoding the path is not a way out: SQLAlchemy's URL parser does not
+  # unquote the host, so `%2Frun%2Fpostgresql` reaches libpq verbatim.
+  #
+  # The value AiiDA does support here is the empty string -- utils.py has an
+  # explicit `config['database_hostname'] or ''` for exactly the peer-auth case.
+  # That leaves the host out of the connection entirely, which is what makes
+  # libpq fall back to PGHOST, set on each unit below.
+  hostIsSocketDir = lib.hasPrefix "/" cfg.database.host;
+
+  profileHostname = if hostIsSocketDir then "" else cfg.database.host;
+
+  # Only the units need this: nixpkgs patches libpq's DEFAULT_PGSOCKET_DIR from
+  # /tmp to /run/postgresql, so an operator running `verdi` by hand reaches the
+  # default cluster anyway.  Setting it explicitly is what keeps a non-default
+  # database.host working.
+  socketEnvironment = lib.optionalAttrs hostIsSocketDir { PGHOST = cfg.database.host; };
+
   # `verdi profile setup core.psql_dos` both creates the profile and initialises
   # the storage -- create_profile() calls storage_cls.initialise().  There is no
   # separate schema-creation step the way qcfractal has `init-db`.
@@ -110,7 +146,7 @@ let
         --last-name '${cfg.lastName}' \
         --institution '${cfg.institution}' \
         --broker '${cfg.broker.backend}' \
-        --database-hostname '${cfg.database.host}' \
+        --database-hostname '${profileHostname}' \
         --database-port '${toString cfg.database.port}' \
         --database-name '${cfg.database.name}' \
         --database-username '${cfg.database.user}' \
@@ -178,7 +214,7 @@ let
     )"
 
     if [ "$role_exists" != "1" ]; then
-      pqsl -X -d postgres -v ON_ERROR_STOP=1 -c \
+      psql -X -d postgres -v ON_ERROR_STOP=1 -c \
         "CREATE ROLE ${dbUserIdent} LOGIN"
     fi
 
@@ -189,7 +225,7 @@ let
       # psql and never interpolated into the Nix store.
       psql -X -d postgres -v ON_ERROR_STOP=1 \
         -v password="$AIIDA_DB_PASSWORD" \
-        -c "ALTER_ ROLE ${dbUserIdent} WITH PASSWORD :'password'"
+        -c "ALTER ROLE ${dbUserIdent} WITH PASSWORD :'password'"
     ''}
 
     db_exists="$(
@@ -216,8 +252,8 @@ let
           "SELECT datctype FROM pg_database WHERE datname = ${dbNameSql}"
       )"
 
-      if [ "$actual_lc_collate" != "${lib.escapeShellArg dbLocale}" ] \
-        || [ "$actual_lc_ctype" != "${lib.escapeShellArg dbLocale}" ]; then
+      if [ "$actual_lc_collate" != ${lib.escapeShellArg dbLocale} ] \
+        || [ "$actual_lc_ctype" != ${lib.escapeShellArg dbLocale} ]; then
         echo "AiiDA database ${cfg.database.name} already exists with locale:" >&2
         echo "  LC_COLLATE=$actual_lc_collate" >&2
         echo "  LC_CTYPE=$actual_lc_ctype" >&2
@@ -769,12 +805,16 @@ in
       after = [
         "network.target"
       ]
-      ++ lib.optional localDB "aiida-postgresql-setup.target"
+      ++ lib.optional localDB "aiida-postgresql-setup.service"
       ++ lib.optional localRabbit "rabbitmq.service";
       requires =
-        lib.optional localDB "aiida-postgresql-setup.target" ++ lib.optional localRabbit "rabbitmq.service";
+        lib.optional localDB "aiida-postgresql-setup.service"
+        ++ lib.optional localRabbit "rabbitmq.service";
 
-      environment.AIIDA_PATH = cfg.stateDir;
+      environment = {
+        AIIDA_PATH = cfg.stateDir;
+      }
+      // socketEnvironment;
 
       serviceConfig = {
         Type = "oneshot";
@@ -800,7 +840,10 @@ in
       ++ lib.optional localDB "postgresql.target";
       requires = [ "aiida-init.service" ] ++ lib.optional localDB "postgresql.target";
 
-      environment.AIIDA_PATH = cfg.stateDir;
+      environment = {
+        AIIDA_PATH = cfg.stateDir;
+      }
+      // socketEnvironment;
 
       serviceConfig = {
         Type = "oneshot";
@@ -834,9 +877,62 @@ in
       # not merely referenced by absolute path in ExecStart.  cfg.extraPackages
       # is here because a core.local calculation is launched by the worker and
       # inherits this PATH.
-      path = [ pythonEnv ] ++ cfg.extraPackages;
+      #
+      # bash and procps are the two a `core.local` computer needs and NixOS
+      # does not already supply.  `stage2ServiceConfig` in
+      # nixos/lib/systemd-lib.nix gives every unit coreutils, findutils,
+      # gnugrep, gnused and systemd, and nothing else -- no shell, and no `ps`:
+      #
+      #   bash    Transport.__init__ sets `_bash_command_str = 'bash -l '`, and
+      #           LocalTransport._exec_command_internal runs *every* command as
+      #           `bash -l -c ...`, resolved from PATH.  Without it no transport
+      #           command runs at all.
+      #   procps  the `core.direct` scheduler polls job state with
+      #           `ps -xo pid,stat,user,time` (schedulers/plugins/direct.py), so
+      #           without it a job that has been submitted is never seen to
+      #           finish.
+      #
+      # The symptom is silence rather than an error: the calcjob is created, the
+      # parent workchain enters WAITING, and it stays there forever.  That is
+      # what tests/aiida/vm.nix's workchain-arithmetic and daemon-rabbitmq both
+      # did -- for the full 900-second timeout, with nothing in the journal, the
+      # node report or the broker log to say why.
+      #
+      # `bash -l` does source /etc/profile, which would repair PATH from the
+      # inside, but only once bash itself has been found, and not at all for a
+      # computer configured with `use_login_shell = False`.  Naming both here is
+      # what makes this independent of that.
+      path = [
+        pythonEnv
+        pkgs.bash
+        pkgs.procps
+      ]
+      ++ cfg.extraPackages;
 
-      environment.AIIDA_PATH = cfg.stateDir;
+      environment = {
+        AIIDA_PATH = cfg.stateDir;
+
+        # Where circus puts its control sockets, and the one setting that makes
+        # `verdi status` outside this unit agree with the daemon inside it.
+        #
+        # DaemonClient talks to the circus arbiter over ipc:// sockets, and
+        # get_circus_socket_directory() in aiida/engine/daemon/client.py puts
+        # them in a `tempfile.mkdtemp()` -- deliberately, because a Unix socket
+        # path may not exceed 107 bytes and the config directory can be nested
+        # arbitrarily deep.  It records the directory it chose in
+        # ${configDir}/daemon/circus-<profile>-socket, which is how every other
+        # `verdi` process finds the running daemon.
+        #
+        # With PrivateTmp below, that recorded path names a directory in the
+        # unit's own /tmp namespace, so an operator's `verdi status` resolves it
+        # to an empty directory on the host and reports "Connection to the
+        # daemon timed out" against a daemon that is running perfectly well.
+        #
+        # RuntimeDirectory gives us a short path outside /tmp that survives the
+        # namespace, so PrivateTmp can stay on.
+        TMPDIR = "/run/${runtimeDirectory}";
+      }
+      // socketEnvironment;
 
       # Bound the restart loop.  With RestartSec=15s systemd's default start
       # limit (5 failures in 10s) can never trigger, so a permanently broken
@@ -860,6 +956,11 @@ in
         WorkingDirectory = cfg.stateDir;
         Restart = "on-failure";
         RestartSec = "15s";
+
+        # Backs TMPDIR above.  systemd adds it to ReadWritePaths for us and
+        # removes it when the unit stops, so a restart cannot inherit a socket
+        # directory from the arbiter that just died.
+        RuntimeDirectory = runtimeDirectory;
 
         ExecStart = "${verdi} -p ${cfg.profileName} daemon start ${toString cfg.workers}";
         ExecStop = "${verdi} -p ${cfg.profileName} daemon stop";

@@ -228,19 +228,74 @@ lib.fix (self: {
   # ../qcarchive/default.nix (server-db-not-precreated) is not a contradiction —
   # the two tools bootstrap differently, and getting either backwards leaves a
   # service that cannot start.
+  #
+  # ensureDatabases/ensureUsers cannot do it: AiiDA wants the database created
+  # with an explicit UTF-8 locale, which those options do not express, so the
+  # module carries its own aiida-postgresql-setup unit instead.
   aiida-postgres-creates-database = check "aiida-postgres-creates-database" (
     let
       cfg = evalAiida { services.aiida.enable = true; };
+      setup = cfg.systemd.services.aiida-postgresql-setup;
     in
-    cfg.services.postgresql.ensureDatabases == [ "aiida" ]
-    && (
-      let
-        users = cfg.services.postgresql.ensureUsers;
-      in
-      builtins.length users == 1
-      && (builtins.head users).name == "aiida"
-      && (builtins.head users).ensureDBOwnership
-    )
+    cfg.systemd.services ? aiida-postgresql-setup
+    && setup.serviceConfig.User == "postgres"
+    && setup.serviceConfig.Type == "oneshot"
+    && setup.serviceConfig.RemainAfterExit
+    && builtins.elem "postgresql.target" setup.requires
+  );
+
+  # The unit above is pulled in by nothing else — it has no wantedBy — so the
+  # ordering edge from aiida-init is the only thing that runs it.  Naming a unit
+  # that does not exist is silent: systemd drops the job and aiida-init sits
+  # inactive with no pending jobs, which is how ".target" instead of ".service"
+  # got through once already.
+  aiida-init-requires-postgres-setup = check "aiida-init-requires-postgres-setup" (
+    let
+      cfg = evalAiida { services.aiida.enable = true; };
+      init = cfg.systemd.services.aiida-init;
+    in
+    builtins.elem "aiida-postgresql-setup.service" init.requires
+    && builtins.elem "aiida-postgresql-setup.service" init.after
+  );
+
+  # A Unix socket directory cannot be spelled as a hostname in a SQLAlchemy URL,
+  # which is what aiida-core builds the profile's connection from.  See the
+  # profileHostname binding in ../../nixos-modules/aiida.nix for the failure it
+  # produces.  The socket directory has to reach libpq through PGHOST instead.
+  aiida-socket-host-not-in-profile = check "aiida-socket-host-not-in-profile" (
+    let
+      cfg = evalAiida { services.aiida.enable = true; };
+      pghost = unit: cfg.systemd.services.${unit}.environment.PGHOST or null;
+    in
+    pghost "aiida-init" == "/run/postgresql"
+    && pghost "aiida-storage-migrate" == "/run/postgresql"
+    && pghost "aiida-daemon" == "/run/postgresql"
+  );
+
+  # An external server is an ordinary hostname and belongs in the profile, so
+  # PGHOST must not appear at all.
+  aiida-remote-host-in-profile = check "aiida-remote-host-in-profile" (
+    let
+      cfg = evalAiida {
+        services.aiida = {
+          enable = true;
+          database.createLocally = false;
+          database.host = "db.example.com";
+        };
+      };
+    in
+    !(cfg.systemd.services.aiida-init.environment ? PGHOST)
+  );
+
+  # circus reaches its arbiter over ipc:// sockets in a mkdtemp directory, so
+  # PrivateTmp would hide them from every `verdi` outside the unit.  TMPDIR and
+  # RuntimeDirectory are what keep the two agreeing.
+  aiida-daemon-socket-dir-shared = check "aiida-daemon-socket-dir-shared" (
+    let
+      cfg = evalAiida { services.aiida.enable = true; };
+      daemon = cfg.systemd.services.aiida-daemon;
+    in
+    daemon.environment.TMPDIR == "/run/aiida" && daemon.serviceConfig.RuntimeDirectory == "aiida"
   );
 
   # createLocally = false: postgresql must not be touched.

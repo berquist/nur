@@ -54,6 +54,13 @@ let
   # load_profile().
   runScript = script: asAiida "${verdi} run ${script}";
 
+  # The daemon worker's own log.  A process wedged in WAITING writes nothing to
+  # the journal, nothing to its own node report and nothing to the broker's log
+  # — the worker's log file is the only place that says what it was doing.  The
+  # path follows AiiDA's own layout under AIIDA_PATH: `.aiida/daemon/log/` plus
+  # the profile name, both fixed here for the same reason `verdi` is.
+  daemonLog = "/var/lib/aiida/.aiida/daemon/log/aiida-main.log";
+
   # A code node for /bin/bash, which is what ArithmeticAddCalculation actually
   # executes: its input file is a shell script computing x + y.  pkgs.bash
   # rather than /bin/bash, which NixOS does not provide.
@@ -91,9 +98,17 @@ let
     print(node.pk)
   '';
 
-  # Report on a submitted process: exit 0 only once it has finished, printing
-  # the named output.  Shared by the workchain and the CP2K tests, which differ
-  # only in which output they read.
+  # Report on a submitted process, with three distinct exit codes, because the
+  # poller below has to tell "not yet" apart from "never".  Shared by the
+  # workchain and the CP2K tests, which differ only in which output they read.
+  #
+  #   0  finished OK, and the named output is on stdout
+  #   1  not terminated yet — keep polling
+  #   3  terminated without finishing OK — stop, the diagnosis is on stdout
+  #
+  # Everything goes to stdout rather than stderr because the test driver pipes
+  # only stdout back to itself; stderr reaches the console log, but not the
+  # string the poller can quote in the error it raises.
   checkProcess =
     outputExpression:
     pkgs.writeText "check-process.py" ''
@@ -107,9 +122,29 @@ let
           sys.exit(f"still running: {node.process_state}")
 
       if not node.is_finished_ok:
-          # Surface the reason in the test log rather than leaving a bare
-          # timeout to be diagnosed from the VM's journal.
-          sys.exit(f"process failed: state={node.process_state} exit={node.exit_status} {node.exit_message}")
+          print(f"process failed: state={node.process_state} exit={node.exit_status} {node.exit_message}")
+
+          # EXCEPTED carries no exit code at all — the traceback is here and
+          # nowhere else, which is what a bare `exit=None None` was hiding.
+          print(f"exception: {node.exception}")
+
+          from aiida.cmdline.utils.common import (
+              get_calcjob_report,
+              get_process_function_report,
+              get_workchain_report,
+          )
+
+          # The dispatch `verdi process report` itself does: no single helper
+          # covers every process class.  For a WorkChain this descends into the
+          # children, so a calcjob that failed under it reports here too.
+          if isinstance(node, orm.CalcJobNode):
+              print(get_calcjob_report(node))
+          elif isinstance(node, orm.WorkChainNode):
+              print(get_workchain_report(node, "REPORT"))
+          elif isinstance(node, (orm.CalcFunctionNode, orm.WorkFunctionNode)):
+              print(get_process_function_report(node))
+
+          sys.exit(3)
 
       print(${outputExpression})
     '';
@@ -121,13 +156,54 @@ let
 
   # Poll until a submitted process reaches a terminal state, then read its
   # result back.  `retry` comes from the NixOS test driver.
+  #
+  # Exit code 3 is re-raised rather than polled through.  A process that has
+  # terminated without finishing OK will not change state again, so continuing
+  # to ask can only burn the whole timeout and then report the timeout instead
+  # of the fault — which is exactly what happened to daemon-rabbitmq: it knew
+  # at 78 seconds that the workchain had EXCEPTED, then spent 911 more seconds
+  # printing the same line 150 times and died claiming it had timed out.
+  # `retry` calls this predicate directly, so an exception here propagates out
+  # of it untouched, and the report goes into the failure message.
+  # A process that never leaves WAITING is the other half of the problem, and
+  # the checker cannot speak to it: it reports only on terminal states, so a
+  # hang produces 150 identical "still running" lines and then a bare timeout.
+  # Dumping these three on the way out covers it — `process status` gives the
+  # tree and each node's state, which is what says whether the child calcjob
+  # was ever created and where it stopped; `process report` gives the log
+  # entries; the daemon log gives the worker's side.  They run on the way out
+  # of both failure paths, so the terminal case gets them too.
   awaitProcess = checker: pk: ''
+    import datetime
+
     def process_finished(_):
-        status, _output = machine.execute(${builtins.toJSON (runScript checker)} + f" {${pk}}")
+        status, output = machine.execute(${builtins.toJSON (runScript checker)} + f" {${pk}}")
+        if status == 3:
+            raise Exception(
+                f"process {${pk}} reached a terminal state without finishing OK:\n" + output
+            )
         return status == 0
 
+    def dump_process_diagnostics():
+        for label, command in [
+            ("verdi process status", ${builtins.toJSON (asAiida "${verdi} process status")} + f" {${pk}}"),
+            ("verdi process report", ${builtins.toJSON (asAiida "${verdi} process report")} + f" {${pk}}"),
+            ("verdi process list -a", ${builtins.toJSON (asAiida "${verdi} process list -a")}),
+            ("daemon log", ${builtins.toJSON (asAiida "tail -n 400 ${daemonLog}")}),
+        ]:
+            # Status ignored on purpose: this runs while something has already
+            # gone wrong, and a diagnostic that raises would replace the fault
+            # with itself.
+            _status, out = machine.execute(command)
+            print(f"----- {label} -----")
+            print(out)
+
     with machine.nested("waiting for process ${pk} to finish"):
-        retry(process_finished, timeout_seconds = 900)
+        try:
+            retry(process_finished, timeout = datetime.timedelta(seconds = 900))
+        except Exception:
+            dump_process_diagnostics()
+            raise
   '';
 
 in
@@ -448,7 +524,13 @@ in
       # package's check phase uses.  Storage stays on conftest's sqlite default:
       # unlike the build there is no pgtest cluster here, and none of these
       # files is about the storage backend.
-      pytest = "${pythonEnv}/bin/pytest --override-ini=addopts= -p no:cacheprovider --broker-backend zmq";
+      #
+      # --tb=short instead of the default: the driver logs the whole output of
+      # a failed `succeed`, so nothing here needs to trim it, and a run that
+      # fails four times out of 498 should say why four times rather than once.
+      # An earlier `| tail -40` did trim it, and cost three of four diagnoses —
+      # it also handed `succeed` tail's exit status rather than pytest's.
+      pytest = "${pythonEnv}/bin/pytest --override-ini=addopts= -p no:cacheprovider --broker-backend zmq --tb=short";
     in
     pkgs.testers.nixosTest {
       name = "aiida-transports-ssh";
@@ -475,6 +557,26 @@ in
         environment.systemPackages = [
           pythonEnv
           pkgs.openssh
+        ];
+
+        # NixOS puts nothing in /bin but `sh`, and four of these tests want
+        # /bin/bash specifically.  Two of them are the memory-leak tests, which
+        # install a code whose `filepath_executable` is that literal path; the
+        # calcjob then "finishes" with an empty output file and the parser
+        # returns 320, which is the same indirect failure
+        # ../../pkgs/aiida-core/default.nix works around with a sed over tests/.
+        # The other two are TestAuthenticationScript, which writes a script with
+        # a `#!/bin/bash` shebang and runs it through `shell=True` — that sed
+        # never matched them, since it only rewrites /bin/bash quoted on both
+        # sides, and tests/transports/ is held out of the build regardless.  So
+        # this VM is the first place they run at all.
+        #
+        # Supplying the path rather than rewriting the source is what keeps the
+        # promise made below: the suite runs here exactly as upstream wrote it,
+        # so a pass means the real test passed.  A real cluster has /bin/bash
+        # too, which makes this the more faithful environment, not a fudged one.
+        systemd.tmpfiles.rules = [
+          "L+ /bin/bash - - - - ${lib.getExe pkgs.bash}"
         ];
       };
 
@@ -516,6 +618,13 @@ in
             "sudo -u tester ssh -o BatchMode=yes localhost true"
         )
 
+        # Likewise for the /bin/bash the node config supplies.  Without it four
+        # of these tests fail on a missing interpreter, and neither failure says
+        # so: the calcjob ones surface as a parser exit code 320 and the
+        # authentication-script ones as a wrong exit code.  Asserting it here
+        # turns a silently reintroduced regression into one obvious line.
+        machine.succeed("test -x /bin/bash")
+
         machine.succeed("cp -r ${testSrc} /home/tester/aiida-core")
         machine.succeed("chown -R tester:users /home/tester/aiida-core")
 
@@ -536,7 +645,7 @@ in
             " tests/orm/nodes/data/test_remote.py"
             " tests/tools/pytest_fixtures/test_orm.py"
             " tests/orm/data/code/test_installed.py"
-            " 2>&1 | tail -40"
+            " 2>&1"
         )
         print(output)
       '';
@@ -572,6 +681,14 @@ in
             # nixpkgs is far past that, so without this every `verdi`
             # invocation in this test would print an unsupported-version
             # warning.  Silencing it keeps a real complaint visible.
+            #
+            # The gap is not only cosmetic.  On 4.2.5 this test also excepted
+            # with `aiormq DeliveryError (None, Basic.Nack)` the moment the
+            # workchain's first calcfunction broadcast its own state change:
+            # the submitting `verdi run` drops its exclusive broadcast queue as
+            # it exits, and RabbitMQ 4 nacks a confirmed publish routed at a
+            # queue mid-teardown.  ../../pkgs/plumpy/default.nix carries the
+            # patch, and this test is what fails if it is ever dropped.
             "warnings.rabbitmq_version" = false;
           };
         };
