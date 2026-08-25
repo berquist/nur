@@ -32,6 +32,27 @@
       nixosConfigurations.meyeri = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
+          # ── Binary caches ─────────────────────────────────────────────────
+          # Without these you build the lot from source, Psi4 included.  Both
+          # lists concatenate with what NixOS already defines, so cache.nixos.org
+          # is not lost.
+          #
+          # The flake declares the same two in nixConfig, but Nix ignores that
+          # unless the invoking user is in trusted-users — setting them here
+          # instead is what makes them apply to nixos-rebuild.
+          {
+            nix.settings = {
+              substituters = [
+                "https://nur-berquist.cachix.org"
+                "https://nix-qchem.cachix.org"
+              ];
+              trusted-public-keys = [
+                "nur-berquist.cachix.org-1:Hoz7CuoAaFYOUxiy5zcrHEM82xJKjilI24ly0W+1kq4="
+                "nix-qchem.cachix.org-1:ZjRh1PosWRj7qf3eukj4IxjhyXx6ZwJbXvvFk3o3Eos="
+              ];
+            };
+          }
+
           # ── Overlays ──────────────────────────────────────────────────────
           # Apply the combined overlay: adds pkgs.qchem.* (NixOS-QChem) and
           # pkgs.qcfractal / pkgs.qcfractalcompute (QCFractal Python packages).

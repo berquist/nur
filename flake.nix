@@ -67,17 +67,29 @@
     };
   };
 
-  # Binary cache for NixOS-QChem (Psi4 and CFOUR are large; fetch binaries
-  # rather than compiling from source).
+  # Binary caches.
+  #
+  #   nix-qchem      NixOS-QChem's own Hydra output.  Psi4 and CFOUR are large;
+  #                  fetch binaries rather than compiling from source.
+  #   nur-berquist   this repo's, populated by .github/workflows/build.yml from
+  #                  `just ci-build` on every push to main and nightly.  It is
+  #                  where the packages nixpkgs does not carry come from, and
+  #                  since the qchem set is rebuilt against the compute
+  #                  worker's interpreter (see qchemPkgs below), it is also the
+  #                  only cache that has *that* Psi4.
   #
   # Note that Nix ignores extra-substituters unless the invoking user is in
   # trusted-users.  Without that, `nix flake check` silently builds Psi4 from
   # source no matter how correct the pinning above is — look for "warning:
   # ignoring untrusted flake configuration setting" before blaming the hashes.
   nixConfig = {
-    extra-substituters = [ "https://nix-qchem.cachix.org" ];
+    extra-substituters = [
+      "https://nix-qchem.cachix.org"
+      "https://nur-berquist.cachix.org"
+    ];
     extra-trusted-public-keys = [
       "nix-qchem.cachix.org-1:ZjRh1PosWRj7qf3eukj4IxjhyXx6ZwJbXvvFk3o3Eos="
+      "nur-berquist.cachix.org-1:Hoz7CuoAaFYOUxiy5zcrHEM82xJKjilI24ly0W+1kq4="
     ];
   };
 

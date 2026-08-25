@@ -267,5 +267,10 @@ before blaming the derivation hashes.
 
 ## Template leftovers
 
-`.github/workflows/build.yml` still contains the `<YOUR_REPO_NAME>` / `<YOUR_CACHIX_NAME>`
-placeholders, which keep the cachix and NUR-update steps disabled by their `if:` guards.
+`.github/workflows/build.yml` still contains the `<YOUR_REPO_NAME>` placeholder, which keeps the
+NUR-update step disabled by its `if:` guard. Setting it means adding this repo to
+[NUR's repos.json](https://github.com/nix-community/NUR/blob/master/repos.json) first, since the
+step pings the update service with that name.
+
+`cachixName` is set to `nur-berquist` and the cachix step is live. Its `if:` guard is now always
+true — it survives only because the placeholder it compares against is the guard's own literal.

@@ -109,6 +109,29 @@ have done it, `qcfractalcompute.service` crash-loops on a failed login. The exac
 for one host or two, plus rotation and what to check when it fails — is in
 [`docs/bootstrapping-worker-credentials.md`](docs/bootstrapping-worker-credentials.md).
 
+### Binary cache
+
+`nur-berquist.cachix.org` holds what CI builds — everything `ci.nix` reports as buildable, across
+the three nixpkgs channels in the workflow matrix. The flake declares it, but **Nix ignores a
+flake's substituters unless the invoking user is in `trusted-users`**, so either put yourself
+there or configure the cache system-wide.
+
+Off the flake path — the NUR entry point, `nix-build -A`, a NixOS host — declare it yourself:
+
+```nix
+{
+  nix.settings = {
+    substituters = [ "https://nur-berquist.cachix.org" ];
+    trusted-public-keys = [
+      "nur-berquist.cachix.org-1:Hoz7CuoAaFYOUxiy5zcrHEM82xJKjilI24ly0W+1kq4="
+    ];
+  };
+}
+```
+
+Add `https://nix-qchem.cachix.org` alongside it (key in `flake.nix`) if you build anything from
+`overlays.qchem`.
+
 Individual packages are available the usual NUR ways:
 
 ```sh
@@ -126,8 +149,16 @@ models. `pkgs.qcfractal` and `python313Packages.qcfractal` are the same derivati
 mechanism and the condition for dropping the pin.
 
 Psi4 is expensive to build from source. `flake.nix` reproduces NixOS-QChem's own instantiation
-exactly so that `nix-qchem.cachix.org` is hit — which only works if your user is in
-`trusted-users`, otherwise Nix ignores the flake's substituter.
+so that `nix-qchem.cachix.org` is hit — which only works if your user is in `trusted-users`,
+otherwise Nix ignores the flake's substituter.
+
+One deviation is deliberate: QCEngine imports a Python QC program into the compute worker's own
+process, so `flake.nix` rebuilds the qchem package set against the interpreter
+`qcfractalcompute` runs. While that is 3.13 and NixOS-QChem's nixpkgs defaults to 3.14, the
+resulting Psi4 is not the one `nix-qchem.cachix.org` holds — it comes from
+`nur-berquist.cachix.org` instead, which is the reason to configure that cache before building
+anything here. Dropping the Python 3.13 pin makes the override a no-op and puts Psi4 back on
+NixOS-QChem's own cache.
 
 ## Hacking
 
