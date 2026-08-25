@@ -334,8 +334,20 @@
           # other, so the override stays correct against pandas 2 as well.  The
           # `jsanitize` path needs nothing: it already matches on
           # pandas.core.base.PandasObject, a base class that keeps its real
-          # module, and _check_type walks the whole MRO.  The one test asserting
-          # the old spelling directly is updated to the new one.
+          # module, and _check_type walks the whole MRO.
+          #
+          # test_json.py's TestCheckType::test_pandas asserts a spelling
+          # directly, so it gets the same tuple rather than the new spelling
+          # alone.  Rewriting it to "pandas.DataFrame" was a pandas 3
+          # assumption, and it failed the other way round on the nixos-26.05 leg
+          # of the matrix, which carries pandas 2.3.3:
+          #
+          #     assert _check_type(df, "pandas.DataFrame")
+          #     E  AssertionError: assert False
+          #
+          # With the tuple the assertion is true under either pandas, and it
+          # tests what the library actually calls rather than one spelling of
+          # it.
           monty = psuper.monty.overridePythonAttrs (old: {
             postPatch = (old.postPatch or "") + ''
               substituteInPlace src/monty/json.py \
@@ -346,9 +358,9 @@
 
               substituteInPlace tests/test_json.py \
                 --replace-fail 'assert _check_type(df, "pandas.core.frame.DataFrame")' \
-                               'assert _check_type(df, "pandas.DataFrame")' \
+                               'assert _check_type(df, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
                 --replace-fail 'assert _check_type(series, "pandas.core.series.Series")' \
-                               'assert _check_type(series, "pandas.Series")'
+                               'assert _check_type(series, ("pandas.core.series.Series", "pandas.Series"))'
             '';
           });
 
