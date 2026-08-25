@@ -180,9 +180,32 @@ buildPythonPackage rec {
   #       administrator command
   #
   # PGTest accepts an explicit `port`, so `_create` hands each worker the one
-  # derived from its own index and the race has nowhere left to happen.  A Nix
-  # build gets a private network namespace containing nothing but loopback, so
-  # 45000 + n cannot collide with anything outside the build either.
+  # derived from its own index and the race between two postmasters has nowhere
+  # left to happen.  A Nix build gets a private network namespace containing
+  # nothing but loopback, so nothing outside the build is listening there.
+  #
+  # The base was 45000 until a `just ci-matrix` run showed what that misses: the
+  # whole block, 45000 to 45127, sits inside the kernel's ephemeral range.
+  #
+  #     $ cat /proc/sys/net/ipv4/ip_local_port_range
+  #     32768   60999
+  #
+  # `_create` is lazy — `create_database` calls it on first use — so by the time
+  # a high-numbered worker starts its cluster, the other 127 have opened
+  # thousands of psycopg connections to loopback and each took an ephemeral
+  # source port.  One of them took 45116, and gw116 died on the same message as
+  # the lost-port race above, this time against a client socket rather than a
+  # neighbour's postmaster:
+  #
+  #     HINT: Is another postmaster already running on port 45116?
+  #
+  # That surfaced as one TimeoutError out of the session fixture plus 25
+  # `assert not self._finalizers` errors in _pytest/fixtures.py — pytest's own
+  # invariant, tripped by every later test on gw116 asking for a fixture that
+  # had already raised.  Only the first of the 26 names a cause.
+  #
+  # 21000 + n is below the low bound instead.  Below rather than above, because
+  # a host that retunes ip_local_port_range widens it upward, never downward.
   #
   # `_close` keeps its tolerance as the backstop for the case the port pinning
   # does not cover: no xdist, so no worker index, so pgtest choosing for itself
@@ -230,6 +253,72 @@ buildPythonPackage rec {
   # guaranteed; requesting the fixture as an argument is the documented way to
   # say the same thing, and is what upstream will have to do. `aiida_profile_clean`
   # goes first in the signature so it still runs before the other fixtures.
+  #
+  # Three more tests ask for that same fixture for an unrelated reason: they
+  # assume an empty group table and upstream never says so.  Each sits beside a
+  # sibling that does ask — `test_dump_basic`, one method above
+  # TestGroups::test_dump_empty_group, carries the usefixtures mark; `test_walk`
+  # reaches it through the `setup_groups` fixture; and TestUpfParser's own
+  # `test_get_upf_groups` opens by deleting every UpfFamily it can see, which
+  # says plainly that the author knew the table was dirty and defended one test
+  # of the two.  All three read as omissions rather than decisions.
+  #
+  # With a handful of workers the omission is invisible, because a polluting
+  # test rarely runs on the same worker first.  With 128 it is close to certain,
+  # and it lands three different ways:
+  #
+  #     UniqueViolation: duplicate key value violates unique constraint
+  #     "uq_db_dbgroup_label_type_string"
+  #     DETAIL:  Key (label, type_string)=(empty_group, core) already exists.
+  #
+  #     AssertionError: Left contains one more item: 'test_group'
+  #
+  #     AssertionError: assert {'family', 'testing2'} == {'family'}
+  #
+  # `empty_group` comes from tests/cmdline/commands/test_data.py, which builds it
+  # four times, and `test_group` from test_calcjob.py or from test_groups.py
+  # itself.  `testing2` appears nowhere under tests/ at all — it rides in inside
+  # one of the ../aiida-export-migration-tests archives, which is why grepping
+  # for the label that broke the test finds nothing.
+  #
+  # An --only-rerun pattern cannot cover any of them: the leftover group outlives
+  # the rerun, so the retry fails the same way.
+  #
+  # tests/manage/test_profile_access.py is the same bug as TestLaunchersDryRun
+  # below rather than a group problem, and it is patched the same way.  Its
+  # MockProcess writes `temp_file.py` and waits for `temp_file.log`, both
+  # relative, so all 128 workers use one pair of names in /build/source.  A
+  # neighbour's log file satisfies our wait, `start()` returns before *our*
+  # subprocess has registered its access to the profile, and the lock error
+  # names an accessor list the test's own pid never made it into:
+  #
+  #     assert '23282' in "process 20620 cannot lock profile `131bcdb5...`
+  #       because it is being accessed."
+  #
+  # The chdir goes on the fixture rather than on the one test that failed,
+  # because `tempfile = Path(file_stem + '.txt')` in test_clear_stale_pid_files
+  # shares the same directory and the same exposure.
+  #
+  # tests/tools/workflows/test_base.py is the odd one out: not a race and not a
+  # leaked row, but an ordering dependency, and the only one of these that would
+  # fail identically on a single worker if the order came out wrong.
+  # test_fallback_workflow_tools_on_loading_error replaces
+  # aiida.plugins.entry_point.load_entry_point with one that always raises, and
+  # only then builds a WorkChainNode.  Constructing a node needs the *storage*
+  # backend, which resolves through the function just replaced:
+  #
+  #     StorageFactory('core.psql_dos') -> BaseFactory -> load_entry_point
+  #     LoadingEntryPointError: broken tools entry point
+  #
+  # get_profile_storage caches after first use, so the test passes whenever
+  # anything on that worker has already touched the database — which is nearly
+  # everything, and is why upstream does not see it.  Across 128 workers one
+  # eventually draws this test before any such neighbour.
+  #
+  # The node construction moves above the monkeypatch rather than a fixture
+  # being added to warm the cache.  What the test asserts is about `node.tools`,
+  # which is still resolved after the patch, so it goes on testing exactly what
+  # it did and stops depending on what ran before it.
   #
   # The next three hunks are all the bill for relaxing click's upper bound just
   # above, and are worth reading together: upstream's `<8.3` is not
@@ -410,6 +499,30 @@ buildPythonPackage rec {
         "def test_get_info(monkeypatch):" \
         "def test_get_info(monkeypatch, aiida_profile_clean):"
 
+    substituteInPlace tests/orm/test_groups.py \
+      --replace-fail \
+        "    def test_dump_empty_group(self, tmp_path):" \
+        "    def test_dump_empty_group(self, aiida_profile_clean, tmp_path):"
+
+    substituteInPlace tests/tools/groups/test_paths.py \
+      --replace-fail \
+        "def test_walk_with_invalid_path():" \
+        "def test_walk_with_invalid_path(aiida_profile_clean):"
+
+    substituteInPlace tests/orm/nodes/data/test_upf.py \
+      --replace-fail \
+        "    def init_profile(self, tmp_path):" \
+        "    def init_profile(self, aiida_profile_clean, tmp_path):"
+
+    substituteInPlace tests/tools/workflows/test_base.py \
+      --replace-fail \
+        "    monkeypatch.setattr(entry_point_module, 'load_entry_point', raise_loading_entry_point_error)
+
+        node = WorkChainNode(process_type=f'aiida.workflows:{WORKFLOW_ENTRY_POINT_NAME}')" \
+        "    node = WorkChainNode(process_type=f'aiida.workflows:{WORKFLOW_ENTRY_POINT_NAME}')
+
+        monkeypatch.setattr(entry_point_module, 'load_entry_point', raise_loading_entry_point_error)"
+
     substituteInPlace tests/cmdline/utils/test_multiline.py \
       --replace-fail \
         "COMMAND = 'sleep 1 ; vim" \
@@ -445,6 +558,15 @@ buildPythonPackage rec {
 
             monkeypatch.chdir(tmp_path)"
 
+    substituteInPlace tests/manage/test_profile_access.py \
+      --replace-fail \
+        "def fixture_profile_access_manager():" \
+        "def fixture_profile_access_manager(tmp_path, monkeypatch):" \
+      --replace-fail \
+        "    aiida_profile = get_manager().get_profile()" \
+        "    monkeypatch.chdir(tmp_path)
+        aiida_profile = get_manager().get_profile()"
+
     substituteInPlace tests/orm/nodes/process/test_process.py \
       --replace-fail \
         "@pytest.mark.usefixtures('aiida_profile')
@@ -465,7 +587,7 @@ buildPythonPackage rec {
         "        try:
                 self.cluster = PGTest()" \
         "        worker = os.environ.get('PYTEST_XDIST_WORKER', ''')
-            port = 45000 + int(worker[2:]) if worker[:2] == 'gw' and worker[2:].isdigit() else None
+            port = 21000 + int(worker[2:]) if worker[:2] == 'gw' and worker[2:].isdigit() else None
 
             try:
                 self.cluster = PGTest(port=port)" \
@@ -516,7 +638,7 @@ buildPythonPackage rec {
             if cluster is not None:
                 cluster.close()" \
         "    worker = os.environ.get('PYTEST_XDIST_WORKER', ''')
-        port = 45000 + int(worker[2:]) if worker[:2] == 'gw' and worker[2:].isdigit() else None
+        port = 21000 + int(worker[2:]) if worker[:2] == 'gw' and worker[2:].isdigit() else None
 
         cluster = None
         try:
@@ -831,23 +953,28 @@ buildPythonPackage rec {
     # Which tests it hits varies run to run, which is what marks them as
     # scheduling artefacts rather than failures.
     #
-    # The fourth is a data race inside plumpy rather than a timing margin, but
-    # it behaves the same way and heals the same way.  Process.spec() builds the
-    # spec on the class itself, in three steps that are not atomic:
+    # The fourth was a data race inside plumpy rather than a timing margin, and
+    # it is the one entry here that should no longer fire.  Process.spec() built
+    # the spec on the class itself, in three steps that are not atomic:
     #
     #     cls._spec = cls._spec_class()
     #     cls.__called = False
     #     cls.define(cls._spec)          # sets cls.__called = True
     #     assert cls.__called, 'Process.define() was not called by ...'
     #
-    # Two threads entering that block for the same class — the test's own and
-    # the broker communicator's — can interleave so that the second resets
-    # __called to False between the first's define() and its assert.  The
-    # assertion message then names define(), which reads like a plugin that
-    # forgot super().define(spec), and every AiiDA process class does call it.
-    # A rerun is sound here because plumpy's own `except` clause deletes _spec
-    # and clears __called before re-raising, so the retry rebuilds from scratch
-    # rather than from the half-built state that failed.
+    # A second caller entering for the same class resets __called between the
+    # first's define() and its assert, and the assertion message then names
+    # define() — which reads like a plugin that forgot super().define(spec), and
+    # every AiiDA process class does call it.  ../plumpy now builds into a local
+    # and hangs the flag on the spec object, so there is nothing left to race
+    # on; see the shared-state note there, including why the RLock that was
+    # tried first did not do.
+    #
+    # The pattern stays as a backstop for a plumpy that patch stops applying to.
+    # It is also the one whose retry can no longer help: the `except` clause it
+    # relied on, which deleted _spec and cleared __called before re-raising, was
+    # removed along with the state it was cleaning up.  If this ever fires
+    # again, the retry will fail the same way and the failure is real.
     #
     # `--only-rerun` is why this is not a blanket retry: it takes a regex
     # matched against the *exception message*, so anything failing for any

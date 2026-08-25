@@ -64,6 +64,51 @@ buildPythonPackage rec {
   # --replace-fail on one line.  The message is widened to cover all four cases,
   # since upstream's "no connection available" would send anyone reading the
   # daemon log after a nack looking for a network fault that is not there.
+  #
+  # The second substituteInPlace is a different bug in the same file.
+  # Process.spec() uses two pieces of shared mutable state to run what is really
+  # a per-call handshake:
+  #
+  #     cls._spec = cls._spec_class()   # published half-built
+  #     cls.__called = False            # one flag for every caller
+  #     cls.define(cls._spec)           # sets cls.__called = True
+  #     assert cls.__called, 'Process.define() was not called by ...'
+  #
+  # A second caller entering for the same class resets __called between the
+  # first's define() and its assert, and the first dies on a message naming
+  # define().  That reads like a plugin that forgot `super().define(spec)`,
+  # which sends you looking in the wrong place -- every AiiDA process class does
+  # call it.  ../aiida-core carries `--only-rerun Process.define...was.not.called`
+  # for it, and `just ci-matrix` still lost three attempts in a row on
+  # tests/parsers/test_parser.py::TestParser::test_parse_from_node.
+  #
+  # A threading.RLock around the rebuild was tried first and is not enough,
+  # which is the whole reason this patch has the shape it does.  An RLock
+  # excludes other *threads* and is transparent to the one already holding it,
+  # so two parties interleaving on a single thread -- an asyncio task switch, or
+  # a greenlet, and plumpy depends on both greenback and greenlet -- walk
+  # straight through it.  The failure came back with the lock in place.  No lock
+  # is the right answer to shared state that can be reached without threads.
+  #
+  # So the state goes instead.  `spec` becomes a local, the flag moves onto that
+  # spec object, and cls._spec is assigned only once the spec is complete.  Two
+  # concurrent builders then each get their own spec and their own flag, both
+  # asserts pass, the last assignment to cls._spec wins, and no caller can
+  # observe a half-built spec.  That holds under threads, greenlets and asyncio
+  # alike, because there is nothing left to race on.
+  #
+  # `spec.__called` inside the Process body mangles to `spec._Process__called`,
+  # in the assignment and in define() alike, so the two still agree.  It is
+  # initialised on the local rather than left to define(), so a subclass that
+  # really does forget super() still gets the assertion and its message rather
+  # than an AttributeError.
+  #
+  # Upstream's `except Exception: del cls._spec; cls.__called = False; raise`
+  # goes with it.  It existed to undo a half-built publication that can no
+  # longer happen -- _spec is not assigned until the assert has passed -- and
+  # `del` on an attribute that was never set would raise on the way out.  That
+  # removes the property the aiida-core rerun comment leans on, so keep the
+  # pattern there as a backstop and expect it to stop firing.
   postPatch = ''
     substituteInPlace src/plumpy/processes.py \
       --replace-fail \
@@ -75,6 +120,34 @@ buildPythonPackage rec {
       --replace-fail \
         "                message = 'Process<%s>: no connection available to broadcast state change from %s to %s'" \
         "                message = 'Process<%s>: could not broadcast state change from %s to %s'"
+
+    substituteInPlace src/plumpy/processes.py \
+      --replace-fail \
+        "            try:
+                    cls._spec: ProcessSpec = cls._spec_class()  # type: ignore
+                    cls.__called: bool = False  # type: ignore
+                    cls.define(cls._spec)  # type: ignore
+                    assert cls.__called, (
+                        f'Process.define() was not called by {cls}\nHint: Did you forget to call the superclass method in '
+                        'your define? Try: super().define(spec)'
+                    )
+                    return cls._spec  # type: ignore
+                except Exception:
+                    del cls._spec  # type: ignore
+                    cls.__called = False
+                    raise" \
+        "            spec: ProcessSpec = cls._spec_class()  # type: ignore
+                spec.__called = False  # type: ignore
+                cls.define(spec)  # type: ignore
+                assert spec.__called, (  # type: ignore
+                    f'Process.define() was not called by {cls}\nHint: Did you forget to call the superclass method in '
+                    'your define? Try: super().define(spec)'
+                )
+                cls._spec = spec  # type: ignore
+                return spec" \
+      --replace-fail \
+        "        cls.__called = True" \
+        "        _spec.__called = True  # type: ignore"
   '';
 
   build-system = [ flit-core ];
