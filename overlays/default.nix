@@ -336,6 +336,13 @@
           upf-to-json = pself.callPackage ../pkgs/upf-to-json { };
           pgtest = pself.callPackage ../pkgs/pgtest { };
 
+          # Missing from nixos-26.05 and present from 26.11, so this one is a
+          # backport rather than a package of ours: take the channel's whenever
+          # it has one, and fall back for the leg that does not.  `psuper`, not
+          # `pself`, or the fallback would refer to itself.  See ../pkgs/pycifrw
+          # for what it unblocks and when to delete it.
+          pycifrw = psuper.pycifrw or (pself.callPackage ../pkgs/pycifrw { });
+
           # Here for one reason only: disk-objectstore ships
           # disk_objectstore/examples/example_objectstore.py, which imports it at
           # module scope, and nixpkgs does not carry it.
