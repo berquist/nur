@@ -70,6 +70,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
 | Why `python313` and not `python3`? What is `meta.broken` protecting? | `pkgs/qcportal/default.nix` (`meta`), `default.nix` |
 | Why is Psi4 taken from a hand-pinned `nixpkgs-qchem`, and why not `nixos-qchem.packages.*`? | `flake.nix` (the `nixpkgs-qchem` input, and `qchemPkgs` in `perSystem`) |
+| Why does `qchemPkgs` rewrite `python3` before the qchem overlay, and what does that cost? | `flake.nix` (`workerPython` and the first entry in `qchemPkgs`' `overlays`) |
 | Why does the compute unit set `PYTHONPATH`, and why per-program envs? | `nixos-modules/qcfractal-compute.nix` |
 | Why is a QC program built for another Python an eval error rather than one that is quietly skipped? | `nixos-modules/qcfractal-compute.nix` (the first entry in `assertions`) |
 | Why three systemd units on the server, and why is `upgrade-db` manual by default? | `nixos-modules/qcfractal-server.nix` |

@@ -163,13 +163,39 @@
             overlays = builtins.attrValues (import ./overlays);
           };
 
+          # The interpreter the compute worker runs.  QCEngine imports a Python
+          # QC program *into the worker process*, so a program built for any
+          # other Python is unusable — nixos-modules/qcfractal-compute.nix
+          # asserts on exactly that.  Programs follow the worker rather than the
+          # other way round, because the worker's Python is this repo's pin and
+          # is shared with the whole QCArchive family, while a QC program is one
+          # package that can be rebuilt.
+          #
+          # Read off the package instead of spelling "python313" a fourth time,
+          # so the two cannot drift.
+          workerPython = pkgs'.qcfractalcompute.pythonModule;
+
+          # ...and the attribute naming the *same version* inside nixpkgs-qchem.
+          # It has to be selected there rather than passed in from pkgs': an
+          # interpreter from our nixpkgs is a different derivation, and handing
+          # it to the qchem overlay would drag our whole stdenv into every QC
+          # program's closure.
+          qchemPythonAttr = "python${lib.replaceStrings [ "." ] [ "" ] workerPython.pythonVersion}";
+
           # Psi4 for the compute tests.
           #
-          # This reproduces NixOS-QChem's own instantiation exactly — its pinned
-          # nixpkgs, its overlay, and the config its flake sets — because that
-          # is what nix-qchem.cachix.org was populated from.  Any deviation
-          # (our nixpkgs, or a missing config.qchem-config) changes the
-          # derivation hash and sends Psi4's closure to a from-source build.
+          # Apart from the interpreter, this reproduces NixOS-QChem's own
+          # instantiation exactly — its pinned nixpkgs, its overlay, and the
+          # config its flake sets — because that is what nix-qchem.cachix.org
+          # was populated from.  Any *further* deviation (our nixpkgs, or a
+          # missing config.qchem-config) changes the derivation hash again.
+          #
+          # The interpreter override is a deviation, and it is not free: while
+          # the worker's pin and nixpkgs-qchem's default `python3` disagree,
+          # Psi4 and its Python closure miss the cache and build from source.
+          # That is the price of the invariant, and it is temporary in the
+          # obvious way — the override becomes a no-op the moment the two agree
+          # again, and the cache comes back with it.
           #
           # Do NOT simplify this to `nixos-qchem.packages.${system}.psi4`.  That
           # output is a filterAttrs over the *entire* qchem set, so selecting a
@@ -195,7 +221,30 @@
           # block above does, is a separate matter and carries no such cost.
           qchemPkgs = import inputs.nixpkgs-qchem {
             inherit system;
-            overlays = [ inputs.nixos-qchem.overlays.qchem ];
+            overlays = [
+              # Must come *before* the qchem overlay, which hangs every Python
+              # QC program off `super.python3` — psi4 is
+              # `toPythonApplication qchem.python3.pkgs.psi4`, and qchem.python3
+              # is `super.python3` plus qchem's packageOverrides.  Rewriting
+              # python3 here is therefore the whole of the retarget: nothing
+              # downstream names a version.
+              #
+              # Only python3 needs it.  The qchem overlay reads no other
+              # interpreter attribute, and in particular never `python3Packages`
+              # — which in nixpkgs aliases the *versioned* set and so would not
+              # follow this anyway.
+              (_final: prev: {
+                python3 =
+                  prev.${qchemPythonAttr} or (throw ''
+                    nixpkgs-qchem has no ${qchemPythonAttr}, which is the
+                    interpreter services.qcfractalCompute would run
+                    (Python ${workerPython.pythonVersion}).  Either move the
+                    nixpkgs-qchem pin to a revision that still carries it, or
+                    move this repo's Python pin to one it does.
+                  '');
+              })
+              inputs.nixos-qchem.overlays.qchem
+            ];
             config.allowUnfree = true;
             # Matches the arguments NixOS-QChem's flake passes; allowEnv = false
             # keeps NIXQC_* environment variables from perturbing the hash.
@@ -212,17 +261,17 @@
 
           # Five packages here need cclib, and cclib's overlay needs the qchem
           # set: nix/overlay.nix there reads final.qchem.python3.pkgs.psi4.
-          # Building onto qchemPkgs rather than pkgs' is what makes that
-          # affordable — qchemPkgs already reproduces NixOS-QChem's own
-          # instantiation, which is the only thing nix-qchem.cachix.org was
-          # populated from, so Psi4 is a download rather than an afternoon.
+          # Building onto qchemPkgs rather than pkgs' keeps that to one Psi4
+          # instead of two — everything else about NixOS-QChem's instantiation
+          # is still reproduced, so only the interpreter override above costs
+          # anything, and it costs it once.
           #
-          # Two things make this safe rather than merely convenient.  cclib's
-          # overlay overrides the *top-level* python3 (not
-          # pythonPackagesExtensions), so it cannot perturb python313Packages and
-          # the QCArchive and AiiDA families are untouched.  And in the nixpkgs
-          # revision NixOS-QChem pins, python3 is 3.13 — psi4 has no 3.14 build
-          # yet, which is exactly why cclib pins that revision.
+          # cclib's overlay overrides the *top-level* python3 rather than
+          # pythonPackagesExtensions, so it cannot perturb python313Packages and
+          # the QCArchive and AiiDA families are untouched.  Note it lands on
+          # the python3 the override above installed, so these five follow the
+          # worker's interpreter too — which is what the repo's python313 pin
+          # wanted of them anyway.
           #
           # The three overlays taken from ./overlays are exactly those whose
           # packages resolve cclib.  `cheminformatics` is included not because
