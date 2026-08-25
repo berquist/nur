@@ -80,27 +80,36 @@ let
   # PYTHONPATH byte-identical — the VM test then rebuilds to the *same*
   # derivation hash, which looks exactly like the edit never landed.
   # Anything else — a plain executable such as pkgs.qchem.cfour — contributes
-  # no modules and is skipped, as is a program built for another interpreter,
-  # whose site-packages would not even sit at the same path.
+  # no modules and is skipped.
   #
   # psi4 itself is deliberately not added: QCEngine's `psi4 --module` fallback
   # already puts it on sys.path, and the application form has no business in a
   # python env.  Only its dependencies were ever missing.
-  programPythonEnv =
+  programPythons = map (
     p:
     let
       isModule = lib.isDerivation (p.pythonModule or false);
-      mods = if isModule then [ p ] else p.requiredPythonModules or [ ];
-      interp =
+      modules = if isModule then [ p ] else p.requiredPythonModules or [ ];
+    in
+    {
+      package = p;
+      inherit modules;
+      interpreter =
         if isModule then
           p.pythonModule
         else
-          lib.findFirst (m: m ? pythonVersion && m ? withPackages) null mods;
-    in
-    if interp == null || interp.pythonVersion != py.pythonVersion then
-      null
-    else
-      interp.withPackages (_: mods);
+          lib.findFirst (m: m ? pythonVersion && m ? withPackages) null modules;
+    }
+  ) cfg.executor.programs;
+
+  # A program with no interpreter at all contributes nothing importable.
+  pythonPrograms = lib.filter (e: e.interpreter != null) programPythons;
+
+  matchesInterpreter = e: e.interpreter.pythonVersion == py.pythonVersion;
+
+  # A program built for a *different* Python than the worker is an eval error,
+  # not something to quietly leave out of PYTHONPATH — see the assertion below.
+  mismatchedPrograms = lib.filter (e: !(matchesInterpreter e)) pythonPrograms;
 
   # Each program gets its own env instead of being merged into pythonEnv,
   # because pkgs.qchem.* is instantiated from a *different* nixpkgs than this
@@ -109,7 +118,9 @@ let
   # qcengine — at differing versions.  Appending instead leaves those resolving
   # to pythonEnv, exactly as they do today via QCEngine's `psi4 --module`
   # sys.path fallback; only the program's private dependencies come from here.
-  programEnvs = lib.remove null (map programPythonEnv cfg.executor.programs);
+  programEnvs = map (e: e.interpreter.withPackages (_: e.modules)) (
+    lib.filter matchesInterpreter pythonPrograms
+  );
 
   pythonPath = lib.concatMapStringsSep ":" (e: "${e}/${py.sitePackages}") (
     [ pythonEnv ] ++ programEnvs
@@ -360,6 +371,39 @@ in
   config = lib.mkIf cfg.enable {
 
     assertions = [
+      # Skipping a mismatched program would be the quiet option, and it is the
+      # wrong one: dropping it from PYTHONPATH does not stop QCEngine from
+      # finding it.  Discovery runs `<program> --module` as a *subprocess*, so
+      # the program's own interpreter answers and the capability is advertised
+      # to the server as usual — psi4 shows up in the manager banner as
+      # `psi4: ['1.11']`.  The harness then does an in-process `import psi4`
+      # inside this worker, and only there does the mismatch surface, as an
+      # ImportError on a `core.cpython-3XX-*.so` built for the other Python.
+      # By then a record has been claimed and errored, so the visible symptom
+      # is a task that never completes rather than anything naming a version.
+      #
+      # The usual cause is a lockfile bump: pkgs.qchem.* comes from the
+      # hand-pinned nixpkgs-qchem (see flake.nix), so moving that pin across a
+      # nixpkgs default-`python3` change re-targets every Python QC program
+      # while this module's `py` stays where cfg.package put it.
+      {
+        assertion = mismatchedPrograms == [ ];
+        message = ''
+          services.qcfractalCompute: the worker runs Python ${py.pythonVersion},
+          but executor.programs contains ${
+            lib.concatMapStringsSep ", " (
+              e: "${lib.getName e.package} (built for Python ${e.interpreter.pythonVersion})"
+            ) mismatchedPrograms
+          }.
+
+          QCEngine imports a Python QC program into the worker process, which
+          cannot load an extension module compiled for another interpreter.
+
+          Both sides have to agree.  Either build the program against the
+          worker's Python, or point services.qcfractalCompute.package at a
+          qcfractalcompute built for the program's Python.
+        '';
+      }
       {
         assertion = cfg.executor.mpi.enable -> cfg.executor.mpi.package != null;
         message = ''
