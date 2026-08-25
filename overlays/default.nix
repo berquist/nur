@@ -234,6 +234,23 @@
               "tests/cli/test_pmg.py::test_pmg_view"
             ];
           });
+
+          # nixpkgs' pythonMetadataCheckPhase — which compares a built wheel's
+          # METADATA against the `version` its derivation declares — and the
+          # pyprojectVersionPatchHook that answers it arrived together, after
+          # 26.05.  On a channel carrying neither, the two mosquito overrides
+          # below are impossible *and* unnecessary: naming a hook that is not an
+          # attribute aborts evaluation of everything downstream of it, and
+          # nothing is comparing the two versions in the first place.  Both
+          # packages then install under the version their pyproject.toml really
+          # carries — aiormq 6.9.2, aio-pika 9.6.0 — which is what their
+          # dependants ask for anyway, so the unpatched derivations are the ones
+          # that work there.
+          #
+          # Keyed on the hook rather than on lib.version, because the hook is
+          # the attribute that would throw, and a backport to a stable channel
+          # would bring both halves of the change at once.
+          hasMetadataCheck = pself ? pyprojectVersionPatchHook;
         in
         {
           # Two nixpkgs packages, neither of them ours, that the AiiDA closure
@@ -251,6 +268,9 @@
           # and kiwipy can only pick the fixes up through pself.  Overriding
           # them for a consumer of overlays.aiida is a repair rather than a
           # surprise — without it neither attribute builds at all.
+          #
+          # Both are guarded on `hasMetadataCheck` above, which is what keeps
+          # them off the 26.05 leg of the matrix.
           #
           # Remove both once nixpkgs carries the fixes; for aiormq see
           # ../.scratch/nixpkgs-aiormq-fix.patch.
@@ -271,19 +291,27 @@
           # src is deliberately left alone.  It still fetches the 9.6.4 tag,
           # which is the same tree as 6.9.4 — identical NAR hash — so there is
           # nothing to gain from re-pointing it and a hash to get wrong.
-          aiormq = psuper.aiormq.overridePythonAttrs (old: {
-            version = "6.9.4";
-            build-system = (old.build-system or [ ]) ++ [ pself.pyprojectVersionPatchHook ];
-          });
+          aiormq =
+            if hasMetadataCheck then
+              psuper.aiormq.overridePythonAttrs (old: {
+                version = "6.9.4";
+                build-system = (old.build-system or [ ]) ++ [ pself.pyprojectVersionPatchHook ];
+              })
+            else
+              psuper.aiormq;
 
           # aio-pika is the ordinary case of the same slip: nixpkgs declares
           # 9.6.2 and fetches that tag, but the tree there still says 9.6.0.
           # No version change, unlike aiormq above — 9.6.2 is a real release in
           # the right series, and kiwipy's `aio-pika~=9.4` accepts it — so the
           # hook alone is the whole fix.
-          aio-pika = psuper.aio-pika.overridePythonAttrs (old: {
-            build-system = (old.build-system or [ ]) ++ [ pself.pyprojectVersionPatchHook ];
-          });
+          aio-pika =
+            if hasMetadataCheck then
+              psuper.aio-pika.overridePythonAttrs (old: {
+                build-system = (old.build-system or [ ]) ++ [ pself.pyprojectVersionPatchHook ];
+              })
+            else
+              psuper.aio-pika;
 
           # monty is a third nixpkgs package that does not build, reached here
           # through pymatgen, and its failure is a real bug rather than a test
