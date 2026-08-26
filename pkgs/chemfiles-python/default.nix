@@ -50,8 +50,34 @@ buildPythonPackage rec {
     owner = "chemfiles";
     repo = "chemfiles.py";
     rev = "8172c78d2c1f64793acc45ec655a6ae4a19e0861";
-    hash = "sha256-cL3oWZ8WNlFq8rrdsj88yGF8gHTw/O0WRnR3HKSiVjU=";
+    hash = "sha256-2MsTAg2zsNlY32GtTMrt4EJdPG/gDLSewd7D7/Q1Sjs=";
   };
+
+  # Upstream asks for the wrong version of its own library, and the request is
+  # an exact-minor gate rather than a floor.  CMakeLists.txt:10 has
+  #
+  #     find_package(chemfiles CONFIG QUIET 0.10)
+  #
+  # while ../chemfiles writes its package version file with
+  # `COMPATIBILITY SameMinorVersion`, which means "0.10" is satisfied only by a
+  # 0.10.x — not by the 0.11.0-rc1 that this very commit pins as its `lib`
+  # submodule (a2319946, the 0.11.0-rc1 tag).  So the external-library branch
+  # can never be taken, and the build falls through to:
+  #
+  #   CMake Error at CMakeLists.txt:59 (message):
+  #     The git submodule for chemfiles is not initalized.
+  #
+  # Upstream does not notice because their wheels vendor the submodule; the
+  # external path is for distributors, and we are the ones exercising it.
+  #
+  # Bumping the request rather than downgrading the library: the submodule pin
+  # is upstream's own statement of which chemfiles this binding is written
+  # against, and src/chemfiles/__init__.py agrees, calling itself 0.11.0-rc1.
+  postPatch = ''
+    substituteInPlace CMakeLists.txt \
+      --replace-fail 'find_package(chemfiles CONFIG QUIET 0.10)' \
+                     'find_package(chemfiles CONFIG QUIET 0.11)'
+  '';
 
   build-system = [
     cmake
@@ -60,9 +86,12 @@ buildPythonPackage rec {
   ];
 
   # setup.py drives cmake itself, from its build_py and build_ext commands, so
-  # nixpkgs' cmake setup hook must not also try to configure the tree.  The hook
-  # still runs its environment half, which is the part that matters here: it is
-  # what puts chemfilesLib on CMAKE_PREFIX_PATH so `find_package` resolves.
+  # nixpkgs' cmake setup hook must not also try to configure the tree.  The
+  # hook's environment half still runs, and that is the part that matters: it
+  # exports NIXPKGS_CMAKE_PREFIX_PATH — not CMAKE_PREFIX_PATH — which nixpkgs'
+  # cmake reads through its own nixpkgs-cmake-prefix-path.patch.  setup.py
+  # builds the cmake command line itself and passes no prefix, so that
+  # environment variable is the only route by which chemfilesLib is findable.
   dontUseCmakeConfigure = true;
 
   buildInputs = [ chemfilesLib ];
