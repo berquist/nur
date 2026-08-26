@@ -314,7 +314,11 @@ in
         wignernj = pself.callPackage ../pkgs/wignernj { };
         strainjedi = pself.callPackage ../pkgs/strainjedi { };
         sella = pself.callPackage ../pkgs/sella { };
-        molara = pself.callPackage ../pkgs/molara { };
+        # `mesaDrivers` is threaded in from `final` for the same reason
+        # chemfiles-python's `chemfilesLib` is: the plain name resolves inside
+        # the Python set first, and `python3Packages.mesa` there is a removal
+        # stub that throws on evaluation rather than merely being wrong.
+        molara = pself.callPackage ../pkgs/molara { mesaDrivers = final.mesa; };
 
         # Carried for molara alone, because nixpkgs *removed* pyrr rather than
         # merely lacking it — so unlike the other dependencies here there is no

@@ -18,11 +18,26 @@
   scipy,
 
   # tests
-  libglvnd,
+  libGL,
+
+  # The Mesa drivers, threaded in from the top level at the callPackage site in
+  # ../../overlays/default.nix rather than taken from the ambient scope.  A
+  # python-set callPackage resolves the Python attribute first, and nixpkgs has
+  # a `python3Packages.mesa` — a removal stub that throws:
+  #
+  #   error: python3Packages.mesa has been removed because it has been marked
+  #   as broken since at least November 2024.
+  #
+  # So a plain `mesa` argument does not merely pick the wrong thing, it takes
+  # the whole evaluation down.  Same treatment as chemfiles-python's
+  # `chemfilesLib`.
+  mesaDrivers,
+
   pytest-cov,
   pytest-qt,
   pytest-xvfb,
   pytestCheckHook,
+  xorg-server,
 }:
 
 buildPythonPackage rec {
@@ -71,24 +86,52 @@ buildPythonPackage rec {
     pytest-qt
     pytest-xvfb
     pytestCheckHook
+
+    # The X server itself.  pytest-xvfb is only the *plugin*: it drives
+    # pyvirtualdisplay, which execs a program called `Xvfb` off PATH, and when
+    # that program is missing it warns and does nothing rather than failing.
+    # So without this the suite runs with no DISPLAY at all.
+    xorg-server
   ];
 
   # pytest.ini sets `qt_api=pyside6`, so pytest-qt is not optional here; it is
-  # what makes the setting mean anything.  pytest-xvfb starts the virtual
-  # display the OpenGL widgets need.
+  # what makes the setting mean anything.
   #
   # `pytest-split` is in upstream's `tests` extra and is deliberately absent:
-  # nixpkgs does not carry it, and it only shards a suite across CI workers —
-  # nothing collects or asserts differently without it.  It is not referenced
-  # from any test module, only from upstream's workflow files, so there is
-  # nothing to patch out.
+  # nixpkgs does not carry it, and it only shards a suite across CI workers.
+  # It is not referenced from any test module, only from upstream's workflow
+  # files, so there is nothing to patch out.
   #
-  # libglvnd supplies libGL.so.1, which PyOpenGL dlopens by bare soname at
-  # import time rather than linking against.
+  # The rest of this is what it takes to compile a shader with no graphics
+  # hardware.  tests/molara/rendering/test_shaders.py builds a QApplication, a
+  # QOpenGLWidget and a 3.3 core profile, then compiles every .glsl file in the
+  # package; tests/molara/gui/test_main_window.py does the same through the real
+  # window.  With no display and no GL driver that does not fail, it *aborts* —
+  # SIGABRT out of Qt, with no Python traceback and no Qt diagnostic:
+  #
+  #   tests/molara/rendering/test_shaders.py Fatal Python error: Aborted
+  #     File ".../test_shaders.py", line 36 in test_compile_shaders
+  #
+  # which is line `QApplication([])`.  Worth knowing that the eight camera tests
+  # before it pass: test_camera.py is pure arithmetic and never touches Qt, so
+  # the shader module is the first thing in the suite to want a display, and the
+  # abort looks like a shader problem when it is not one yet.
+  #
+  # mesa supplies the llvmpipe software rasteriser, LIBGL_DRIVERS_PATH points
+  # the loader at it, and LIBGL_ALWAYS_SOFTWARE stops it looking for hardware.
+  # llvmpipe advertises GL 4.5, so the 3.3 core profile the test asks for is
+  # comfortably within range.
   preCheck = ''
     export HOME="$(mktemp -d)"
     export MPLBACKEND=Agg
-    export LD_LIBRARY_PATH="${lib.makeLibraryPath [ libglvnd ]}''${LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH"
+    export LIBGL_DRIVERS_PATH="${lib.getLib mesaDrivers}/lib/dri"
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export LD_LIBRARY_PATH="${
+      lib.makeLibraryPath [
+        libGL
+        mesaDrivers
+      ]
+    }''${LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH"
   '';
 
   pythonImportsCheck = [
