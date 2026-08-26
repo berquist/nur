@@ -115,6 +115,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is the pinned port base 21000 rather than 45000, and what did the old comment get wrong? | `pkgs/aiida-core/default.nix` (the ephemeral-range note above `postPatch`) |
 | Why do two group tests have `aiida_profile_clean` injected when upstream never asks for it? | `pkgs/aiida-core/default.nix` (the group-table note above `postPatch`) |
 | Why does one parser test call `spec()` before rebinding `define`, when nothing reads it? | `pkgs/aiida-core/default.nix` (the `test_parser.py` note above `postPatch`) |
+| Why does one repository test read its isolated stream inside the `with` block? | `pkgs/aiida-core/default.nix` (the `test_repository.py` note above `postPatch`) |
 | Why is RabbitMQ deleted from the *deprecated* pytest fixture plugin, and which packages does that fix? | `pkgs/aiida-core/default.nix` (the last note above `postPatch`) |
 | Why does `TestLaunchersDryRun` need its own working directory? | `pkgs/aiida-core/default.nix` (the `test_launch.py` note above `postPatch`) |
 | Why does `aiida-pseudo` put its own `$out/bin` on PATH for the check phase? | `pkgs/aiida-pseudo/default.nix` (`preCheck`) |
@@ -125,6 +126,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `fastentrypoints` a build-system input when `setup.py` only warns without it? | `pkgs/aiida-testing/default.nix` (`build-system`) |
 | Why does `aiida-testing` rewrite `collections.Iterable`, and what still blocks `test_diff.py`? | `pkgs/aiida-testing/default.nix` (`postPatch`, `nativeCheckInputs`) |
 | Why do the recorded `mock-*` fixture directories get renamed, and how do I get the new digests? | `pkgs/aiida-testing/default.nix` and `pkgs/aiida-psi4/default.nix` (the notes above `postPatch`) |
+| Why does `example_01` overwrite two `provenance.version` strings, and why only those? | `pkgs/aiida-psi4/default.nix` (the example_01 note above `postPatch`) |
 | Why does `aiida-psi4` stop setting `codeinfo.withmpi`? | `pkgs/aiida-psi4/default.nix` (the note above `postPatch`) |
 | Why are the per-worker role, port and `_close` fixes applied to *two* fixture modules? | `pkgs/aiida-core/default.nix` (the deprecated-plugin note above `postPatch`) |
 | Why does `aiida-cp2k` need `procps` when the failure is `assert 303 == 0`? | `pkgs/aiida-cp2k/default.nix` (`nativeCheckInputs`) |

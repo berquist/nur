@@ -357,6 +357,28 @@ buildPythonPackage rec {
   # puts `define` back at teardown; what the test actually exercises, through
   # CustomCalcJob, is untouched.
   #
+  # tests/cmdline/utils/test_repository.py is not a race at all — it is the one
+  # failure here that depends on the channel rather than on the dice.  It reads
+  # the isolated stream after leaving the context manager:
+  #
+  #     with runner.isolation(color=True) as outstreams:
+  #         list_repository_contents(folder_data, path='', color=True)
+  #
+  #     values = outstreams[0].getvalue()
+  #     ValueError: I/O operation on closed file.
+  #
+  # click 8.2.2 gave StreamMixer a `__del__` that closes stderr, stdout and
+  # output "in a predictable order"; 8.3.3 took it out again.  `outstreams`
+  # holds the three streams but not the mixer, so on 8.3.1 the mixer is
+  # collected the moment the `with` ends and shuts them under the test's feet.
+  # nixos-26.05 has click 8.3.1 and both unstable channels have 8.3.3, which is
+  # why this is invisible until the stable leg builds.
+  #
+  # Reading inside the block is correct on every version — click.echo flushes,
+  # so the bytes are there — and confirmed against both: on 8.3.1 the read after
+  # the block raises and the read inside returns the ANSI sequence the test
+  # asserts, while 8.3.3 is happy either way.
+  #
   # The next three hunks are all the bill for relaxing click's upper bound just
   # above, and are worth reading together: upstream's `<8.3` is not
   # bookkeeping, it is load-bearing, and lifting it costs twelve tests in three
@@ -612,6 +634,14 @@ buildPythonPackage rec {
         "        ArithmeticAddCalculation.define = CustomCalcJob.define" \
         "        ArithmeticAddCalculation.spec()
             monkeypatch.setattr(ArithmeticAddCalculation, 'define', CustomCalcJob.define)"
+
+    substituteInPlace tests/cmdline/utils/test_repository.py \
+      --replace-fail \
+        "        list_repository_contents(folder_data, path=''', color=True)
+
+        values = outstreams[0].getvalue()" \
+        "        list_repository_contents(folder_data, path=''', color=True)
+            values = outstreams[0].getvalue()"
 
     substituteInPlace tests/orm/nodes/process/test_process.py \
       --replace-fail \
