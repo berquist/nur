@@ -189,10 +189,19 @@ buildPythonPackage rec {
   # place — it took the run from 97 passed / 59 skipped to 157 passed / 9
   # skipped, because most of FireWorks' database tests are not marked at all
   # and simply skipped themselves when no server answered.
-  pytestFlags = [
-    "-m"
-    "not mongodb"
-  ];
+  #
+  # disabledTestMarks, not `pytestFlags = [ "-m" "not mongodb" ]`.  pytestFlags
+  # reaches the hook through `concatTo`, which word-splits, so the marker
+  # expression arrives as two arguments and pytest reads the second as a path:
+  #
+  #   pytest flags: -m pytest -m not mongodb
+  #   collected 0 items
+  #   ERROR: file or directory not found: mongodb
+  #
+  # The dedicated attribute builds `-m "not (mongodb)"` as one quoted argument.
+  # Note it is silent about a mark that matches nothing, unlike disabledTestPaths
+  # — so if this ever stops excluding anything, the run just gets longer.
+  disabledTestMarks = [ "mongodb" ];
 
   # Several modules import `fw_tutorials.*`, which is a second top-level package
   # in this repository rather than a test fixture.  setup.py's bare
