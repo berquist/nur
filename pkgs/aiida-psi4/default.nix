@@ -110,6 +110,40 @@ buildPythonPackage {
   #
   #     nix build -L --keep-failed .#python313Packages.aiida-psi4
   #     ls <kept build dir>/source/tests/data
+  #
+  # The example_01 hunk is what makes that digest hold on more than one channel
+  # at a time, and it is worth understanding before touching either.  The md5 is
+  # over the *working* directory, which for the qcschema example is
+  # `_aiidasubmit.sh` plus the `input.json` the plugin writes — and that file is
+  # `json.dumps` of a qcelemental model, which stamps its own version into two
+  # provenance blocks:
+  #
+  #     "provenance": {"creator": "QCElemental",
+  #                    "routine": "qcelemental.models.v1.results",
+  #                    "version": "0.50.4"}
+  #
+  # So the digest is a function of the qcelemental version.  nixos-26.05 has
+  # 0.50.0rc3 and both unstable channels have 0.50.4, and a diff of the two
+  # serialised inputs shows those two strings and nothing else — same fields,
+  # same values, same geometry.  That is exactly why example_02, whose input is
+  # a literal PsiAPI string, passes on 26.05 while this one does not.
+  #
+  # Pinning both to the version the fixture was recorded against makes
+  # `input.json` byte-identical everywhere.  On unstable it is a no-op, so the
+  # digest above is unchanged; on 26.05 the input becomes unstable's and the
+  # same digest starts hitting.  It also survives future qcelemental bumps,
+  # which the digest otherwise would not.
+  #
+  # Pin only what actually differs.  `routine` moved from
+  # `qcelemental.models.results` to `...models.v1.results` at some point after
+  # the fixture's own `input.json` was recorded, but both live channels agree on
+  # it today, so normalising it as well would change the digest rather than
+  # preserve it.  Same for the geometry, which numpy round-trips identically.
+  #
+  # The pin goes through `set_dict` on the unstored node rather than into
+  # TEST_DICT: qcelemental honours a provenance supplied at the top level but
+  # regenerates the molecule's, because Molecule.__init__ re-stamps it through
+  # molparse.from_schema.
   postPatch = ''
     substituteInPlace setup.json \
       --replace-fail '"setup_requires": ["reentry"],' "" \
@@ -124,6 +158,15 @@ buildPythonPackage {
         "        codeinfo.code_uuid = self.inputs.code.uuid
             codeinfo.withmpi = self.inputs.metadata.options.withmpi" \
         "        codeinfo.code_uuid = self.inputs.code.uuid"
+
+    substituteInPlace examples/example_01.py \
+      --replace-fail \
+        "    atomic_input = AtomicInput(TEST_DICT)" \
+        "    atomic_input = AtomicInput(TEST_DICT)
+        pinned = atomic_input.get_dict()
+        pinned['provenance']['version'] = '0.50.4'
+        pinned['molecule']['provenance']['version'] = '0.50.4'
+        atomic_input.set_dict(pinned)"
 
     mv tests/data/mock-psi4-1.4rc2-8ee90fe88003087a30e5fa3bc31a1a44 \
        tests/data/mock-psi4-1.4rc2-24adc79085d1b8f0d854137ffa8076e6
