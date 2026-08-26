@@ -20,6 +20,21 @@
   zlib,
 }:
 
+let
+  # Pinned by tests/CMakeLists.txt itself, in TESTS_DATA_GIT on its first line.
+  # Bump this in lockstep with `version`, and expect the suite to fail loudly if
+  # they disagree — the marker file the download guard looks for is named after
+  # this exact string.
+  testsDataRev = "7610e0ba23bd8b03a4f74b039f8fe5f6b0a4873a";
+
+  testsData = fetchFromGitHub {
+    owner = "chemfiles";
+    repo = "tests-data";
+    rev = testsDataRev;
+    hash = "sha256-aQMASGiWx8esxGF8MN99G/8VOZH8vPTCK9Wsqh7CMAo=";
+  };
+in
+
 stdenv.mkDerivation (finalAttrs: {
   pname = "chemfiles";
   version = "0.11.0-rc1";
@@ -54,27 +69,50 @@ stdenv.mkDerivation (finalAttrs: {
     (lib.cmakeBool "CHFL_SYSTEM_LZMA" true)
     (lib.cmakeBool "CHFL_SYSTEM_ZLIB" true)
 
-    # Left at upstream's default, and deliberately so — see below.
-    (lib.cmakeBool "CHFL_BUILD_TESTS" false)
+    (lib.cmakeBool "CHFL_BUILD_TESTS" true)
   ];
 
-  # No test suite is run, and unlike a bare `doCheck = false` the reason is
-  # structural rather than a shrug: tests/CMakeLists.txt begins with a
-  # `file(DOWNLOAD ...)` of https://github.com/chemfiles/tests-data at a pinned
-  # commit (7610e0ba23bd8b03a4f74b039f8fe5f6b0a4873a), at *configure* time.  A
-  # Nix builder has no network, so enabling CHFL_BUILD_TESTS fails at cmake
-  # rather than at ctest.
+  # The suite runs, and getting there needed one trick.
   #
-  # The fix is to supply the data rather than to skip the suite: add
-  # chemfiles/tests-data as a second fetchFromGitHub, unpack it to
-  # `<builddir>/tests/data`, and `touch` the marker file named after that commit
-  # — the download is guarded by `if(NOT EXISTS .../data/${TESTS_DATA_GIT})`, so
-  # a pre-placed tree short-circuits it. That is a one-clone change and worth
-  # doing; it is left out here only because the hash cannot be computed without
-  # the clone.
+  # tests/CMakeLists.txt opens with a `file(DOWNLOAD ...)` of
+  # chemfiles/tests-data at a pinned commit, at *configure* time — so with no
+  # network, enabling CHFL_BUILD_TESTS fails at cmake rather than at ctest.
+  # But the download is guarded:
   #
-  # In the meantime ../chemfiles-python's suite is not nothing: it drives this
-  # library through the C API for every format it touches.
+  #   if(NOT EXISTS "${CMAKE_CURRENT_BINARY_DIR}/data/${TESTS_DATA_GIT}")
+  #
+  # and the last thing the unpack does is `touch data/${TESTS_DATA_GIT}`.  So a
+  # tree placed at that path with that marker file short-circuits the whole
+  # block, and no patching of upstream's CMakeLists is needed.
+  #
+  # `build/` is nixpkgs' default cmakeBuildDir, and preConfigure runs before
+  # cmakeConfigurePhase creates and enters it, so the directory has to be made
+  # here rather than assumed.  chmod because the store tree is read-only and
+  # some format tests write beside their inputs.
+  preConfigure = ''
+    mkdir -p build/tests
+    cp -r ${testsData} build/tests/data
+    chmod -R u+w build/tests/data
+    touch build/tests/data/${testsDataRev}
+  '';
+
+  # Turning this on is not free: it compiles some 200 test binaries alongside
+  # the library, so `just ci-build` pays for it every time this derivation
+  # changes.  Worth it — this is the only thing here that exercises the C++ API
+  # directly, and ../chemfiles-python only ever reaches it through the C ABI.
+  doCheck = true;
+
+  # ctest rather than a `check` target: chemfiles registers its tests with
+  # add_test and provides no `make check`, so the generic checkPhase would find
+  # nothing to do and report success — the C++ spelling of the same trap
+  # ../../AGENTS.md describes for pytest.
+  checkPhase = ''
+    runHook preCheck
+
+    ctest --output-on-failure -j "$NIX_BUILD_CORES"
+
+    runHook postCheck
+  '';
 
   meta = {
     description = "Library for reading and writing chemistry trajectory files";

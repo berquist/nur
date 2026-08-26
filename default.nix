@@ -83,7 +83,13 @@ in
     digichem-core
     metallogen
     molcat
+    xyzrender
     ;
+  # graphrc is deliberately absent from that list.  It is a top-level attribute
+  # of overlays.cheminformatics-cclib only because cclib forces it to be — see
+  # the note at that binding — and it exists for xyzrender alone, so
+  # re-exporting it here would have ci.nix build it as a package in its own
+  # right.
 
   # The chemfiles C++ library.  Not a Python package, so it comes straight from
   # the overlaid set rather than through `py` below — and pkgs/chemfiles-python
@@ -121,6 +127,7 @@ in
     wignernj
     strainjedi
     sella
+    molara
 
     custodian
     fireworks

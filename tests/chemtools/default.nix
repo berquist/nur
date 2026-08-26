@@ -70,6 +70,7 @@ let
     "wignernj"
     "strainjedi"
     "sella"
+    "molara"
     "custodian"
     "fireworks"
   ];
@@ -90,7 +91,13 @@ let
   # one today: fireworks needs it to test its database code without a database.
   internalDependencies = [
     "mongomock-persistence"
+    "pyrr"
   ];
+
+  # `trexio` is deliberately not in that list, because it cannot satisfy it:
+  # nixpkgs already has a top-level `trexio` and it is the C library, so
+  # "absent from the top level" is not the property to assert.  What must hold
+  # is that our binding has not *replaced* it — see chemtools-trexio-* below.
 
 in
 lib.fix (self: {
@@ -146,6 +153,28 @@ lib.fix (self: {
     lib.all (
       name: overlaidPkgs.python313Packages ? ${name} && !(overlaidPkgs ? ${name})
     ) internalDependencies
+  );
+
+  # ==========================================================================
+  # The trexio name split
+  # ==========================================================================
+
+  # nixpkgs' top-level `trexio` is the C library; ../../pkgs/trexio is the SWIG
+  # binding, and both want the name.  The binding lives only in the package
+  # sets, so the top-level attribute must still be the library — a `trexio`
+  # there carrying `pythonModule` means the extension leaked upward and every
+  # consumer of this overlay just lost the C library.
+  #
+  # The mirror of the chemfiles split below, and the more dangerous direction of
+  # it: chemfiles collides with a name *we* introduce, whereas this one would
+  # quietly redefine an attribute nixpkgs already ships.
+  chemtools-trexio-toplevel-is-the-c-library = check "chemtools-trexio-toplevel-is-the-c-library" (
+    !(overlaidPkgs.trexio ? pythonModule)
+  );
+
+  chemtools-trexio-binding-is-separate = check "chemtools-trexio-binding-is-separate" (
+    overlaidPkgs.python313Packages.trexio ? pythonModule
+    && overlaidPkgs.python313Packages.trexio != overlaidPkgs.trexio
   );
 
   # ==========================================================================

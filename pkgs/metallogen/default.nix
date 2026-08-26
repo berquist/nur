@@ -12,6 +12,9 @@
   rdkit,
   scipy,
 
+  # tests
+  pytestCheckHook,
+
   # cclib is not in nixpkgs and arrives from a flake input, which
   # ../../overlays/default.nix cannot reach.  Defaulted rather than required so
   # that evaluation still succeeds on the bare NUR path — `nix-env -f . -qa '*'`
@@ -44,18 +47,36 @@ buildPythonPackage {
     scipy
   ];
 
-  # There is no test suite, and this needs saying because the repository looks
-  # like it has one: `MetalloGen/test.py` is 248 lines and its name matches what
-  # a collector would look for by eye.  It is not a test — it is the package's
-  # main entry point, defining the TMCGenerator class, and it imports
-  # MetalloGen.Calculator.orca and .gaussian, which shell out to ORCA and
-  # Gaussian.  Nothing in the repository asserts anything.
+  # Upstream ships no test suite, and the repository looks like it does:
+  # `MetalloGen/test.py` is 248 lines and its name matches what a collector
+  # would look for by eye.  It is not a test — it is the package's main entry
+  # point, defining TMCGenerator, and it imports MetalloGen.Calculator.orca and
+  # .gaussian, which shell out to ORCA and Gaussian.  Nothing upstream asserts
+  # anything.  pytest would not collect it either: `test.py` matches neither
+  # `test_*.py` nor `*_test.py`, so a bare pytestCheckHook would report success
+  # having found zero items, which is the trap ../../AGENTS.md describes.
   #
-  # pytest would not collect it in any case: `test.py` matches neither
-  # `test_*.py` nor `*_test.py`, so pytestCheckHook would report success having
-  # found zero items — the trap ../../AGENTS.md describes.  Naming the absence
-  # here is better than a check phase that silently proves nothing.
-  doCheck = false;
+  # So ./tests/test_examples.py is ours.  It is built out of upstream's own
+  # examples/ directory, which the sdist would not have carried but the git
+  # checkout does: each `commands` file records a real invocation and the
+  # result_*.xyz files beside it record what that invocation produced.  The
+  # invocations cannot be replayed — they drive Gaussian, ORCA or xtb through
+  # absolute paths on someone else's machine — but the inputs and the recorded
+  # outputs together pin down everything that does not need a quantum chemistry
+  # program: the mSMILES parser, the SDF reader, and the geometry tables both
+  # consult.  34 tests, one of them an expected failure; see the module
+  # docstring for why the cross-checks are the valuable part.
+  #
+  # Copied in rather than applied as a patch so it stays a real Python file that
+  # can be linted and run on its own, the way ../../AGENTS.md asks of scripts.
+  preCheck = ''
+    mkdir -p tests
+    cp ${./tests/test_examples.py} tests/test_examples.py
+  '';
+
+  nativeCheckInputs = [ pytestCheckHook ];
+
+  enabledTestPaths = [ "tests/test_examples.py" ];
 
   # Deliberately only the top-level package.  Importing MetalloGen.test would
   # drag in the ORCA and Gaussian calculator wrappers, which is not something to

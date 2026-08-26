@@ -376,6 +376,7 @@
                 dbstep
                 digichem-core
                 metallogen
+                xyzrender
                 ;
               # molcat is deliberately absent, for the same reason
               # aiida-gaussian is: `nix flake check` forces every attribute of

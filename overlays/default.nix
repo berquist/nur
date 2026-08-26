@@ -220,6 +220,17 @@ in
         # materials overlay: its ase/pymatgen/aiida-core converters are optional
         # extras imported lazily, so nothing of those closures is pulled in.
         dough = pself.callPackage ../pkgs/dough { };
+
+        # xyzgraph is here rather than in cheminformatics-cclib below because it
+        # is the one link in that chain that does *not* need cclib — it wants
+        # rdkit and networkx only.  That matters structurally: because this
+        # extension is injected into every pythonX.pkgs set, `final.python3.pkgs`
+        # gets an xyzgraph too, which is what lets ../pkgs/graphrc and
+        # ../pkgs/xyzrender resolve it from the one set that does have cclib.
+        #
+        # A dependency of those two, so it stops at this line and is not
+        # re-exported.
+        xyzgraph = pself.callPackage ../pkgs/xyzgraph { };
       })
     ];
 
@@ -269,6 +280,21 @@ in
     digichem-core = final.python3.pkgs.callPackage ../pkgs/digichem-core { };
     metallogen = final.python3.pkgs.callPackage ../pkgs/metallogen { };
     molcat = final.python3.pkgs.callPackage ../pkgs/molcat { };
+    xyzrender = final.python3.pkgs.callPackage ../pkgs/xyzrender { };
+
+    # graphrc breaks the rule this file otherwise keeps, and it has to.
+    #
+    # Nothing but xyzrender wants it, so by the convention in ../AGENTS.md it
+    # should stop at a `pythonPackagesExtensions` entry and never become a
+    # top-level attribute.  But it needs cclib, and `final.python313Packages` —
+    # the set that extension feeds — is precisely the set cclib's overlay never
+    # touches.  So it must be a top-level `final.python3.pkgs.callPackage` like
+    # its neighbours here, while still not being re-exported from
+    # ../default.nix, so ci.nix does not build it in its own right.
+    #
+    # ../tests/cheminformatics asserts that exact shape, because it is the only
+    # thing keeping the two halves of it from drifting.
+    graphrc = final.python3.pkgs.callPackage ../pkgs/graphrc { };
   };
 
   # Standalone computational chemistry tools that share no closure with each
@@ -288,6 +314,26 @@ in
         wignernj = pself.callPackage ../pkgs/wignernj { };
         strainjedi = pself.callPackage ../pkgs/strainjedi { };
         sella = pself.callPackage ../pkgs/sella { };
+        molara = pself.callPackage ../pkgs/molara { };
+
+        # Carried for molara alone, because nixpkgs *removed* pyrr rather than
+        # merely lacking it — so unlike the other dependencies here there is no
+        # attribute to fall back to, and `python-aliases.nix` throws on the
+        # name.  Not re-exported; see the header of ../pkgs/pyrr for when to
+        # delete this.
+        pyrr = pself.callPackage ../pkgs/pyrr { };
+
+        # The Python binding, for moltui's `trexio` extra.  Emphatically **not**
+        # re-exported to the top level, and this is the one case in this file
+        # where that would do real damage rather than merely being untidy:
+        # nixpkgs already has a top-level `trexio`, and it is the C library.
+        # Lifting this over it would replace a C library with a Python module
+        # for every consumer of the overlay, and the two are not substitutes.
+        #
+        # The reverse of ../pkgs/chemfiles-python's problem, and it needs no
+        # `chemfilesLib`-style rename because this derivation takes no `trexio`
+        # argument — it builds the C sources itself out of the sdist.
+        trexio = pself.callPackage ../pkgs/trexio { };
 
         # The C++ library is threaded in from `final` by hand.  It has to be:
         # this attribute is also called `chemfiles`, and a python-set callPackage
@@ -323,6 +369,7 @@ in
       wignernj
       strainjedi
       sella
+      molara
       ;
   };
 

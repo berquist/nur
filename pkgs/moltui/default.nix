@@ -11,6 +11,7 @@
   numpy,
   scikit-image,
   textual,
+  trexio,
 
   # tests
   pytestCheckHook,
@@ -38,18 +39,19 @@ buildPythonApplication rec {
     numpy
     scikit-image
     textual
-  ];
 
-  # The `trexio` extra is deliberately not enabled.  nixpkgs carries the
-  # *C library* as a top-level `trexio` (pkgs/by-name/tr/trexio) but no Python
-  # module — the derivation lists python3 and swig as native build inputs, for
-  # code generation, and installs nothing importable.  The extra wants the PyPI
-  # distribution, which is the swig wrapper over that same library.
-  #
-  # Nothing is silently lost by leaving it out: the six modules that exercise
-  # trexio all guard themselves with `pytest.importorskip("trexio")`, so they
-  # skip rather than fail.  Once the binding is packaged, adding it here is the
-  # whole change.
+    # Upstream's `trexio` extra.  This resolves to ../trexio, the Python
+    # binding, *not* to nixpkgs' top-level `trexio` — that attribute is the C
+    # library, which installs nothing importable.  The two share a name and
+    # differ entirely in what they are, so the distinction is worth stating
+    # here: see ../../overlays/default.nix, where the binding is deliberately
+    # left out of the top level to keep from shadowing the library.
+    #
+    # Six test modules guard themselves with `pytest.importorskip("trexio")`,
+    # so before this they skipped rather than failed — 8 skips in the last
+    # green run, which is the number to watch go down.
+    trexio
+  ];
 
   nativeCheckInputs = [
     pytestCheckHook
