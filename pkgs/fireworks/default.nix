@@ -20,6 +20,10 @@
   tqdm,
 
   # tests
+  graphviz,
+  igraph,
+  matplotlib,
+  mongomock-persistence,
   pytestCheckHook,
 }:
 
@@ -70,21 +74,128 @@ buildPythonPackage rec {
     tqdm
   ];
 
-  nativeCheckInputs = [ pytestCheckHook ];
+  nativeCheckInputs = [
+    pytestCheckHook
+    # setup.py's `workflow-checks` extra, needed because its tests ship inside
+    # the package.  Without it collection aborts before a single test runs:
+    #
+    #   ERROR collecting fireworks/utilities/tests/test_dagflow.py
+    #   fireworks/utilities/dagflow.py:9: in <module>
+    #       import igraph
+    #   E   ModuleNotFoundError: No module named 'igraph'
+    #   !!!! Interrupted: 1 error during collection !!!!
+    #
+    # test_dagflow.py does guard for this — DAGFlowTest.setUp raises
+    # unittest.SkipTest when igraph will not import — but the guard is dead
+    # code: line 15 does `from fireworks.utilities.dagflow import DAGFlow` at
+    # module scope, so the ImportError lands during collection and setUp is
+    # never reached.  Supplying the dependency is the fix; deselecting the
+    # module would lose the only coverage the DAG validator has.
+    igraph
 
-  # No MongoDB is provided, and unlike most of this tree that is not a gap.
-  # FireWorks' LaunchPad tests live in exactly three modules, and all three
-  # check for a server on localhost:27017 and raise unittest.SkipTest when there
-  # is none.  Two of them — mongo_tests.py and multiprocessing_tests.py — are
-  # not even collectible: pytest's default python_files matches neither, so they
-  # never run under pytestCheckHook whatever the environment.  Only
-  # test_deserialization.py both collects and skips.
+    #
+    # DAGFlow.to_dot writes DOT through igraph's own write_dot(), so the three
+    # to_dot tests do not need the separate `graph-plotting` extra.  The two
+    # test_visualize.py tests do, and they fail loudly rather than skipping:
+    #
+    #   FAILED test_visualize.py::test_wf_to_graph
+    #     - RuntimeError: graphviz package required for wf_to_graph.
+    #   FAILED test_visualize.py::test_plot_wf
+    #     - SystemExit: Install matplotlib. Exiting.
+    #
+    # Neither renders anything — wf_to_graph only asserts it gets a Digraph
+    # back, and plot_wf never calls plt.show() — so the Python `graphviz`
+    # binding is enough and the `dot` binary is not needed.
+    graphviz
+    matplotlib
+
+    # setup.py's `mongomock` extra, which is what lets the database tests run
+    # with no database.  See the MONGOMOCK_SERVERSTORE_FILE note below.
+    mongomock-persistence
+  ];
+
+  # Three things the check phase needs, and only the first is obvious.
   #
-  # That leaves the other twenty-three modules — serializers, queue adapters,
-  # firetasks, templates — running for real against no database at all.
+  # HOME: matplotlib wants a writable config directory.  MPLBACKEND: makes the
+  # backend choice explicit rather than leaving it to display autodetection —
+  # nothing here calls plt.show(), so Agg is enough.
   #
-  # Several of those import `fw_tutorials.*`, which is a second top-level
-  # package in this repository rather than a test fixture.  setup.py's bare
+  # MONGOMOCK_SERVERSTORE_FILE is the interesting one.  A real MongoDB is not
+  # an option: every mongodb-ce in the locked nixpkgs is
+  # `meta.license.free = false` under the SSPL, and ci.nix filters on
+  # `meta.license.free`, so depending on one would silently drop fireworks out
+  # of CI and the binary cache.
+  #
+  # Most of FireWorks' database coverage is not marked `mongodb` and simply
+  # skips itself when no server answers, so a database-less build quietly ran
+  # about a third less than it appeared to.  Nineteen more tests did not even
+  # skip — they sat through pymongo's server-selection timeout and failed:
+  #
+  #   pymongo.errors.ServerSelectionTimeoutError:
+  #     localhost:27017: [Errno 111] Connection refused
+  #
+  # which cost 17 minutes of wall clock to produce 20 failures, making it a
+  # CI-time problem as much as a correctness one.
+  #
+  # fw_config.py's override_user_settings() reads this variable at import time
+  # and, when it is set, swaps `MongoClient` for
+  # `mongomock_persistence.MongoClient` and enables mongomock's gridfs
+  # integration — which GRIDFS_FALLBACK_COLLECTION turns on by default.  That
+  # took the run from 97 passed / 59 skipped / 20 failed in 17:06 to 157 passed
+  # / 9 skipped / 12 failed in 2:24; see pytestFlags below for what is left.
+  #
+  # It has to be exported before fireworks is first imported, which is why it
+  # lives here rather than in an `env` attribute alongside a pytest flag.
+  #
+  # The file is where the mock persists its JSON between clients, and it has to
+  # exist before the first client is built: mongomock_persistence's
+  # ServerStore.__init__ opens it for reading unconditionally once the variable
+  # is set, so an absent path is a FileNotFoundError rather than an empty
+  # database.  Seeding it with `{}` is what upstream's own test does.
+  preCheck = ''
+    export HOME="$(mktemp -d)"
+    export MPLBACKEND=Agg
+    export MONGOMOCK_SERVERSTORE_FILE="$(mktemp -d)/mongodb.json"
+    echo '{}' > "$MONGOMOCK_SERVERSTORE_FILE"
+  '';
+
+  # What the mock cannot reach, deselected the way upstream says to.  Its own
+  # marker description is the instruction: pyproject.toml declares
+  #
+  #   "mongodb: marks tests that need mongodb (deselect with '-m \"not mongodb\"')"
+  #
+  # and that marker turned out to be an exact partition of what was left: with
+  # mongomock in place the run is 157 passed / 12 failed, and the twelve
+  # failures are precisely the twelve `@pytest.mark.mongodb` tests — two on
+  # GridfsStoredDataTest, two parametrisations of test_lpad_get_fws, and eight
+  # in test_filepad_tasks.py.  Nothing marked passes; nothing unmarked fails.
+  #
+  # They fail three different ways, and each is a place mongomock diverges from
+  # a real server rather than anything wrong here:
+  #
+  #   KeyError: 'gridfs_id'        GridfsStoredDataTest exists to check the
+  #                                spill-to-GridFS path that only triggers when
+  #                                a document exceeds MongoDB's 16MB limit.
+  #                                mongomock enforces no such limit, so the
+  #                                document is stored inline and never spills.
+  #   assert '0\n' == '1\n'        the `[{$match: {}}, {$count: 'count'}]`
+  #                                aggregation comes back empty under mongomock.
+  #   assert None == b'...'        FilePad's GridFS content does not round-trip
+  #                                through mongomock's gridfs integration.
+  #
+  # A marker rather than the paths and test names this used to list: upstream
+  # maintains it, so a database test added later is excluded without anyone
+  # here noticing it needs to be.  The mock is still very much earning its
+  # place — it took the run from 97 passed / 59 skipped to 157 passed / 9
+  # skipped, because most of FireWorks' database tests are not marked at all
+  # and simply skipped themselves when no server answered.
+  pytestFlags = [
+    "-m"
+    "not mongodb"
+  ];
+
+  # Several modules import `fw_tutorials.*`, which is a second top-level package
+  # in this repository rather than a test fixture.  setup.py's bare
   # find_packages() picks it up (it carries four __init__.py files), so it is
   # installed alongside `fireworks` and the imports resolve.
 

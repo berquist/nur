@@ -346,6 +346,11 @@ in
         {
           custodian = pself.callPackage ../pkgs/custodian { inherit pymatgen; };
           fireworks = pself.callPackage ../pkgs/fireworks { };
+
+          # A test-only dependency of fireworks, so it stops here rather than
+          # being re-exported: it stays reachable as python313Packages.* without
+          # ci.nix building it in its own right.
+          mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
         }
       )
     ];

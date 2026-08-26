@@ -32,7 +32,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   above; they are one overlay rather than five because each would otherwise be an overlay
   attribute holding a single `callPackage`. `moltui` is a top-level attribute rather than a
   package-set member, like dotdrop and harmonwig — see the table below.
-- the **materials family** — `custodian` and `fireworks` today. Its own overlay because it is
+- the **materials family** — `custodian` and `fireworks` today, plus `mongomock-persistence`,
+  which is carried for fireworks' tests alone and is not re-exported. Its own overlay because it is
   the seed of a much larger tree that is not yet reachable; see "Deferred packaging" below.
 
 ### The cclib split
@@ -169,7 +170,11 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `moltui` a top-level attribute rather than a `python313Packages` member? | `overlays/default.nix` (the `moltui` binding in `chemtools`), `tests/chemtools/default.nix` (`applicationPackages`) |
 | Why does `sella` derive `SETUPTOOLS_SCM_PRETEND_VERSION` from `version` instead of repeating it? | `pkgs/sella/default.nix` (the `env` note) |
 | Why does `custodian` take pymatgen as a *check* input, and why does that need the gate lifted? | `pkgs/custodian/default.nix` (`nativeCheckInputs`) |
-| Why does `fireworks` need no MongoDB, and why is `mainProgram` `lpad`? | `pkgs/fireworks/default.nix` (the note below `nativeCheckInputs`, `meta.mainProgram`) |
+| Why does `sella` delete its own source directory before the check phase? | `pkgs/sella/default.nix` (the note above `preCheck`), `pkgs/wignernj/default.nix` (the same trap, silent) |
+| Why does `sella` set `HOME` when nothing in it writes to one? | `pkgs/sella/default.nix` (the note above `preBuild`) |
+| How do `fireworks`' database tests run with no MongoDB, and why not just deselect them? | `pkgs/fireworks/default.nix` (the `MONGOMOCK_SERVERSTORE_FILE` note above `preCheck`) |
+| Why is `mongomock-persistence` carried here, and why is it not a top-level attribute? | `pkgs/mongomock-persistence/default.nix` (the `src` comment), `tests/chemtools/default.nix` (`internalDependencies`) |
+| Why does `fireworks` need `igraph`, `graphviz` and `matplotlib` to test, and why is `mainProgram` `lpad`? | `pkgs/fireworks/default.nix` (`nativeCheckInputs`, `meta.mainProgram`) |
 | Why does `metallogen` set `doCheck = false` when `MetalloGen/test.py` exists? | `pkgs/metallogen/default.nix` (the `doCheck` note) |
 | Why does `molcat` install a top-level `src` module, and why is it marked unfree? | `pkgs/molcat/default.nix` (`pythonImportsCheck`, `meta.license`) |
 | Why is `molcat` absent from the flake's `packages` when the other cclib packages are there? | `flake.nix` (the note in the `cclibPkgs` override block) |

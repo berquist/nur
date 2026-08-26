@@ -84,6 +84,14 @@ let
     "moltui"
   ];
 
+  # Carried for a dependant rather than for their own sake, so they must stay
+  # reachable through python313Packages and stay *out* of the top level, or
+  # ci.nix builds each of them in its own right.  The materials overlay's only
+  # one today: fireworks needs it to test its database code without a database.
+  internalDependencies = [
+    "mongomock-persistence"
+  ];
+
 in
 lib.fix (self: {
   # ==========================================================================
@@ -130,6 +138,14 @@ lib.fix (self: {
       nur = import ../../default.nix { pkgs = basePkgs; };
     in
     lib.all (name: nur ? ${name} && nur.${name} == fullyOverlaidPkgs.${name}) applicationPackages
+  );
+
+  # Dependencies stay reachable but stay out of the top level.  The mirror of
+  # cheminformatics-dependencies-are-internal in ../cheminformatics.
+  chemtools-dependencies-are-internal = check "chemtools-dependencies-are-internal" (
+    lib.all (
+      name: overlaidPkgs.python313Packages ? ${name} && !(overlaidPkgs ? ${name})
+    ) internalDependencies
   );
 
   # ==========================================================================

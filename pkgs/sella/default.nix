@@ -86,9 +86,56 @@ buildPythonPackage rec {
     scipy
   ];
 
+  # `import sella` sets up a JAX persistent compilation cache at module scope —
+  # sella/__init__.py line 11, before anything else runs:
+  #
+  #   _cache_dir = os.environ.setdefault("JAX_COMPILATION_CACHE_DIR",
+  #                                      os.path.expanduser("~/.cache/sella/jax_cache"))
+  #   os.makedirs(_cache_dir, exist_ok=True)
+  #
+  # so with no HOME the very first import dies:
+  #
+  #   PermissionError: [Errno 13] Permission denied: '/homeless-shelter'
+  #
+  # That is unconditional, so it takes out pythonImportsCheckPhase as well as
+  # the suite.  Upstream anticipates this — the comment above those lines says
+  # "Explicitly setting the environment variable is recommended if the home
+  # directory is not writable", and the `setdefault` is what makes
+  # JAX_COMPILATION_CACHE_DIR work as an override.  Setting HOME instead keeps
+  # the one idiom the rest of this tree uses (../aiida-core, ../strainjedi) and
+  # also covers whatever else jax wants a home for, at the cost of nothing:
+  # the cache is written into a build directory that is thrown away.
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+  '';
+
   nativeCheckInputs = [ pytestCheckHook ];
 
   # testpaths = ["tests"] is already set in pyproject.toml.
+  #
+  # ../wignernj's trap, and it lands harder here.  pytestCheckHook invokes
+  # `python -m pytest`, which puts the working directory first on sys.path, so
+  # from /build/source `import sella` resolves to the source tree rather than to
+  # the installed package.  That copy is pure Python: cythonize wrote the three
+  # extensions into build/lib.linux-*/, never beside the .pyx files.  So the
+  # first thing every test module transitively imports is missing:
+  #
+  #   sella/peswrapper.py:14: in <module>
+  #       from sella.utilities.math import modified_gram_schmidt
+  #   E   ModuleNotFoundError: No module named 'sella.utilities.math'
+  #   !!!! Interrupted: 11 errors during collection !!!!
+  #
+  # Loud here only because sella/__init__.py reaches the extensions on any
+  # import at all.  wignernj had the same shadowing resolve to a silent skip,
+  # and the whole suite reported success having run nothing — so treat the
+  # noisy version as the lucky case.
+  #
+  # Removing the source copy makes the import resolve to the installed
+  # extensions.  tests/ is a sibling directory and testpaths points at it, so
+  # nothing else moves.
+  preCheck = ''
+    rm -rf sella
+  '';
 
   pythonImportsCheck = [
     "sella"
