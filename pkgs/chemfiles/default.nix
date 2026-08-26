@@ -11,6 +11,21 @@
 
   cmake,
 
+  # Only for the test suite, and only as an interpreter: tests/CMakeLists.txt
+  # ends with `find_package(Python REQUIRED)` and registers tests/lints/*.py —
+  # five source-linting scripts that check the C API docs, the error messages,
+  # the public headers and so on — as ctest cases.  REQUIRED, so without this
+  # the *configure* step fails outright:
+  #
+  #   CMake Error at .../FindPackageHandleStandardArgs.cmake:290 (message):
+  #     Could NOT find Python (missing: Python_EXECUTABLE Interpreter)
+  #   Call Stack (most recent call first):
+  #     tests/CMakeLists.txt:203 (find_package)
+  #
+  # A native build input rather than a check input, because cmake resolves it at
+  # configure time, well before checkPhase.
+  python3,
+
   # Compression backends.  chemfiles vendors all three under external/ as
   # tarballs and builds them itself unless told otherwise; the CHFL_SYSTEM_*
   # options below point it at nixpkgs' copies instead, so that a security fix in
@@ -49,7 +64,10 @@ stdenv.mkDerivation (finalAttrs: {
     hash = "sha256-hu9sB2onaf8BA0TnCWI20xkgJ2cF8hlAwxfOHR1MS2E=";
   };
 
-  nativeBuildInputs = [ cmake ];
+  nativeBuildInputs = [
+    cmake
+    python3
+  ];
 
   buildInputs = [
     bzip2

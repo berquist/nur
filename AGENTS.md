@@ -173,8 +173,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `chemfiles-python` run `unittest discover` instead of `pytestCheckHook`? | `pkgs/chemfiles-python/default.nix` (`checkPhase`) |
 | How does the chemfiles C++ suite get its test data with no network, and why `ctest` rather than a check target? | `pkgs/chemfiles/default.nix` (the note above `preConfigure`, and `checkPhase`) |
 | Why does `chemfiles-python` ask for chemfiles 0.11 when upstream's CMakeLists says 0.10? | `pkgs/chemfiles-python/default.nix` (`postPatch`) |
-| Why is `pyrr` carried here at all, and when should it be deleted? | `pkgs/pyrr/default.nix` (the header, and the `postPatch` note) |
-| What was pyrr's NumPy 2 incompatibility, actually? | `pkgs/pyrr/default.nix` (`postPatch` — it is one expression on one line) |
+| Why is `pyrr` carried here at all, and when should it be deleted? | `pkgs/pyrr/default.nix` (the header) |
+| What was pyrr's NumPy 2 incompatibility, actually? It is three defects, not one | `pkgs/pyrr/default.nix` (the note above `patches`), `pkgs/pyrr/numpy2.patch` |
 | Why does `molara` relax PySide6 with `pythonRelaxDeps` when `sella` had to patch its pin instead? | `pkgs/molara/default.nix` (`pythonRelaxDeps`), `pkgs/sella/default.nix` (`postPatch`) |
 | Why is the `trexio` Python binding built from a PyPI sdist rather than the git tag? | `pkgs/trexio/default.nix` (the `src` comment) |
 | Why does `trexio` restore one test file from GitHub, and where did its sdist hash come from? | `pkgs/trexio/default.nix` (the `testSrc` note) |

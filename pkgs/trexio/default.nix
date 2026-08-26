@@ -101,11 +101,42 @@ buildPythonPackage {
   # See the note above testSrc for why the suite is restored from the tag.  The
   # enabledTestPaths glob below aborts if this copy ever stops landing, which is
   # the guard that keeps the whole thing from silently reverting to zero tests.
+  #
+  # The `rm` is ../sella's and ../wignernj's trap for the third time, and the
+  # nastiest of the three because the shadowing is two levels deep.
+  # pytestCheckHook runs `python -m pytest`, which puts the working directory
+  # first on sys.path, so from the unpacked sdist `import trexio` finds
+  # ./trexio.py rather than the installed one — and that file does
+  # `import pytrexio.pytrexio`, which finds ./pytrexio/, which has no compiled
+  # _pytrexio beside it because the extension was built into build/lib.*/ and
+  # installed to site-packages:
+  #
+  #   trexio.py:14: import pytrexio.pytrexio as pytr
+  #   pytrexio/pytrexio.py:13: from . import _pytrexio
+  #   E  ImportError: cannot import name '_pytrexio' from 'pytrexio'
+  #   E  Exception: Could not import pytrexio module from trexio package
+  #
+  # Loud here only because trexio.py converts the ImportError into an explicit
+  # raise.  Removing both source copies makes the import resolve to the
+  # installed package; test/ is untouched, and conftest.py only registers the
+  # --all option, so nothing in the suite reads from the source tree.
   preCheck = ''
     cp ${testSrc}/python/test/test_api.py test/
+    rm -rf trexio.py pytrexio
   '';
 
   enabledTestPaths = [ "test/test_api.py" ];
+
+  # conftest.py registers `--all`, and without it `pytest_generate_tests`
+  # parametrises `backend` over `['text']` alone.  So the default run never
+  # touches HDF5 — meaning a build where pkg-config failed to find it, and which
+  # therefore silently produced a TEXT-only extension, would still pass its
+  # tests.  Passing --all is what makes the hdf5 buildInput above load-bearing
+  # rather than decorative.
+  #
+  # One word with no space in it, so pytestFlags is safe here; see
+  # ../fireworks/default.nix for the case where it is not.
+  pytestFlags = [ "--all" ];
 
   pythonImportsCheck = [
     "trexio"
