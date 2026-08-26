@@ -284,6 +284,33 @@ buildPythonPackage rec {
   # An --only-rerun pattern cannot cover any of them: the leftover group outlives
   # the rerun, so the retry fails the same way.
   #
+  # test_backup is a fifth, and the state it trips over is deliberate rather than
+  # leaked.  One test above it in tests/storage/psql_dos/test_backend.py breaks
+  # the profile on purpose: test_get_unreferenced_keyset stores a FolderData,
+  # reads its repository keys back out of the database, and then deletes those
+  # objects from the container, so that it can assert the error the resulting
+  # inconsistency raises.  It asks for `aiida_profile_clean`, which resets the
+  # storage at *setup*; nothing puts the two halves back afterwards, and the
+  # profile stays broken for whatever runs next on that worker.
+  #
+  # test_backup does not ask for it, and `backup()` calls `maintain()`, which
+  # opens with the very check the other test built its wreckage for:
+  #
+  #     RuntimeError: There are objects referenced in the database that are not
+  #     present in the repository. Aborting!
+  #
+  # xdist's default --dist load hands each test to whichever worker is free, so
+  # whether those two meet is a lottery — roughly one run in 128 here, which is
+  # why this survived every green build so far and then took `just check` down
+  # while `just ci-matrix` passed on all three channels.  --only-rerun is no help
+  # for the same reason as the groups above: the deleted objects outlive the
+  # retry.
+  #
+  # Cleaning first costs the test nothing.  It asserts that `last-backup` is a
+  # symlink and that `container` and `db.psql` sit inside it, none of which needs
+  # the profile to hold data, and upstream's own test_export_repository_after_
+  # maintain already runs a maintain-based test on a cleaned profile.
+  #
   # tests/manage/test_profile_access.py is the same bug as TestLaunchersDryRun
   # below rather than a group problem, and it is patched the same way.  Its
   # MockProcess writes `temp_file.py` and waits for `temp_file.log`, both
@@ -556,7 +583,10 @@ buildPythonPackage rec {
     substituteInPlace tests/storage/psql_dos/test_backend.py \
       --replace-fail \
         "def test_get_info(monkeypatch):" \
-        "def test_get_info(monkeypatch, aiida_profile_clean):"
+        "def test_get_info(monkeypatch, aiida_profile_clean):" \
+      --replace-fail \
+        "def test_backup(tmp_path):" \
+        "def test_backup(aiida_profile_clean, tmp_path):"
 
     substituteInPlace tests/orm/test_groups.py \
       --replace-fail \
