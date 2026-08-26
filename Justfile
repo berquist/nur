@@ -149,6 +149,12 @@ aiida-eval-tests:
 cheminformatics-eval-tests:
     nix-build tests -A cheminformatics.all --no-out-link
 
+# chemtools and materials overlay evaluation tests only — fast, no VM, nothing
+# real built. This is where the chemfiles name split and the shared pymatgen
+# lift are asserted.
+chemtools-eval-tests:
+    nix-build tests -A chemtools.all --no-out-link
+
 # dotdrop integration tests. No VM, but these build the real package.
 dotdrop-tests:
     nix-build tests -A dotdrop.all --no-out-link

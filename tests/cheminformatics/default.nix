@@ -91,6 +91,7 @@ let
   # ../../default.nix re-exports through python313Packages.  Deliberately not
   # derived from either file — the point is that the hand-written lists agree.
   exportedPackages = [
+    "dough"
     "morfeus-ml"
     "qmzyme"
   ];
@@ -104,6 +105,8 @@ let
     "dbstep"
     "digichem-core"
     "harmonwig"
+    "metallogen"
+    "molcat"
   ];
 
   # The dependencies that stop at the pythonPackagesExtensions step: reachable

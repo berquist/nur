@@ -375,7 +375,20 @@
                 ccreg
                 dbstep
                 digichem-core
+                metallogen
                 ;
+              # molcat is deliberately absent, for the same reason
+              # aiida-gaussian is: `nix flake check` forces every attribute of
+              # `packages`, and molcat has no licence at all — no LICENSE file,
+              # no metadata field — so ../pkgs/molcat marks it
+              # `lib.licenses.unfree` and nixpkgs refuses to evaluate it.
+              # Naming it here would take the whole check down with a
+              # "refusing to evaluate" throw.
+              #
+              # It stays reachable through legacyPackages and through
+              # python313Packages, neither of which flake check forces, so
+              # `nix build .#legacyPackages.x86_64-linux.molcat` still works for
+              # anyone who has set allowUnfree.
             };
 
           # -------------------------------------------------------------------
@@ -443,6 +456,9 @@
           # built, including the packages under test):
           #   nix build .#checks.x86_64-linux.eval-cheminformatics
           #
+          # chemtools/materials overlay evaluation tests (likewise stubbed):
+          #   nix build .#checks.x86_64-linux.eval-chemtools
+          #
           # dotdrop integration tests (no VM, but they build the real package):
           #   nix build .#checks.x86_64-linux.dotdrop
           #
@@ -496,6 +512,13 @@
             # assert how ../overlays wires the cclib split, which is silent when
             # it goes wrong.  See tests/cheminformatics/default.nix.
             eval-cheminformatics = tests.cheminformatics.all;
+
+            # The chemtools and materials overlays.  Same shape as the line
+            # above and for the same reason — the two failures worth catching
+            # here (a `chemfiles` that resolves to itself, a pymatgen repair
+            # that leaks into the package set) are both silent.  See
+            # tests/chemtools/default.nix.
+            eval-chemtools = tests.chemtools.all;
 
             # dotdrop integration tests — no VM, but they do build dotdrop and
             # run upstream's tests-ng scripts against the installed binary.

@@ -27,6 +27,13 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   above and is deliberately kept separate: its own overlay, its own test subdirectory, and the
   default `python3` rather than the 3.13 pin.
 - **harmonwig** — likewise a standalone CLI.
+- the **chemtools family** — `wignernj`, `strainjedi`, `sella`, `moltui`, and the `chemfiles`
+  C++ library with its Python binding. These share no closure with each other or with anything
+  above; they are one overlay rather than five because each would otherwise be an overlay
+  attribute holding a single `callPackage`. `moltui` is a top-level attribute rather than a
+  package-set member, like dotdrop and harmonwig — see the table below.
+- the **materials family** — `custodian` and `fireworks` today. Its own overlay because it is
+  the seed of a much larger tree that is not yet reachable; see "Deferred packaging" below.
 
 ### The cclib split
 
@@ -153,6 +160,20 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `disk-objectstore` want `rsync` and `openssh` as check inputs? | `pkgs/disk-objectstore/default.nix` (`nativeCheckInputs`) |
 | Why is `profilehooks` here at all, and why does it keep upstream's `addopts`? | `pkgs/profilehooks/default.nix` |
 | Why does `pgsu` need `glibcLocalesUtf8` and a `LOCALE_ARCHIVE` export? | `pkgs/pgsu/default.nix` (`preCheck`) |
+| Why is the pymatgen interpreter lift a shared `pymatgenFor` function, and why must it never join a package set? | `overlays/default.nix` (the `pymatgenFor` binding at the top) |
+| Why does `pkgs.chemfiles` mean the C++ library while `python313Packages.chemfiles` means the binding? | `default.nix` (the `inherit (pkgs') chemfiles` note), `overlays/default.nix` (the `chemtools` callPackage) |
+| Why does `chemfiles-python` refuse to fetch its own submodule, and what does `postInstall` assert? | `pkgs/chemfiles-python/default.nix` (`src`, `postInstall`) |
+| Why does `chemfiles-python` run `unittest discover` instead of `pytestCheckHook`? | `pkgs/chemfiles-python/default.nix` (`checkPhase`) |
+| Why does the chemfiles C++ suite not run, and what would it take to turn on? | `pkgs/chemfiles/default.nix` (the note below `cmakeFlags`) |
+| Why does `wignernj` delete its own source directory before the check phase? | `pkgs/wignernj/default.nix` (`preCheck`) |
+| Why is `moltui` a top-level attribute rather than a `python313Packages` member? | `overlays/default.nix` (the `moltui` binding in `chemtools`), `tests/chemtools/default.nix` (`applicationPackages`) |
+| Why does `sella` derive `SETUPTOOLS_SCM_PRETEND_VERSION` from `version` instead of repeating it? | `pkgs/sella/default.nix` (the `env` note) |
+| Why does `custodian` take pymatgen as a *check* input, and why does that need the gate lifted? | `pkgs/custodian/default.nix` (`nativeCheckInputs`) |
+| Why does `fireworks` need no MongoDB, and why is `mainProgram` `lpad`? | `pkgs/fireworks/default.nix` (the note below `nativeCheckInputs`, `meta.mainProgram`) |
+| Why does `metallogen` set `doCheck = false` when `MetalloGen/test.py` exists? | `pkgs/metallogen/default.nix` (the `doCheck` note) |
+| Why does `molcat` install a top-level `src` module, and why is it marked unfree? | `pkgs/molcat/default.nix` (`pythonImportsCheck`, `meta.license`) |
+| Why is `molcat` absent from the flake's `packages` when the other cclib packages are there? | `flake.nix` (the note in the `cclibPkgs` override block) |
+| Why does the chemtools python-pin test compose *every* overlay when the cheminformatics one does not? | `tests/chemtools/default.nix` (the `fullyOverlaidPkgs` binding) |
 
 ### The sdist-has-no-tests trap
 
@@ -283,6 +304,32 @@ Note that `nixConfig.extra-substituters` is ignored unless the invoking user is 
 `trusted-users`. Without that, `nix flake check` silently builds Psi4 from source no matter how
 correct the pinning is — check for `warning: ignoring untrusted flake configuration setting`
 before blaming the derivation hashes.
+
+## Deferred packaging
+
+`wc/` holds upstream clones of the projects packaged here, and of several that are not yet.
+This section records why the remainder are not, so the survey does not have to be redone. All
+availability claims were probed against the locked nixpkgs with
+`nix-instantiate --eval --store dummy://` over `python313Packages`, `python3.pkgs` and the top
+level.
+
+**The materials-project chain** is gated on six shared dependencies nixpkgs lacks —
+`pymatgen-core`, `emmet-core`, `maggma`, `mp-pyrho`, `qtoolkit`, `mp-api` — plus a `pymatgen`
+bump from 2025.10.7, where consumers ask for `>=2026.x`. In dependency order it unlocks
+`jobflow` → `jobflow-remote`, `pymatgen-analysis-defects`, `matgl`, `matcalc`, `atomate2`,
+`quacc`. `overlays.materials` already exists for it.
+
+| Not packaged | Blocker |
+|---|---|
+| `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs |
+| `ShakeNBreak` | needs `doped` (missing, large) and `hiphive` (missing), on top of the chain above |
+| `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
+| `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
+| `fairchem` | 13-distribution monorepo, torch plus pretrained model weights |
+| `PsiDataViz` | uv workspace, never released, includes a React/TS frontend; only `packages/psidata` is plausible |
+| `crest` | Fortran/meson with vendored subprojects; not in nixpkgs. Feasible, just different work — `tblite` and `xtb` are already there to build against |
+| `Molara` | needs `pyrr`, which nixpkgs **removed** (`pyrr = throw "…incompatible with NumPy 2.0+"` in `pkgs/top-level/python-aliases.nix`, added 2026-02-18). Patching Molara off it is not viable — some forty call sites across `rendering/camera.py` and `tools/raycasting.pyx` use `Vector3`, `Quaternion`, `matrix44` and `vector3`. Carrying a patched `pyrr` here is the intended fix |
+| `xyzrender` | needs `xyzgraph` and `graphrc`, both PyPI-only and both missing. `graphrc` needs cclib, so it would be a top-level `python3.pkgs.callPackage` despite being a pure dependency |
 
 ## Template leftovers
 

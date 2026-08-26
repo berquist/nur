@@ -9,6 +9,8 @@
 #   aiida/vm.nix            NixOS VM integration tests for the same
 #   cheminformatics/default.nix  evaluation tests for the two cheminformatics
 #                                overlays, including the cclib split
+#   chemtools/default.nix   evaluation tests for the chemtools and materials
+#                           overlays, including the chemfiles name split
 #   dotdrop/default.nix     integration tests for the dotdrop package
 #   harmonwig/default.nix   integration tests for the harmonwig package
 #
@@ -51,6 +53,7 @@ let
   };
   aiida = import ./aiida { inherit pkgs; };
   cheminformatics = import ./cheminformatics { inherit pkgs; };
+  chemtools = import ./chemtools { inherit pkgs; };
 in
 {
   inherit
@@ -58,6 +61,7 @@ in
     dotdrop
     aiida
     cheminformatics
+    chemtools
     ;
 
   # Every non-VM test in the repo.
@@ -68,6 +72,7 @@ in
       dotdrop.all
       aiida.all
       cheminformatics.all
+      chemtools.all
     ];
   };
 }

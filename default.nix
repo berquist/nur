@@ -66,7 +66,11 @@ in
   # harmonwig is here too, but on the bare NUR path it carries meta.broken:
   # its cclib comes from a flake input that ./overlays cannot reach.  See
   # pkgs/harmonwig/default.nix, and flake.nix for the working instantiation.
-  inherit (pkgs') dotdrop harmonwig;
+  #
+  # moltui is a third: a TUI application rather than a library, so it is a
+  # buildPythonApplication and could not sit in python313Packages even if the
+  # pin were wanted — nixpkgs rejects a non-module in a Python package set.
+  inherit (pkgs') dotdrop harmonwig moltui;
 
   # The cheminformatics packages that need cclib.  Same arrangement as
   # harmonwig above and for the same reason — see overlays/default.nix's
@@ -77,7 +81,21 @@ in
     ccreg
     dbstep
     digichem-core
+    metallogen
+    molcat
     ;
+
+  # The chemfiles C++ library.  Not a Python package, so it comes straight from
+  # the overlaid set rather than through `py` below — and pkgs/chemfiles-python
+  # binds against exactly this derivation.
+  #
+  # There is deliberately no top-level alias for the *Python* binding, which is
+  # also called `chemfiles`: one name cannot be both, and this is the split both
+  # halves of the audience expect.  `pkgs.chemfiles` is the shared library, the
+  # way every other distribution spells it; `python313Packages.chemfiles` is the
+  # module, the way pip spells it.  See the callPackage site in
+  # overlays/default.nix for how the two are kept from resolving to each other.
+  inherit (pkgs') chemfiles;
 
   # Python packages, reached through the extended python313Packages so that
   # these derivations are identical to what python313.withPackages returns.
@@ -98,5 +116,13 @@ in
 
     morfeus-ml
     qmzyme
+    dough
+
+    wignernj
+    strainjedi
+    sella
+
+    custodian
+    fireworks
     ;
 }
