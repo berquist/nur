@@ -114,6 +114,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `PostgresCluster` pin its port to the xdist worker index, and why does `_close` still tolerate a postmaster that was never running? | `pkgs/aiida-core/default.nix` (the `_create`/`_close` note above `postPatch`) |
 | Why is the pinned port base 21000 rather than 45000, and what did the old comment get wrong? | `pkgs/aiida-core/default.nix` (the ephemeral-range note above `postPatch`) |
 | Why do two group tests have `aiida_profile_clean` injected when upstream never asks for it? | `pkgs/aiida-core/default.nix` (the group-table note above `postPatch`) |
+| Why does one parser test call `spec()` before rebinding `define`, when nothing reads it? | `pkgs/aiida-core/default.nix` (the `test_parser.py` note above `postPatch`) |
 | Why is RabbitMQ deleted from the *deprecated* pytest fixture plugin, and which packages does that fix? | `pkgs/aiida-core/default.nix` (the last note above `postPatch`) |
 | Why does `TestLaunchersDryRun` need its own working directory? | `pkgs/aiida-core/default.nix` (the `test_launch.py` note above `postPatch`) |
 | Why does `aiida-pseudo` put its own `$out/bin` on PATH for the check phase? | `pkgs/aiida-pseudo/default.nix` (`preCheck`) |

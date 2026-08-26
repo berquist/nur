@@ -320,6 +320,43 @@ buildPythonPackage rec {
   # which is still resolved after the patch, so it goes on testing exactly what
   # it did and stops depending on what ran before it.
   #
+  # tests/parsers/test_parser.py is the same shape once more, and reading the
+  # two together is the point: a cache decides whether a leak is ever observed.
+  # test_parser_get_outputs_for_parsing opens with
+  #
+  #     ArithmeticAddCalculation.define = CustomCalcJob.define
+  #
+  # and never puts it back.  Nothing in that test consults it — its node carries
+  # `CustomCalcJob.build_process_type()`, so `get_outputs_for_parsing` reads
+  # CustomCalcJob's spec — but the rebinding outlives the test in that worker's
+  # interpreter.  `Process.spec()` caches into `cls.__dict__['_spec']`, so what
+  # happens next depends entirely on whether that cache was already warm:
+  #
+  #   warm — nearly always, since test_parser_exit_codes and hundreds of others
+  #   build it — the rebound `define` is never called and nothing is visible.
+  #
+  #   cold, and ArithmeticAddCalculation's spec gets built from CustomCalcJob's
+  #   define.  Its outputs become {out, output, remote_folder, remote_stash,
+  #   retrieved}: no `sum`, and an `output` port that is required and
+  #   pass_to_parser.  test_parse_from_node then asks for a link that was never
+  #   made:
+  #
+  #       NotExistent: no neighbor with the label output found
+  #
+  # Reproduced directly against the built library rather than inferred — cold,
+  # the outputs come back without `sum`; warm, they are correct.
+  #
+  # So the same derivation passed on the nixpkgs-unstable leg and failed on
+  # nixos-unstable, 3363 tests versus 3362 out of an identical suite.  With 128
+  # workers and dynamic distribution it is a coin flip which test reaches
+  # ArithmeticAddCalculation first.
+  #
+  # The fix warms the cache deliberately and then scopes the rebinding, rather
+  # than deleting a line that upstream may yet find a use for.  `spec()` on the
+  # line above pins the correct spec before `define` changes, and monkeypatch
+  # puts `define` back at teardown; what the test actually exercises, through
+  # CustomCalcJob, is untouched.
+  #
   # The next three hunks are all the bill for relaxing click's upper bound just
   # above, and are worth reading together: upstream's `<8.3` is not
   # bookkeeping, it is load-bearing, and lifting it costs twelve tests in three
@@ -566,6 +603,15 @@ buildPythonPackage rec {
         "    aiida_profile = get_manager().get_profile()" \
         "    monkeypatch.chdir(tmp_path)
         aiida_profile = get_manager().get_profile()"
+
+    substituteInPlace tests/parsers/test_parser.py \
+      --replace-fail \
+        "    def test_parser_get_outputs_for_parsing(self):" \
+        "    def test_parser_get_outputs_for_parsing(self, monkeypatch):" \
+      --replace-fail \
+        "        ArithmeticAddCalculation.define = CustomCalcJob.define" \
+        "        ArithmeticAddCalculation.spec()
+            monkeypatch.setattr(ArithmeticAddCalculation, 'define', CustomCalcJob.define)"
 
     substituteInPlace tests/orm/nodes/process/test_process.py \
       --replace-fail \
