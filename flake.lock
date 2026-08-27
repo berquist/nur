@@ -11,17 +11,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1786919133,
-        "narHash": "sha256-WI8ClqtHdUejSJuzk1SPKDS3myLDl4IZxVdaKK2z5L8=",
+        "lastModified": 1786902621,
+        "narHash": "sha256-eATk/kLniz4Myk4Yzy4O2e7EF/Nw5/KVaXXVmdxsFlI=",
         "owner": "cclib",
         "repo": "cclib",
-        "rev": "545fa9bdd25af7b6e70d3323d4156791dd54a440",
+        "rev": "21daa960123d28aa21eeaaacc2a1dea39e136829",
         "type": "github"
       },
       "original": {
         "owner": "cclib",
         "repo": "cclib",
-        "rev": "545fa9bdd25af7b6e70d3323d4156791dd54a440",
+        "rev": "21daa960123d28aa21eeaaacc2a1dea39e136829",
         "type": "github"
       }
     },
