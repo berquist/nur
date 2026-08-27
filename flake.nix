@@ -61,7 +61,7 @@
     # hard dependencies, so building it means building Psi4 unless the
     # nix-qchem cache is hit — see cclibPkgs below.
     cclib = {
-      url = "github:cclib/cclib/545fa9bdd25af7b6e70d3323d4156791dd54a440";
+      url = "github:cclib/cclib/21daa960123d28aa21eeaaacc2a1dea39e136829";
       inputs.nixpkgs.follows = "nixpkgs-qchem";
       inputs.qchem.follows = "nixos-qchem";
     };
