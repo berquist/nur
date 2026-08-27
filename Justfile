@@ -130,6 +130,42 @@ vm-test name:
 vm-test-interactive name suite="qcarchive":
     $(nix-build tests/{{ suite }}/vm.nix -A {{ name }}.driver)/bin/nixos-test-driver
 
+# Adversarial ordering checks for aiida-core's suite — one polluter then its
+# victims, serially, so a cross-test pollution bug is a build failure rather
+# than a one-in-128 draw.  See the header of tests/aiida/ordering.nix.
+#
+# Every entry must be green here and red under `just aiida-ordering-control`.
+# Not part of `just check`: each entry builds a full aiida-core variant.
+
+# Adversarial ordering checks, e.g. `just aiida-ordering group-agroup`.
+aiida-ordering name="all":
+    nix-build tests/aiida/ordering.nix -A {{ name }} --no-out-link
+
+# The negative control: same checks with each victim's guard undone again, so
+# every one of them is expected to FAIL.  A check that stays green under this
+# never reproduced the bug it claims to.  --keep-going because the whole point
+# is to see all seven fail, not to stop at the first.
+
+# Ordering checks with the guards removed — every one must fail.
+aiida-ordering-control name="all":
+    nix-build tests/aiida/ordering.nix --arg unguard true -A {{ name }} --keep-going --no-out-link
+
+# The mirror of the ordering checks: each test module in a session of its own,
+# so a test that quietly needs a neighbour to have run first fails outright
+# rather than one run in 128.  One derivation, ~200 pytest sessions, so budget
+# an hour or two — `just aiida-isolation tests/tools` to narrow it.
+
+# Every aiida-core test module run alone, e.g. `just aiida-isolation tests/orm`.
+aiida-isolation only="tests":
+    nix-build tests/aiida/isolation.nix --argstr only {{ only }} --no-out-link
+
+# Seconds, not minutes — it patches the source and reads it, without building
+# aiida-core.  Run it after any aiida-core bump: new tests bring new hazards.
+
+# Static scan for cross-test pollution hazards in aiida-core's suite.
+aiida-pollution-scan:
+    cat $(nix-build tests/aiida/pollution-scan.nix --no-out-link)
+
 # Eval tests, VM test instantiation and a parse of every Nix file — the whole
 # of what can be checked without a nix-daemon, and so the whole of what runs
 # inside the Claude Code sandbox.

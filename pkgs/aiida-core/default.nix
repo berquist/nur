@@ -311,6 +311,84 @@ buildPythonPackage rec {
   # the profile to hold data, and upstream's own test_export_repository_after_
   # maintain already runs a maintain-based test on a cleaned profile.
   #
+  # test_nodes_belonging_to_different_users is a sixth, and the row it collides
+  # with is one its own neighbours plant.  Three tests under
+  # tests/tools/archive/orm/ create the same hardcoded user:
+  #
+  #     UniqueViolation: duplicate key value violates unique constraint
+  #     "uq_db_dbuser_email"
+  #     DETAIL:  Key (email)=(newuser@new.n) already exists.
+  #
+  # All three call `reset_storage()` *mid*-test and then `import_archive()` on an
+  # archive that carries the user, so each one ends with the row back in place —
+  # cleaning up after itself is exactly what none of them does.  Two defend
+  # themselves at setup instead: test_users.py's own test_non_default_user_nodes
+  # and test_groups.py's test_group_import_existing both ask for
+  # `aiida_profile_clean`.  test_nodes_belonging_to_different_users asks for bare
+  # `aiida_profile` and is the only one of the three left open, which makes it
+  # the one that fails whenever either sibling drew the same worker first.
+  #
+  # (tests/orm/test_querybuilder.py creates it too, but the -k filter above drops
+  # that whole module — `test_query` is a substring of `test_querybuilder`.)
+  #
+  # The fixture rename covers the mid-test `reset_storage()` call as well, since
+  # `aiida_profile_clean` yields the same Profile object.  Cleaning at setup costs
+  # the test nothing: it stores every node it goes on to assert about, and
+  # `aiida_localhost` is function-scoped, so the computer is created against the
+  # cleaned profile rather than cached from before it.
+  #
+  # Five more were found by scanning for the shape rather than by waiting for the
+  # lottery: every test that creates a UNIQUE-constrained row from a *literal*,
+  # kept only where some other test creates the same literal and at least one of
+  # the two does not clean.  That is the whole of the pattern above — the
+  # constraints that bite are uq_db_dbuser_email and
+  # uq_db_dbgroup_label_type_string — and it finds the five already patched here
+  # plus these, each of which is one green run away from failing:
+  #
+  #   User('commenting@user.s')  tests/orm/test_comments.py's
+  #     test_comment_querybuilder cleans at setup and ends with the user still
+  #     stored.  Both victims are in tests/tools/archive/orm/test_comments.py and
+  #     both take bare `aiida_profile`; tests/orm collects first, so the polluter
+  #     runs first.  test_multiple_user_comments_single_node re-creates the user
+  #     through import_archive as well, so it can also feed
+  #     test_exclude_comments_flag.
+  #
+  #   Group('agroup')  tests/cmdline/commands/test_group.py's test_list_order is
+  #     safe coming in — that module's autouse `groups` fixture deletes every
+  #     group at setup — and leaves `agroup` behind going out.  test_nodes.py's
+  #     TestNodeDeletion has no cleaning fixture at all.
+  #
+  #   Group('test_args_group')  test_group.py's
+  #     test_dump_calls_group_dump_with_correct_args into test_profile.py's
+  #     TestVerdiProfileDumpCLI, which carries only `pytestmark =
+  #     requires_psql`.
+  #
+  #   Group('test_metadata_group')  test_group.py's
+  #     test_dump_metadata_inclusion_options into tests/orm/test_groups.py — the
+  #     same TestGroups class as test_dump_empty_group above, where only two
+  #     methods ask for the fixture.
+  #
+  #   Group('test_dump_group')  test_dump_dry_run and test_dump_basic, both in
+  #     TestGroups.  This one is ordering-safe today rather than correct: the
+  #     unguarded test is the earlier of the two in the source, so it wins the
+  #     race as long as nothing reorders them.  Patched anyway, since the cost is
+  #     a fixture argument and the protection does not depend on reading the
+  #     file in order.
+  #
+  # The two archive test_comments.py tests *gain* the fixture rather than trading
+  # `aiida_profile` for it, which is what the other patches here do.  Their bodies
+  # call `aiida_profile.reset_storage()` mid-test, and that exact line appears
+  # five times in the file for five different tests — three of which must keep
+  # asking for `aiida_profile`.  substituteInPlace replaces every occurrence, so
+  # the rename would leave those three raising NameError on a fixture they never
+  # requested.  Requesting both is well defined: `aiida_profile_clean` yields the
+  # same session-scoped Profile object, so the mid-test call still resolves.
+  #
+  # test_dump_cli_to_api_mapping takes the fixture *after* `mock_dump` because a
+  # @patch decorator owns that slot.  pytest strips mock arguments from the front
+  # of the signature, so everything after them is still resolved as a fixture —
+  # checked against the pytest this builds against, not assumed.
+  #
   # tests/manage/test_profile_access.py is the same bug as TestLaunchersDryRun
   # below rather than a group problem, and it is patched the same way.  Its
   # MockProcess writes `temp_file.py` and waits for `temp_file.log`, both
@@ -591,7 +669,13 @@ buildPythonPackage rec {
     substituteInPlace tests/orm/test_groups.py \
       --replace-fail \
         "    def test_dump_empty_group(self, tmp_path):" \
-        "    def test_dump_empty_group(self, aiida_profile_clean, tmp_path):"
+        "    def test_dump_empty_group(self, aiida_profile_clean, tmp_path):" \
+      --replace-fail \
+        "    def test_dump_attributes_and_extras(self, tmp_path):" \
+        "    def test_dump_attributes_and_extras(self, aiida_profile_clean, tmp_path):" \
+      --replace-fail \
+        "    def test_dump_dry_run(self, tmp_path):" \
+        "    def test_dump_dry_run(self, aiida_profile_clean, tmp_path):"
 
     substituteInPlace tests/tools/groups/test_paths.py \
       --replace-fail \
@@ -602,6 +686,32 @@ buildPythonPackage rec {
       --replace-fail \
         "    def init_profile(self, tmp_path):" \
         "    def init_profile(self, aiida_profile_clean, tmp_path):"
+
+    substituteInPlace tests/tools/archive/orm/test_users.py \
+      --replace-fail \
+        "def test_nodes_belonging_to_different_users(aiida_profile, tmp_path, aiida_localhost):" \
+        "def test_nodes_belonging_to_different_users(aiida_profile_clean, tmp_path, aiida_localhost):" \
+      --replace-fail \
+        "    aiida_profile.reset_storage()" \
+        "    aiida_profile_clean.reset_storage()"
+
+    substituteInPlace tests/tools/archive/orm/test_comments.py \
+      --replace-fail \
+        "def test_exclude_comments_flag(tmp_path, aiida_profile):" \
+        "def test_exclude_comments_flag(aiida_profile_clean, tmp_path, aiida_profile):" \
+      --replace-fail \
+        "def test_multiple_user_comments_single_node(tmp_path, aiida_profile):" \
+        "def test_multiple_user_comments_single_node(aiida_profile_clean, tmp_path, aiida_profile):"
+
+    substituteInPlace tests/test_nodes.py \
+      --replace-fail \
+        "    def test_delete_group_nodes(self):" \
+        "    def test_delete_group_nodes(self, aiida_profile_clean):"
+
+    substituteInPlace tests/cmdline/commands/test_profile.py \
+      --replace-fail \
+        "    def test_dump_cli_to_api_mapping(self, mock_dump, run_cli_command, tmp_path):" \
+        "    def test_dump_cli_to_api_mapping(self, mock_dump, aiida_profile_clean, run_cli_command, tmp_path):"
 
     substituteInPlace tests/tools/workflows/test_base.py \
       --replace-fail \
