@@ -32,6 +32,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `repeated_keys` disabled? Why does the whitespace hook skip `*.patch`? | `statix.toml`, `flake.nix` |
 | Why does `qcfractalcompute` carry a patch? Why is `parsl` built from the sdist? | the respective `pkgs/*/default.nix` |
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
+| Why does NOMAD get its own interpreter instead of `pythonPackagesExtensions`? Why python312? | `overlays/nomad.nix` |
+| Why are three NOMAD downgrades taken from older nixpkgs revisions, and why `fetchTarball` rather than flake inputs? | `pkgs/nomad/nixpkgs-pins.nix`, `pkgs/nomad/python-overrides.nix` |
+| Why is `nomad-lab` built from the PyPI sdist and not from git? | `pkgs/nomad/nomad-lab/default.nix` |
+| When can NOMAD move off python312? | `scripts/pymatgen-python-support.sh` |
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
 
 ## Architecture

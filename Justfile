@@ -38,9 +38,16 @@ ci-version:
     nix-instantiate --eval -E '(import <nixpkgs> {}).lib.version'
 
 # Evaluate every package's metadata under restricted eval.
+#
+# The second --allowed-uris is for NOMAD: pkgs/nomad/nixpkgs-pins.nix resolves
+# two older nixpkgs revisions with builtins.fetchTarball at *evaluation* time,
+# and restricted mode rejects any URI not listed here ("access to URI ... is
+# forbidden in restricted mode").  See that file for why the pins are
+# fetchTarball rather than flake inputs.
 ci-eval:
     nix-env -f . -qa '*' --meta --xml \
       --allowed-uris https://static.rust-lang.org \
+      --allowed-uris https://github.com/NixOS/nixpkgs \
       --option restrict-eval true \
       --option allow-import-from-derivation true \
       --drv-path --show-trace \

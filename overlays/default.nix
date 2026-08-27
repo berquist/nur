@@ -17,6 +17,13 @@
     dotdrop = final.python3Packages.callPackage ../pkgs/dotdrop { };
   };
 
+  # NOMAD Oasis. Unlike the two overlays around it this one does *not* touch
+  # pythonPackagesExtensions — it builds a scoped `pkgs.nomadPython` instead,
+  # because NOMAD needs a pile of downgrades that must not escape into the rest
+  # of the package set. The reasoning is in ./nomad.nix, and it is long enough
+  # to be worth its own file.
+  nomad = import ./nomad.nix;
+
   # Injects all QCArchive/QCFractal Python packages into every pythonX.pkgs
   # set via pythonPackagesExtensions.  This is what makes
   # python3.withPackages (p: [ p.qcfractal p.qcportal ... ]) work.

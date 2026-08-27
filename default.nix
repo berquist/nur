@@ -29,6 +29,12 @@ let
   # Keep in sync with the top-level aliases in overlays/default.nix; the
   # overlay-python-pin eval test asserts the two agree.
   py = pkgs'.python313Packages;
+
+  # NOMAD gets its own interpreter rather than a slot in python313Packages —
+  # see overlays/nomad.nix for why.  Reached through pkgs' for the same reason
+  # as `py` above: these must be the same derivations `nomadPython.withPackages`
+  # returns, not rebuilds.
+  nomadPy = pkgs'.nomadPython.pkgs;
 in
 {
   # Reserved keys — not lifted into the nixpkgs overlay by overlay.nix.
@@ -49,4 +55,12 @@ in
     qcfractalcompute
     qcarchivetesting
     ;
+
+  # NOMAD.  Only nomad-lab and the parser plugins are exported: the two dozen
+  # supporting packages in pkgs/nomad/ exist to satisfy its closure and are
+  # reachable as pkgs.nomadPython.pkgs.* for anyone who wants them, but
+  # publishing every one of them as a top-level NUR attribute would say they
+  # are generally useful, which they are not — several are pinned to versions
+  # only NOMAD wants.
+  inherit (nomadPy) nomad-lab;
 }
