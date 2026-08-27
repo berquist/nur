@@ -1,0 +1,22 @@
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# scripts/ was already 4-space with indented case arms; this records that so
+# `shfmt` with no flags agrees, rather than defaulting to tabs.
+[*.sh]
+indent_style = space
+indent_size = 4
+switch_case_indent = true
+binary_next_line = true
+
+[*.nix]
+indent_style = space
+indent_size = 2
+
+[Justfile]
+indent_style = space
+indent_size = 4

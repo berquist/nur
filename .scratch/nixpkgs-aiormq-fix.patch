@@ -1,0 +1,68 @@
+From: Eric Berquist <eric.berquist@gmail.com>
+Subject: [PATCH] python313Packages.aiormq: 9.6.4 -> 6.9.4, fix version metadata
+
+aiormq has never released a 9.6.4.  Upstream pushed two tags on
+2026-03-22, 6.9.4 and 9.6.4, and they point at the same commit
+(c1ba6e80404b88f2be174479a15d89f5ceba6a03) -- 9.6.4 is a
+transposed-digit duplicate.  Sorting tags numerically picks the bogus
+one, which is presumably how it landed here.
+
+The src hash is unchanged, because the two tags are the same tree.
+
+That commit also still declares `version = "6.9.2"` in pyproject.toml:
+upstream tagged the release without bumping it.  So the build fails even
+once the tag is corrected --
+
+    The 'aiormq' derivation has version '6.9.4' but .dist-info/METADATA
+    specifies version '6.9.2'.
+
+-- and pyprojectVersionPatchHook resolves that, as the error message
+itself recommends.
+
+Correcting the version is not cosmetic.  aio-pika, the only reverse
+dependency in nixpkgs, requires `aiormq<7,>=6.8`, so patching the
+metadata while leaving version at 9.6.4 merely moves the failure one
+package downstream:
+
+    Checking runtime dependencies for aio_pika-9.6.0-py3-none-any.whl
+      - aiormq<7,>=6.8 not satisfied by version 9.6.4
+
+That bound is also why this stays on 6.x rather than moving to the newer
+7.0.0, which is self-consistent but outside aio-pika's range.
+
+Without this, python3Packages.aiormq does not build at all, taking
+aio-pika and everything downstream of it with it.
+
+---
+diff --git a/pkgs/development/python-modules/aiormq/default.nix b/pkgs/development/python-modules/aiormq/default.nix
+index 31e7a30..f8bc86a 100644
+--- a/pkgs/development/python-modules/aiormq/default.nix
++++ b/pkgs/development/python-modules/aiormq/default.nix
+@@ -3,13 +3,14 @@
+   buildPythonPackage,
+   fetchFromGitHub,
+   pamqp,
++  pyprojectVersionPatchHook,
+   uv-build,
+   yarl,
+ }:
+ 
+ buildPythonPackage rec {
+   pname = "aiormq";
+-  version = "9.6.4";
++  version = "6.9.4";
+   pyproject = true;
+ 
+   src = fetchFromGitHub {
+@@ -26,7 +27,10 @@ buildPythonPackage rec {
+ 
+   pythonRelaxDeps = [ "pamqp" ];
+ 
+-  build-system = [ uv-build ];
++  build-system = [
++    pyprojectVersionPatchHook
++    uv-build
++  ];
+ 
+   dependencies = [
+     pamqp

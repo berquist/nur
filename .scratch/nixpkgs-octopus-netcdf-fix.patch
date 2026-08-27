@@ -1,0 +1,45 @@
+From: Eric Berquist <eric.berquist@gmail.com>
+Subject: [PATCH] octopus: add netcdffortran so NetCDF output works
+
+octopus builds without NetCDF support, so any input asking for it aborts:
+
+    **************************** FATAL ERROR *****************************
+    * Octopus was compiled without NetCDF support.
+    * It is not possible to write output in NetCDF format.
+    **********************************************************************
+
+and the process exits 1. The failure is quiet in the usual case, because
+an input that names `stdout` and `stderr` sends octopus' diagnostics to
+files in the run directory rather than to the terminal.
+
+netcdf is already in buildInputs, but that is the C library. CMakeLists.txt
+asks for `find_package(netCDF-Fortran MODULE)`, whose find module resolves
+`netcdf-fortran` through pkg-config -- a separate derivation. It is never
+found, so HAVE_NETCDF is never set. There is no OCTOPUS_NetCDF flag to
+force the issue; supplying the dependency is the whole fix, and pkg-config
+is already in nativeBuildInputs.
+
+Found through postopus, whose test suite runs octopus to generate its
+fixtures. Every one of its test inputs asks for
+`OutputFormat = netcdf + vtk + plane_z + xcrysden`, so all 68 tests
+downstream of a calculation errored.
+
+---
+--- a/pkgs/by-name/oc/octopus/package.nix
++++ b/pkgs/by-name/oc/octopus/package.nix
+@@ -17,6 +17,7 @@
+   lapack,
+   gsl,
+   netcdf,
++  netcdffortran,
+   arpack,
+   spglib,
+   metis,
+@@ -83,6 +84,7 @@
+     gsl
+     fftw
+     netcdf
++    netcdffortran
+     arpack
+     libvdwxc
+     spglib

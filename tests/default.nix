@@ -5,7 +5,12 @@
 #
 #   qcarchive/default.nix   evaluation tests for the QCFractal NixOS modules
 #   qcarchive/vm.nix        NixOS VM integration tests for the same
+#   aiida/default.nix       evaluation tests for the AiiDA NixOS module
+#   aiida/vm.nix            NixOS VM integration tests for the same
+#   cheminformatics/default.nix  evaluation tests for the two cheminformatics
+#                                overlays, including the cclib split
 #   dotdrop/default.nix     integration tests for the dotdrop package
+#   harmonwig/default.nix   integration tests for the harmonwig package
 #
 # Run everything that needs no VM:
 #   nix-build tests -A all
@@ -13,6 +18,7 @@
 # Run one suite, or one test within it:
 #   nix-build tests -A qcarchive.all
 #   nix-build tests -A qcarchive.server-defaults
+#   nix-build tests -A aiida.aiida-defaults
 #   nix-build tests -A dotdrop.roundtrip
 #
 # The VM tests are deliberately *not* reachable from `all` — they need KVM and
@@ -20,6 +26,13 @@
 # .#checks.<system>.vm-server-local-db`, or `just vm-test server-local-db`), or
 # directly:
 #   nix-build tests/qcarchive/vm.nix -A server-local-db
+#   nix-build tests/aiida/vm.nix -A daemon-local-db
+#
+# The harmonwig suite is not dispatched from here either, for a different
+# reason: harmonwig's cclib comes from a flake input, so a package set built by
+# importing <nixpkgs> — which is all this file has — cannot produce a working
+# one.  It is reachable through the flake only:
+#   nix build .#checks.<system>.harmonwig
 
 {
   pkgs ? import <nixpkgs> { },
@@ -36,9 +49,16 @@ let
   dotdrop = import ./dotdrop {
     pkgs = pkgs.extend (import ../overlays).dotdrop;
   };
+  aiida = import ./aiida { inherit pkgs; };
+  cheminformatics = import ./cheminformatics { inherit pkgs; };
 in
 {
-  inherit qcarchive dotdrop;
+  inherit
+    qcarchive
+    dotdrop
+    aiida
+    cheminformatics
+    ;
 
   # Every non-VM test in the repo.
   all = pkgs.symlinkJoin {
@@ -46,6 +66,8 @@ in
     paths = [
       qcarchive.all
       dotdrop.all
+      aiida.all
+      cheminformatics.all
     ];
   };
 }

@@ -7,3 +7,16 @@ result-*
 /.pre-commit-config.yaml
 
 .direnv/
+
+# Secrets for direnv to pick up.  `.envrc` itself is tracked, so a credential
+# put there — a cachix push token, say — is one `git add` away from being
+# published.  Keep them here and source it from .envrc:
+#
+#   source_env_if_exists .envrc.local
+/.envrc.local
+/.env
+
+# Upstream checkouts of the projects packaged under pkgs/, cloned here so their
+# pyproject.toml, conftest.py and uv.lock can be read while packaging.  They are
+# other people's repositories, each with its own .git — not content of this one.
+/wc/

@@ -22,18 +22,18 @@ jobs:
         # https://github.com/nix-community/NUR/blob/master/repos.json
         nurRepo:
           - <YOUR_REPO_NAME>
-        # Set this to cache your build results in cachix for faster builds
-        # in CI and for everyone who uses your cache.
+        # Where build results are pushed, so that CI and anyone using these
+        # overlays fetches binaries instead of rebuilding.  The cache host name
+        # without the ".cachix.org" suffix.
         #
-        # Format: Your cachix cache host name without the ".cachix.org" suffix.
-        # Example: mycache (for mycache.cachix.org)
+        # Needs the CACHIX_AUTH_TOKEN repository secret, set at
+        # https://github.com/berquist/nur/settings/secrets/actions
         #
-        # For this to work, you also need to set the CACHIX_SIGNING_KEY or
-        # CACHIX_AUTH_TOKEN secret in your repository secrets settings in
-        # Github found at
-        # https://github.com/<your_githubname>/nur-packages/settings/secrets
+        # No signing key: cachix signs server-side for caches created since
+        # 2021, and the auth token is the whole credential.  Pushing is skipped
+        # on pull requests from forks, which cannot see repository secrets.
         cachixName:
-          - <YOUR_CACHIX_NAME>
+          - nur-berquist
         nixPath:
           - nixpkgs=https://github.com/NixOS/nixpkgs/archive/refs/heads/nixpkgs-unstable.tar.gz
           - nixpkgs=https://github.com/NixOS/nixpkgs/archive/refs/heads/nixos-unstable.tar.gz
@@ -62,7 +62,6 @@ jobs:
       if: ${{ matrix.cachixName != '<YOUR_CACHIX_NAME>' }}
       with:
         name: ${{ matrix.cachixName }}
-        signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
         authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
     - name: Check evaluation
       run: nix shell -f '<nixpkgs>' just -c just ci-eval

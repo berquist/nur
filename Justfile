@@ -64,7 +64,7 @@ ci-eval:
 
 # Build everything ci.nix reports as buildable and cacheable.
 ci-build:
-    nix build -L --no-link -f ci.nix cacheOutputs
+    nix build -L --no-link --keep-going -f ci.nix cacheOutputs
 
 # Full CI sequence against one channel, e.g. `just ci nixos-26.05`.
 ci channel=default_channel:
@@ -88,29 +88,83 @@ ci-matrix:
 # errors with "unrecognised flag"), but it streams build output by default, so
 # the nix-build recipes below need nothing extra.
 
-# Everything: eval tests, dotdrop tests, all six VM tests, and the hooks.
+# Everything: all three eval suites, the dotdrop and harmonwig integration
+# tests, every VM test, and the hooks.
 check:
     nix flake check -L
 
-# Every non-VM test: the QCFractal eval tests and the dotdrop integration tests.
+# Every non-VM test reachable without the flake: the three eval suites and the
+# dotdrop integration tests.  Not harmonwig — its cclib comes from a flake
+# input, so `just harmonwig-tests` goes through the flake instead.
 tests:
     nix-build tests -A all --no-out-link
 
 # QCFractal module evaluation tests only — fast, no VM, stubbed packages.
-eval-tests:
+qcfractal-eval-tests:
     nix-build tests -A qcarchive.all --no-out-link
+
+# AiiDA module evaluation tests only — fast, no VM, stubbed packages.
+aiida-eval-tests:
+    nix-build tests -A aiida.all --no-out-link
+
+# Cheminformatics overlay evaluation tests only — fast, no VM, nothing real
+# built. This is where the cclib split is asserted.
+cheminformatics-eval-tests:
+    nix-build tests -A cheminformatics.all --no-out-link
 
 # dotdrop integration tests. No VM, but these build the real package.
 dotdrop-tests:
     nix-build tests -A dotdrop.all --no-out-link
 
+# harmonwig integration tests. Through the flake: harmonwig's cclib is a flake
+# input, so `nix-build tests` cannot produce a working one.
+harmonwig-tests:
+    nix build -L --no-link .#checks.$(nix eval --impure --raw --expr builtins.currentSystem).harmonwig
+
 # One VM integration test, e.g. `just vm-test server-local-db`. Needs KVM.
 vm-test name:
     nix build -L --no-link .#checks.$(nix eval --impure --raw --expr builtins.currentSystem).vm-{{ name }}
 
-# Drop into the interactive driver for one VM test.
-vm-test-interactive name:
-    $(nix-build tests/qcarchive/vm.nix -A {{ name }}.driver)/bin/nixos-test-driver
+# Drop into the interactive driver for one VM test, e.g.
+# `just vm-test-interactive daemon-local-db aiida`.
+vm-test-interactive name suite="qcarchive":
+    $(nix-build tests/{{ suite }}/vm.nix -A {{ name }}.driver)/bin/nixos-test-driver
+
+# Adversarial ordering checks for aiida-core's suite — one polluter then its
+# victims, serially, so a cross-test pollution bug is a build failure rather
+# than a one-in-128 draw.  See the header of tests/aiida/ordering.nix.
+#
+# Every entry must be green here and red under `just aiida-ordering-control`.
+# Not part of `just check`: each entry builds a full aiida-core variant.
+
+# Adversarial ordering checks, e.g. `just aiida-ordering group-agroup`.
+aiida-ordering name="all":
+    nix-build tests/aiida/ordering.nix -A {{ name }} --no-out-link
+
+# The negative control: same checks with each victim's guard undone again, so
+# every one of them is expected to FAIL.  A check that stays green under this
+# never reproduced the bug it claims to.  --keep-going because the whole point
+# is to see all seven fail, not to stop at the first.
+
+# Ordering checks with the guards removed — every one must fail.
+aiida-ordering-control name="all":
+    nix-build tests/aiida/ordering.nix --arg unguard true -A {{ name }} --keep-going --no-out-link
+
+# The mirror of the ordering checks: each test module in a session of its own,
+# so a test that quietly needs a neighbour to have run first fails outright
+# rather than one run in 128.  One derivation, ~200 pytest sessions, so budget
+# an hour or two — `just aiida-isolation tests/tools` to narrow it.
+
+# Every aiida-core test module run alone, e.g. `just aiida-isolation tests/orm`.
+aiida-isolation only="tests":
+    nix-build tests/aiida/isolation.nix --argstr only {{ only }} --no-out-link
+
+# Seconds, not minutes — it patches the source and reads it, without building
+# aiida-core.  Run it after any aiida-core bump: new tests bring new hazards.
+
+# Static scan for cross-test pollution hazards in aiida-core's suite.
+aiida-pollution-scan:
+    cat $(nix-build tests/aiida/pollution-scan.nix --no-out-link)
 
 # Eval tests, VM test instantiation and a parse of every Nix file — the whole
 # of what can be checked without a nix-daemon, and so the whole of what runs
@@ -127,6 +181,33 @@ check-no-daemon:
 # Build one package the NUR way, e.g. `just build qcfractal`.
 build pkg:
     nix-build -A {{ pkg }} --no-out-link
+
+# The flake counterpart, and not a stylistic alternative to `build` above: the
+# five cclib dependants are `meta.broken` on the NUR path and flake.nix's
+# `packages` replaces them with the cclibPkgs ones, so `just build harmonwig`
+# stops at "Package is marked as broken" and only this recipe can build them.
+# See the cclib split in AGENTS.md.
+#
+# -L for the same reason ci-build uses it: the whole builder output, so the run
+# can be redirected to a file and read back with `just demux-log`.
+
+# Build one package through the flake, e.g. `just build-flake harmonwig`.
+build-flake pkg:
+    nix build -L --no-link .#{{ pkg }}
+
+# `--keep-going` interleaves every concurrent build line by line, so a redirected
+# ci-build log is a dozen derivations shuffled together and no single failure
+# reads straight through.  This undoes that:
+#
+#   just ci-build 2>&1 | tee log_ci
+#   just demux-log -l log_ci        # which derivations spoke, and how much
+#   just demux-log -o postopus log_ci
+#
+# `-o '(nix)'` gets nix's own lines — the build plan and the failure summary.
+
+# Regroup a redirected `nix build -L` log so each derivation reads as one block.
+demux-log +args:
+    ./scripts/demux-build-log.sh {{ args }}
 
 # Builds qcportal against a channel's *default* interpreter rather than the
 # python313 the repo pins.

@@ -1,0 +1,46 @@
+From: Eric Berquist <eric.berquist@gmail.com>
+Subject: [PATCH] python3Packages.rdkit: install .dist-info metadata
+
+rdkit is built by CMake with `pyproject = false`, so what lands in
+site-packages is a bare rdkit/ tree with no .dist-info beside it. The
+package imports perfectly; it is simply invisible to importlib.metadata.
+
+That is what pythonRuntimeDepsCheckHook uses to resolve a wheel's
+Requires-Dist, so every dependant that declares rdkit in its own metadata
+fails its build:
+
+    Checking runtime dependencies for qmzyme-0.1.2-py3-none-any.whl
+      - rdkit not installed
+
+while rdkit is in the closure and importable. The workaround at each
+dependant is `pythonRemoveDeps = [ "rdkit" ]`, which drops a declaration
+that is true rather than fixing the package it points at.
+
+METADATA alone is enough and is all this writes: importlib.metadata needs
+a <name>-<version>.dist-info directory with a Name and a Version, and
+reads nothing else. A RECORD would have to carry real hashes to be worth
+anything, and nothing consumes one here.
+
+---
+--- a/pkgs/development/python-modules/rdkit/default.nix
++++ b/pkgs/development/python-modules/rdkit/default.nix
+@@ -184,6 +184,19 @@
+     (lib.cmakeFeature "coordgen_DIR" "${coordgenlibs}/lib/cmake")
+   ];
+ 
++  # The CMake build installs the rdkit/ tree straight into site-packages with
++  # no .dist-info beside it, so the package is invisible to
++  # importlib.metadata. Every dependant that declares rdkit in its own
++  # metadata then fails pythonRuntimeDepsCheckHook with "rdkit not installed"
++  # while rdkit sits in its closure, importable. Synthesise the minimum that
++  # importlib.metadata reads: a Name and a Version.
++  postInstall = ''
++    distInfo="$out/${python.sitePackages}/rdkit-${version}.dist-info"
++    mkdir -p "$distInfo"
++    printf 'Metadata-Version: 2.1\nName: rdkit\nVersion: %s\n' \
++      "${version}" >"$distInfo/METADATA"
++  '';
++
+   checkPhase = ''
+     export QT_QPA_PLATFORM='offscreen'
+     export RDBASE=$(realpath ..)

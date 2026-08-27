@@ -38,26 +38,58 @@
     # This must be bumped in lockstep with the nixos-qchem input above.  Read
     # the target revision out of the input's own lock:
     #
-    #   nix flake metadata github:Nix-QChem/NixOS-QChem --json \
-    #     | jq -r '.locks.nodes.nixpkgs.locked.rev'
+    #   nix flake metadata github:Nix-QChem/NixOS-QChem --json | jq -r '.locks.nodes.nixpkgs.locked.rev'
     #
     # Pinning it by hand rather than reading nixos-qchem's lock at eval time is
     # deliberate: flakes offer no supported way to reach a transitive input's
     # locked revision, and `follows` cannot express "match the dependency".
-    nixpkgs-qchem.url = "github:NixOS/nixpkgs/1469d42eb4b3e88d7f30267d86253e6a3eeb5356";
+    nixpkgs-qchem.url = "github:NixOS/nixpkgs/ac6b2166e7a9375683b8e98f860f273222337b16";
+
+    # cclib is not in nixpkgs and upstream carries its own flake, so take it
+    # from there rather than repackaging.  Only overlays.default is used — a
+    # plain final: prev: function — so following our inputs is free, exactly as
+    # for nixos-qchem above.
+    #
+    # The two `follows` are also no-ops today, and deliberately so: cclib's own
+    # flake.lock already pins nixpkgs 3e41b24 and nixos-qchem faad404, which are
+    # the two revisions pinned above.  Stating them keeps that alignment from
+    # drifting silently when either input is bumped — if it does drift, cclib
+    # gets built against a nixpkgs its CI never saw.
+    #
+    # It matters more than it looks: cclib's nix/cclib.nix promotes the whole
+    # `bridges` extra (psi4, pyscf, iodata, biopython, trexio, openbabel) into
+    # hard dependencies, so building it means building Psi4 unless the
+    # nix-qchem cache is hit — see cclibPkgs below.
+    cclib = {
+      url = "github:cclib/cclib/545fa9bdd25af7b6e70d3323d4156791dd54a440";
+      inputs.nixpkgs.follows = "nixpkgs-qchem";
+      inputs.qchem.follows = "nixos-qchem";
+    };
   };
 
-  # Binary cache for NixOS-QChem (Psi4 and CFOUR are large; fetch binaries
-  # rather than compiling from source).
+  # Binary caches.
+  #
+  #   nix-qchem      NixOS-QChem's own Hydra output.  Psi4 and CFOUR are large;
+  #                  fetch binaries rather than compiling from source.
+  #   nur-berquist   this repo's, populated by .github/workflows/build.yml from
+  #                  `just ci-build` on every push to main and nightly.  It is
+  #                  where the packages nixpkgs does not carry come from, and
+  #                  since the qchem set is rebuilt against the compute
+  #                  worker's interpreter (see qchemPkgs below), it is also the
+  #                  only cache that has *that* Psi4.
   #
   # Note that Nix ignores extra-substituters unless the invoking user is in
   # trusted-users.  Without that, `nix flake check` silently builds Psi4 from
   # source no matter how correct the pinning above is — look for "warning:
   # ignoring untrusted flake configuration setting" before blaming the hashes.
   nixConfig = {
-    extra-substituters = [ "https://nix-qchem.cachix.org" ];
+    extra-substituters = [
+      "https://nix-qchem.cachix.org"
+      "https://nur-berquist.cachix.org"
+    ];
     extra-trusted-public-keys = [
       "nix-qchem.cachix.org-1:ZjRh1PosWRj7qf3eukj4IxjhyXx6ZwJbXvvFk3o3Eos="
+      "nur-berquist.cachix.org-1:Hoz7CuoAaFYOUxiy5zcrHEM82xJKjilI24ly0W+1kq4="
     ];
   };
 
@@ -77,6 +109,7 @@
         # Import into your system flake as:
         #   inputs.nur-berquist.nixosModules.qcfractal-server
         #   inputs.nur-berquist.nixosModules.qcfractal-compute
+        #   inputs.nur-berquist.nixosModules.aiida
         nixosModules = import ./nixos-modules;
 
         # Overlays
@@ -84,8 +117,25 @@
         # Our Python packages (pkgs.python313Packages.qcfractal, etc.):
         #   inputs.nur-berquist.overlays.qcfractal
         #
+        # aiida-core, its five plugins and their dependencies
+        # (pkgs.aiida-core, pkgs.python313Packages.aiida-cp2k, …):
+        #   inputs.nur-berquist.overlays.aiida
+        #
         # dotdrop (pkgs.dotdrop):
         #   inputs.nur-berquist.overlays.dotdrop
+        #
+        # harmonwig (pkgs.harmonwig) — but only usable when composed *after*
+        # cclib's own overlay, which supplies its cclib; see pkgs/harmonwig:
+        #   inputs.nur-berquist.overlays.harmonwig
+        #
+        # morfeus, QMzyme and the cheminformatics dependencies nixpkgs lacks
+        # (pkgs.morfeus-ml, pkgs.python313Packages.mdanalysis, …):
+        #   inputs.nur-berquist.overlays.cheminformatics
+        #
+        # DBSTEP, aqme, ccreg and digichem (pkgs.dbstep, …) — like harmonwig,
+        # usable only when composed after cclib's overlay, and after
+        # overlays.cheminformatics, which supplies their other dependencies:
+        #   inputs.nur-berquist.overlays.cheminformatics-cclib
         #
         # NixOS-QChem re-exported for convenience (pkgs.qchem.*):
         #   inputs.nur-berquist.overlays.qchem
@@ -125,13 +175,39 @@
             overlays = builtins.attrValues (import ./overlays);
           };
 
+          # The interpreter the compute worker runs.  QCEngine imports a Python
+          # QC program *into the worker process*, so a program built for any
+          # other Python is unusable — nixos-modules/qcfractal-compute.nix
+          # asserts on exactly that.  Programs follow the worker rather than the
+          # other way round, because the worker's Python is this repo's pin and
+          # is shared with the whole QCArchive family, while a QC program is one
+          # package that can be rebuilt.
+          #
+          # Read off the package instead of spelling "python313" a fourth time,
+          # so the two cannot drift.
+          workerPython = pkgs'.qcfractalcompute.pythonModule;
+
+          # ...and the attribute naming the *same version* inside nixpkgs-qchem.
+          # It has to be selected there rather than passed in from pkgs': an
+          # interpreter from our nixpkgs is a different derivation, and handing
+          # it to the qchem overlay would drag our whole stdenv into every QC
+          # program's closure.
+          qchemPythonAttr = "python${lib.replaceStrings [ "." ] [ "" ] workerPython.pythonVersion}";
+
           # Psi4 for the compute tests.
           #
-          # This reproduces NixOS-QChem's own instantiation exactly — its pinned
-          # nixpkgs, its overlay, and the config its flake sets — because that
-          # is what nix-qchem.cachix.org was populated from.  Any deviation
-          # (our nixpkgs, or a missing config.qchem-config) changes the
-          # derivation hash and sends Psi4's closure to a from-source build.
+          # Apart from the interpreter, this reproduces NixOS-QChem's own
+          # instantiation exactly — its pinned nixpkgs, its overlay, and the
+          # config its flake sets — because that is what nix-qchem.cachix.org
+          # was populated from.  Any *further* deviation (our nixpkgs, or a
+          # missing config.qchem-config) changes the derivation hash again.
+          #
+          # The interpreter override is a deviation, and it is not free: while
+          # the worker's pin and nixpkgs-qchem's default `python3` disagree,
+          # Psi4 and its Python closure miss the cache and build from source.
+          # That is the price of the invariant, and it is temporary in the
+          # obvious way — the override becomes a no-op the moment the two agree
+          # again, and the cache comes back with it.
           #
           # Do NOT simplify this to `nixos-qchem.packages.${system}.psi4`.  That
           # output is a filterAttrs over the *entire* qchem set, so selecting a
@@ -142,15 +218,45 @@
           # NixOS-QChem then takes down our whole `checks` output.  Selecting
           # qchem.psi4 from our own instantiation forces only Psi4.
           #
-          # Taking Psi4 from a different package set than the VM nodes is fine —
-          # and in fact preferable.  The nixos-qchem overlay extends python3's
-          # packageOverrides, so folding it into pkgs' would rebuild qcfractal,
-          # qcportal and their whole dependency closure against a different
-          # Python package set, changing even the tests that never touch Psi4.
-          # A QC program only has to be an executable on the worker's PATH.
+          # Taking Psi4 from a different package set than the VM nodes is fine:
+          # a QC program only has to be an executable on the worker's PATH.
+          #
+          # It is *not* fine to instead fold nixos-qchem.overlays.qchem into
+          # pkgs' and take Psi4 from there.  Not because the overlay would
+          # disturb anything — it would not; every attribute it writes is
+          # namespaced under cfg.prefix, which defaults to "qchem", and the
+          # python3 it overrides is qchem.python3, so python313Packages and both
+          # our families are untouched by it.  The reason is the one above:
+          # pkgs' is built from *our* nixpkgs with no qchem-config, and Psi4
+          # built against those is a different derivation from the one the cache
+          # holds.  Re-exporting the overlay for consumers, which the `flake`
+          # block above does, is a separate matter and carries no such cost.
           qchemPkgs = import inputs.nixpkgs-qchem {
             inherit system;
-            overlays = [ inputs.nixos-qchem.overlays.qchem ];
+            overlays = [
+              # Must come *before* the qchem overlay, which hangs every Python
+              # QC program off `super.python3` — psi4 is
+              # `toPythonApplication qchem.python3.pkgs.psi4`, and qchem.python3
+              # is `super.python3` plus qchem's packageOverrides.  Rewriting
+              # python3 here is therefore the whole of the retarget: nothing
+              # downstream names a version.
+              #
+              # Only python3 needs it.  The qchem overlay reads no other
+              # interpreter attribute, and in particular never `python3Packages`
+              # — which in nixpkgs aliases the *versioned* set and so would not
+              # follow this anyway.
+              (_final: prev: {
+                python3 =
+                  prev.${qchemPythonAttr} or (throw ''
+                    nixpkgs-qchem has no ${qchemPythonAttr}, which is the
+                    interpreter services.qcfractalCompute would run
+                    (Python ${workerPython.pythonVersion}).  Either move the
+                    nixpkgs-qchem pin to a revision that still carries it, or
+                    move this repo's Python pin to one it does.
+                  '');
+              })
+              inputs.nixos-qchem.overlays.qchem
+            ];
             config.allowUnfree = true;
             # Matches the arguments NixOS-QChem's flake passes; allowEnv = false
             # keeps NIXQC_* environment variables from perturbing the hash.
@@ -165,6 +271,52 @@
           # need Psi4 are defined only there.  They need KVM anyway.
           psi4 = if system == "x86_64-linux" then qchemPkgs.qchem.psi4 else null;
 
+          # Five packages here need cclib, and cclib's overlay needs the qchem
+          # set: nix/overlay.nix there reads final.qchem.python3.pkgs.psi4.
+          # Building onto qchemPkgs rather than pkgs' keeps that to one Psi4
+          # instead of two — everything else about NixOS-QChem's instantiation
+          # is still reproduced, so only the interpreter override above costs
+          # anything, and it costs it once.
+          #
+          # cclib's overlay overrides the *top-level* python3 rather than
+          # pythonPackagesExtensions, so it cannot perturb python313Packages and
+          # the QCArchive and AiiDA families are untouched.  Note it lands on
+          # the python3 the override above installed, so these five follow the
+          # worker's interpreter too — which is what the repo's python313 pin
+          # wanted of them anyway.
+          #
+          # The three overlays taken from ./overlays are exactly those whose
+          # packages resolve cclib.  `cheminformatics` is included not because
+          # anything in it needs cclib — nothing does — but because it is where
+          # morfeus-ml, colour-science, lwreg, configurables and openprattle
+          # come from, and cheminformatics-cclib reaches them through
+          # final.python3.pkgs.
+          #
+          # `aiida` is deliberately *not* in this list, even though
+          # aiida-gaussian would become buildable if it were.  Adding it would
+          # rebuild aiida-core and its whole closure against the year-old
+          # nixpkgs NixOS-QChem pins instead of ours, which is both expensive
+          # and a second, silently divergent AiiDA.  See
+          # pkgs/aiida-gaussian/default.nix.
+          #
+          # Only defined where NixOS-QChem has outputs; its flake hardcodes
+          # x86_64-linux and optAVX implies an x86 -march.
+          cclibPkgs =
+            let
+              ours = import ./overlays;
+            in
+            if system == "x86_64-linux" then
+              qchemPkgs.extend (
+                lib.composeManyExtensions [
+                  inputs.cclib.overlays.default
+                  ours.harmonwig
+                  ours.cheminformatics
+                  ours.cheminformatics-cclib
+                ]
+              )
+            else
+              null;
+
           # NWChem needs no flake input — it is in nixpkgs, and so cached — but
           # it is Linux-only, and a VM test could not run anywhere else anyway.
           nwchem = if pkgs'.stdenv.hostPlatform.isLinux then pkgs'.nwchem else null;
@@ -173,6 +325,13 @@
             pkgs = pkgs';
             inherit psi4 nwchem;
           };
+
+          aiidaVmTests = import ./tests/aiida/vm.nix { pkgs = pkgs'; };
+
+          # Given cclibPkgs rather than pkgs', because that is the only package
+          # set in which harmonwig has a cclib; see ./tests/harmonwig and the
+          # cclibPkgs binding above.
+          harmonwigTests = if cclibPkgs != null then import ./tests/harmonwig { pkgs = cclibPkgs; } else null;
 
           tests = import ./tests { pkgs = pkgs'; };
 
@@ -188,7 +347,36 @@
           legacyPackages = nurAttrs;
 
           # Flake-style packages (derivations only, filtered).
-          packages = lib.filterAttrs (_: v: lib.isDerivation v) nurAttrs;
+          #
+          # The five cclib-dependent packages are replaced rather than
+          # inherited: the ones in nurAttrs come from the bare ./overlays and
+          # carry meta.broken because ./overlays cannot reach the cclib flake
+          # input.  These are the working ones.  `nix build .#dbstep` therefore
+          # succeeds while `nix-build -A dbstep` does not, which is the same
+          # split the Psi4-backed VM checks already live with.
+          #
+          # aiida-gaussian is the one cclib dependant *not* replaced here; see
+          # the cclibPkgs binding above for why.
+          #
+          # Broken derivations are filtered out rather than left to fail.
+          # `nix flake check` forces every member of `packages`, and forcing a
+          # meta.broken derivation throws — so leaving `aiida-gaussian` in would
+          # take the whole check down, and so would the four below on any system
+          # where cclibPkgs is null.  They stay reachable through
+          # legacyPackages, which flake check does not force, and which answers
+          # with nixpkgs' own "marked as broken" message rather than an
+          # attribute-not-found.
+          packages =
+            lib.filterAttrs (_: v: lib.isDerivation v && !(v.meta.broken or false)) nurAttrs
+            // lib.optionalAttrs (cclibPkgs != null) {
+              inherit (cclibPkgs)
+                harmonwig
+                aqme
+                ccreg
+                dbstep
+                digichem-core
+                ;
+            };
 
           # -------------------------------------------------------------------
           # Formatting and linting, wired up as git hooks.
@@ -247,8 +435,31 @@
           # QCFractal module evaluation tests (fast, no VM, no real packages):
           #   nix build .#checks.x86_64-linux.eval
           #
+          # AiiDA module evaluation tests (likewise fast and stubbed):
+          #   nix build .#checks.x86_64-linux.eval-aiida
+          #
+          # Cheminformatics overlay evaluation tests (likewise; nothing real is
+          # built, including the packages under test):
+          #   nix build .#checks.x86_64-linux.eval-cheminformatics
+          #
           # dotdrop integration tests (no VM, but they build the real package):
           #   nix build .#checks.x86_64-linux.dotdrop
+          #
+          # harmonwig integration tests — no VM either, but they build harmonwig
+          # and therefore cclib, and so exist only where NixOS-QChem does:
+          #   nix build .#checks.x86_64-linux.harmonwig
+          #
+          # AiiDA VM tests.  The first three need only nixpkgs; the CP2K plugin
+          # round trip additionally needs a CP2K, so it is x86_64-linux only:
+          #   nix build .#checks.x86_64-linux.vm-aiida-daemon-local-db
+          #   nix build .#checks.x86_64-linux.vm-aiida-workchain-arithmetic
+          #   nix build .#checks.x86_64-linux.vm-aiida-daemon-rabbitmq
+          #   nix build .#checks.x86_64-linux.vm-aiida-plugin-cp2k
+          #
+          # And aiida-core's own SSH transport suite, which needs a real sshd
+          # and a real login shell, so it cannot run in the package's check
+          # phase — see the comment on the test:
+          #   nix build .#checks.x86_64-linux.vm-aiida-transports-ssh
           #
           # VM integration tests (require KVM and real packages):
           #   nix build .#checks.x86_64-linux.vm-server-local-db
@@ -274,6 +485,16 @@
             # Evaluation tests — always fast, no real packages needed.
             eval = tests.qcarchive.all;
 
+            # The same, for the AiiDA module.  A separate check rather than a
+            # second path into `eval`, so that a failure names which module set
+            # broke without having to read the build log.
+            eval-aiida = tests.aiida.all;
+
+            # The cheminformatics overlays.  Not a module suite at all — these
+            # assert how ../overlays wires the cclib split, which is silent when
+            # it goes wrong.  See tests/cheminformatics/default.nix.
+            eval-cheminformatics = tests.cheminformatics.all;
+
             # dotdrop integration tests — no VM, but they do build dotdrop and
             # run upstream's tests-ng scripts against the installed binary.
             dotdrop = tests.dotdrop.all;
@@ -282,6 +503,11 @@
             vm-server-local-db = vmTests.server-local-db;
             vm-server-open-firewall = vmTests.server-open-firewall;
             vm-server-remote-db = vmTests.server-remote-db;
+
+            vm-aiida-daemon-local-db = aiidaVmTests.daemon-local-db;
+            vm-aiida-workchain-arithmetic = aiidaVmTests.workchain-arithmetic;
+            vm-aiida-daemon-rabbitmq = aiidaVmTests.daemon-rabbitmq;
+            vm-aiida-transports-ssh = aiidaVmTests.transports-ssh;
           }
           // lib.optionalAttrs (nwchem != null) {
             vm-compute-nwchem-singlepoint = vmTests.compute-nwchem-singlepoint;
@@ -290,6 +516,16 @@
             vm-compute-connects = vmTests.compute-connects;
             vm-compute-authenticated = vmTests.compute-authenticated;
             vm-compute-singlepoint = vmTests.compute-singlepoint;
+          }
+          // lib.optionalAttrs (system == "x86_64-linux") {
+            # nixpkgs' cp2k declares platforms = [ "x86_64-linux" ].  Guarded on
+            # the system string rather than on cp2k.meta.available, because
+            # reading that attribute forces the derivation — which is the thing
+            # that is not guaranteed to evaluate elsewhere.
+            vm-aiida-plugin-cp2k = aiidaVmTests.plugin-cp2k;
+          }
+          // lib.optionalAttrs (harmonwigTests != null) {
+            harmonwig = harmonwigTests.all;
           };
         };
     };

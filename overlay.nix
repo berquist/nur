@@ -4,6 +4,12 @@
 
 _self: super:
 let
+  # Keep in sync with the same predicate in ./ci.nix.
+  #
+  # python313Packages is ours rather than part of the NUR template's list, and
+  # is the one that would do real damage if it leaked: it would replace the
+  # consumer's python313Packages with the one ./default.nix builds from its own
+  # pkgs'.  See the comment at that attribute.
   isReserved =
     n:
     n == "lib"
@@ -11,7 +17,8 @@ let
     || n == "nixosModules"
     || n == "homeModules"
     || n == "darwinModules"
-    || n == "flakeModules";
+    || n == "flakeModules"
+    || n == "python313Packages";
   nameValuePair = n: v: {
     name = n;
     value = v;

@@ -36,6 +36,30 @@ let
     } "mkdir -p $out/bin && touch $out/bin/qcfractal-compute-manager";
   };
 
+  # Shaped like `toPythonApplication python3.pkgs.psi4`, which is what
+  # pkgs.qchem.psi4 is: `pythonModule` is deliberately `false`, and the
+  # interpreter arrives as the one non-module element of
+  # `requiredPythonModules`.  The compute module has to read the interpreter out
+  # of that, so a stub carrying a plain `pythonModule` would not exercise it.
+  pythonProgramStub =
+    python:
+    pkgs.runCommand "psi4-stub" {
+      passthru = {
+        pythonModule = false;
+        requiredPythonModules = [ python ];
+      };
+    } "mkdir -p $out/bin && touch $out/bin/psi4";
+
+  # Stands in for a QC program that a nixpkgs-qchem bump has re-targeted at an
+  # interpreter the worker does not run.  It throws rather than defaulting if
+  # nixpkgs ever makes this version the default: a mismatch test whose two sides
+  # match would still pass its `check` while proving nothing.
+  otherPython =
+    if pkgs.python312.pythonVersion == pkgs.python3.pythonVersion then
+      throw "tests/qcarchive: otherPython must differ from pkgs.python3"
+    else
+      pkgs.python312;
+
   # Silence the stateVersion warning that fires on every eval-config.nix call.
   noStateVersionWarning = {
     system.stateVersion = lib.mkDefault "26.11";
@@ -553,6 +577,24 @@ lib.fix (self: {
     builtins.elem fakePsi4 cfg.systemd.services.qcfractalcompute.path
   );
 
+  # A Python QC program built for the worker's own interpreter still gets its
+  # private dependency closure appended to PYTHONPATH — two entries, the
+  # worker's env and the program's.  The companion to
+  # assertion-program-python-mismatch below: rejecting the mismatched case is
+  # only correct if the matching one keeps working.
+  compute-program-python-env = check "compute-program-python-env" (
+    let
+      cfg = evalCompute {
+        services.qcfractalCompute = {
+          enable = true;
+          executor.programs = [ (pythonProgramStub pkgs.python3) ];
+        };
+      };
+      pythonPath = cfg.systemd.services.qcfractalcompute.environment.PYTHONPATH;
+    in
+    lib.length (lib.splitString ":" pythonPath) == 2
+  );
+
   # Regression guard.  QCEngine program discovery is *not* in-process: the
   # manager shells out to `python3 qcengine_list.py`, and that script turns a
   # failed `import qcengine` into an empty program list rather than an error.
@@ -618,6 +660,21 @@ lib.fix (self: {
   # ==========================================================================
   # Compute module — assertion violations (must throw during evaluation)
   # ==========================================================================
+
+  # A Python QC program built for an interpreter other than the worker's.
+  # Leaving it out of PYTHONPATH is not enough: QCEngine discovers it through a
+  # subprocess and then imports it in-process, so the failure would surface as
+  # every claimed record erroring on an ImportError rather than as anything
+  # naming a Python version.
+  assertion-program-python-mismatch = assertFails "assertion-program-python-mismatch" (nixosEval [
+    ../../nixos-modules/qcfractal-compute.nix
+    {
+      services.qcfractalCompute = {
+        enable = true;
+        executor.programs = [ (pythonProgramStub otherPython) ];
+      };
+    }
+  ]);
 
   # mpi.enable without an MPI package: mpirun would be missing from PATH, and
   # the failure would surface as the whole discovery collapsing.
