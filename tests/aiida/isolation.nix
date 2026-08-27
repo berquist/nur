@@ -84,18 +84,45 @@ aiida-core.overridePythonAttrs (old: {
       --numprocesses=${toString workers}
     )
 
-    ignores=()
-    for glob in ${lib.escapeShellArgs old.disabledTestPaths}; do
-      ignores+=(--ignore-glob "$glob")
+    # The other half of "same exclusions as the real suite", and the half that
+    # pytest will not do for us.  Handing it `--ignore-glob` per
+    # disabledTestPaths entry -- the obvious spelling, and what this used to do
+    # -- is silently inert here: pytest consults pytest_ignore_collect only for
+    # paths it *discovers*, and Session._collectfile guards that hook with
+    # `if not self.isinitpath(fspath)`.  Every module below is named on the
+    # command line, so it is an initial path and the hook never fires.  The
+    # symptom was the three relocated SSH modules reported as isolation
+    # failures, at 162 failures apiece, for want of an sshd rather than for want
+    # of a predecessor test.  So filter the list instead of asking pytest to.
+    excluded=(${lib.escapeShellArgs old.disabledTestPaths})
+
+    mapfile -t found < <(find ${lib.escapeShellArg only} -name 'test_*.py' | sort)
+
+    modules=()
+    dropped=0
+    for module in "''${found[@]}"; do
+      keep=1
+      for glob in "''${excluded[@]}"; do
+        # Unquoted right-hand side deliberately: these entries are globs, and
+        # bash's own pattern match is what stands in for pytest's fnmatch.
+        # shellcheck disable=SC2053
+        if [[ $module == $glob ]]; then
+          keep=0
+          dropped=$((dropped + 1))
+          break
+        fi
+      done
+      if [ "$keep" -eq 1 ]; then
+        modules+=("$module")
+      fi
     done
 
-    mapfile -t modules < <(find ${lib.escapeShellArg only} -name 'test_*.py' | sort)
-    echo "isolation: ${"\${#modules[@]}"} module(s) under ${only}, ${toString workers} workers each"
+    echo "isolation: ${"\${#modules[@]}"} module(s) under ${only}, ${toString workers} workers each ($dropped excluded)"
 
     failed=()
     for module in "''${modules[@]}"; do
       echo "::: $module"
-      if python -m pytest "''${flags[@]}" "''${ignores[@]}" "$module"; then
+      if python -m pytest "''${flags[@]}" "$module"; then
         :
       else
         # 5 is "no tests collected", which is not a failure for a module whose

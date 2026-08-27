@@ -101,6 +101,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `octopus` a defaulted argument to `postopus`, and why `enableMpi = false` *and* `netcdffortran`? | `pkgs/postopus/default.nix` (the `octopus` argument), `overlays/default.nix` (the `postopus` callPackage) |
 | Why is nixpkgs' `rdkit` rebuilt just to add a `.dist-info`, and what is the cheaper option? | `overlays/default.nix` (the `rdkit` binding in the `cheminformatics` extension) |
 | Why do aiida-core's SSH transport tests live in a VM test rather than its check phase? | `pkgs/aiida-core/default.nix` (`disabledTestPaths`), `tests/aiida/vm.nix` (`transports-ssh`) |
+| Why does the isolation harness drop `disabledTestPaths` modules itself instead of passing `--ignore-glob`? | `tests/aiida/isolation.nix` (the `excluded` array) |
 | Why does the SSH VM hand itself a `/bin/bash` instead of patching the suite like the build does? | `tests/aiida/vm.nix` (`systemd.tmpfiles.rules` in `transports-ssh`) |
 | Why does the process checker exit 3, and why does the poller raise on it rather than keep polling? | `tests/aiida/vm.nix` (`checkProcess`, `awaitProcess`) |
 | Why does a process that never leaves WAITING dump the daemon log, and where does that path come from? | `tests/aiida/vm.nix` (`daemonLog`, `dump_process_diagnostics` in `awaitProcess`) |
