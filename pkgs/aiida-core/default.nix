@@ -603,6 +603,34 @@ buildPythonPackage rec {
   # /bin/bash rewrite above, and that is deliberate: the module only ever runs
   # under pytest, and the consumers being fixed are the six AiiDA plugins in
   # this repo, which are built from this same package set.
+  #
+  # test_restart_after_daemon_reset is the one failure here that is about the
+  # machine being *small* rather than large.  Everything above, and every
+  # --only-rerun pattern in pytestFlags, comes from 128 xdist workers racing
+  # each other; this one passed on that machine and failed on GitHub's runner
+  # at --numprocesses=4:
+  #
+  #     AssertionError: process failed to terminate within timeout,
+  #     current state: ProcessState.WAITING
+  #
+  # The test hard-codes `timeout = 10` for a daemon restart *plus* the resumed
+  # job running to completion, having just given `submit_and_await` its default
+  # 20s for the strictly smaller job of reaching WAITING with the daemon already
+  # up.  Ten seconds is simply the wrong number, and upstream gets away with it
+  # on a fast runner.
+  #
+  # Not an --only-rerun entry, unlike the contention failures: a retry re-runs
+  # the same fixed deadline on the same slow machine, so it re-rolls nothing.
+  # Those patterns are for races a fresh attempt genuinely re-rolls.
+  #
+  # Raising it costs a machine that passes nothing at all — the loop polls every
+  # 0.1s and leaves the moment the state is terminal, so the number is an upper
+  # bound and never a wait.  60 rather than something larger keeps it well
+  # inside pytest-timeout's per-test `timeout = 240` from upstream's pyproject,
+  # which survives `--override-ini=addopts=` because that clears addopts alone.
+  # Staying under it matters: the test's own AssertionError names the process
+  # state it was stuck in, which is worth more than pytest-timeout killing the
+  # worker at 240s with nothing to say.
   postPatch = ''
     substituteInPlace pyproject.toml \
       --replace-fail "'click>=8.1.0,<8.3'" "'click>=8.1.0'"
@@ -756,6 +784,11 @@ buildPythonPackage rec {
         "        from aiida.common.folders import CALC_JOB_DRY_RUN_BASE_PATH
 
             monkeypatch.chdir(tmp_path)"
+
+    substituteInPlace tests/engine/processes/calcjobs/test_calc_job.py \
+      --replace-fail \
+        "    timeout = 10" \
+        "    timeout = 60"
 
     substituteInPlace tests/manage/test_profile_access.py \
       --replace-fail \

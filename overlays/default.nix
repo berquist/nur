@@ -233,6 +233,40 @@
               "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_get_igraph"
               "tests/cli/test_pmg.py::test_pmg_view"
             ];
+
+            # A tenth failure that is not a deselect, because it is a flake
+            # rather than a broken test, and deselecting it would drop real
+            # coverage of van_arkel_triangle:
+            #
+            #   assert ax.get_title() == ""
+            #   E  AssertionError: assert 'Coordination numbers' == ''
+            #
+            # van_arkel_triangle sets no title.  It ends with `ax = plt.gca()`
+            # — pyplot's *current* axes, whatever that happens to be — and
+            # tests/analysis/chemenv/coordination_environments/test_structure_environments.py
+            # calls get_environments_figure, whose title defaults to
+            # "Coordination numbers", and never closes the figure.  When both
+            # land in one xdist worker in that order the assertion reads the
+            # leftover.  Which tests share a worker is a scheduling accident
+            # under xdist's default --dist load, so this appears and vanishes
+            # between runs; --numprocesses is $NIX_BUILD_CORES, and 128 workers
+            # make it likely enough to matter here and rare enough that nixpkgs
+            # has never had to deselect it.
+            #
+            # Retrying would not help, and pytest-rerunfailures is deliberately
+            # not the answer as it is for aiida-core: a rerun runs in the same
+            # process and finds the same stale figure.
+            #
+            # So give the test the clean state it assumes.  `plt` is already
+            # imported at the top of that file, and the second van_arkel_triangle
+            # call in the test only asserts isinstance, so nothing else moves.
+            postPatch = (old.postPatch or "") + ''
+              substituteInPlace tests/util/test_plotting.py \
+                --replace-fail \
+                  '        random_list = [("Fe", "C"), ("Ni", "F")]' \
+                  '        plt.close("all")
+                      random_list = [("Fe", "C"), ("Ni", "F")]'
+            '';
           });
 
           # nixpkgs' pythonMetadataCheckPhase — which compares a built wheel's
@@ -348,21 +382,76 @@
           # With the tuple the assertion is true under either pandas, and it
           # tests what the library actually calls rather than one spelling of
           # it.
-          monty = psuper.monty.overridePythonAttrs (old: {
-            postPatch = (old.postPatch or "") + ''
-              substituteInPlace src/monty/json.py \
-                --replace-fail '_check_type(o, "pandas.core.frame.DataFrame")' \
-                               '_check_type(o, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
-                --replace-fail '_check_type(o, "pandas.core.series.Series")' \
-                               '_check_type(o, ("pandas.core.series.Series", "pandas.Series"))'
+          #
+          # Only for monty older than 2026.7.16.  That release restructured
+          # json.py into TypeHandler classes and fixed this upstream in the
+          # same way — PandasHandler carries `_DF_QUALNAMES` and
+          # `_SERIES_QUALNAMES`, both of them the two-spelling tuples above —
+          # so the literals these replacements look for no longer exist and
+          # every --replace-fail aborts the build.  Both unstable legs of the
+          # matrix carry 2026.7.16; nixos-26.05 carries 2025.3.3 and still
+          # needs the patch.  Delete the whole binding once 26.05 leaves
+          # ../Justfile's `channels`.
+          #
+          # Keyed on the version rather than on some attribute that would
+          # throw, unlike hasMetadataCheck above: nothing about the derivation
+          # says which shape the source has, and the source itself is not
+          # readable at evaluation time.
+          monty =
+            if final.lib.versionOlder psuper.monty.version "2026.7.16" then
+              psuper.monty.overridePythonAttrs (old: {
+                postPatch = (old.postPatch or "") + ''
+                  substituteInPlace src/monty/json.py \
+                    --replace-fail '_check_type(o, "pandas.core.frame.DataFrame")' \
+                                   '_check_type(o, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
+                    --replace-fail '_check_type(o, "pandas.core.series.Series")' \
+                                   '_check_type(o, ("pandas.core.series.Series", "pandas.Series"))'
 
-              substituteInPlace tests/test_json.py \
-                --replace-fail 'assert _check_type(df, "pandas.core.frame.DataFrame")' \
-                               'assert _check_type(df, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
-                --replace-fail 'assert _check_type(series, "pandas.core.series.Series")' \
-                               'assert _check_type(series, ("pandas.core.series.Series", "pandas.Series"))'
-            '';
-          });
+                  substituteInPlace tests/test_json.py \
+                    --replace-fail 'assert _check_type(df, "pandas.core.frame.DataFrame")' \
+                                   'assert _check_type(df, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
+                    --replace-fail 'assert _check_type(series, "pandas.core.series.Series")' \
+                                   'assert _check_type(series, ("pandas.core.series.Series", "pandas.Series"))'
+                '';
+              })
+            else
+              # 2026.7.16 fixed the pandas bug above and introduced this one in
+              # the same rewrite, so the new branch is not "no patch needed".
+              #
+              # monty imports bson at module scope and leaves it None when
+              # pymongo is absent.  The rewrite moved decoding into handler
+              # classes registered in `_DECODER_HANDLERS` at import time — bson
+              # among them, registered whether or not the import succeeded — and
+              # guarded the dispatch site with `except ImportError`, whose own
+              # comment says it is there to "fall through to the generic
+              # resolver / raw dict" when an optional dependency is missing.
+              # BsonHandler.matches checks `bson is None`; BsonHandler.decode
+              # does not, so it dereferences None, raises AttributeError, and
+              # sails past that except clause.  Before the rewrite the whole
+              # bson branch sat behind `if bson is not None` and an ObjectId
+              # document decoded to a plain dict.
+              #
+              # Raising ImportError is what makes the existing handler do what
+              # its comment already claims.  It goes before the `@class` test so
+              # DBRef is covered too, not just ObjectId.
+              #
+              # This is invisible from monty's own suite, which is why upstream
+              # has it: nixpkgs hands monty its whole `optional` extra as
+              # nativeCheckInputs, and that pulls in pymongo, so `bson` is never
+              # None there.  pymatgen declares no pymongo — upstream pymatgen
+              # does not either — and its tests/io/vasp/test_sets.py fixture
+              # holds a serialised ObjectId, so test_grid_size_from_struct is
+              # where the defect actually surfaces.
+              psuper.monty.overridePythonAttrs (old: {
+                postPatch = (old.postPatch or "") + ''
+                  substituteInPlace src/monty/json.py \
+                    --replace-fail \
+                      '        if d["@class"] == "ObjectId":' \
+                      '        if bson is None:
+                              raise ImportError("bson is not installed")
+                          if d["@class"] == "ObjectId":'
+                '';
+              });
 
           # Dependencies missing from nixpkgs.  Not re-exported at the top level
           # or from ../default.nix: they are implementation detail, and every
