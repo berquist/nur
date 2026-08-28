@@ -450,11 +450,12 @@
           # and therefore cclib, and so exist only where NixOS-QChem does:
           #   nix build .#checks.x86_64-linux.harmonwig
           #
-          # AiiDA VM tests.  The first three need only nixpkgs; the CP2K plugin
+          # AiiDA VM tests.  The first four need only nixpkgs; the CP2K plugin
           # round trip additionally needs a CP2K, so it is x86_64-linux only:
           #   nix build .#checks.x86_64-linux.vm-aiida-daemon-local-db
           #   nix build .#checks.x86_64-linux.vm-aiida-workchain-arithmetic
           #   nix build .#checks.x86_64-linux.vm-aiida-daemon-rabbitmq
+          #   nix build .#checks.x86_64-linux.vm-aiida-daemon-sqlite
           #   nix build .#checks.x86_64-linux.vm-aiida-plugin-cp2k
           #
           # And aiida-core's own SSH transport suite, which needs a real sshd
@@ -508,6 +509,7 @@
             vm-aiida-daemon-local-db = aiidaVmTests.daemon-local-db;
             vm-aiida-workchain-arithmetic = aiidaVmTests.workchain-arithmetic;
             vm-aiida-daemon-rabbitmq = aiidaVmTests.daemon-rabbitmq;
+            vm-aiida-daemon-sqlite = aiidaVmTests.daemon-sqlite;
             vm-aiida-transports-ssh = aiidaVmTests.transports-ssh;
           }
           // lib.optionalAttrs (nwchem != null) {

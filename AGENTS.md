@@ -12,6 +12,9 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 - the **AiiDA ecosystem** — `aiida-core`, six quantum chemistry plugins (`aiida-cp2k`,
   `aiida-gaussian`, `aiida-orca`, `aiida-octopus`, `aiida-psi4`, `aiida-quantumespresso`), the
   fifteen-odd dependencies of both that nixpkgs does not carry, and one NixOS service module.
+  That module offers both of aiida-core's read-write storage plugins: `core.psql_dos` by
+  default, and `core.sqlite_dos` — which needs no service at all — behind
+  `services.aiida.storage.backend`.
   Together with QCArchive this is the bulk of the repo. It shares the `python313` pin with
   QCArchive and nothing else; the two overlays are separate so that a consumer can take one
   without the other's closure.
@@ -80,6 +83,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
 | Why does `verdi` come from a `withPackages` env instead of `lib.getExe cfg.package`? | `nixos-modules/aiida.nix` (`pythonEnv`) |
 | Why does the AiiDA module ensure the *database* when the QCFractal one deliberately does not? | `nixos-modules/aiida.nix` (`services.postgresql`) |
+| Why does `database.createLocally` default to whether the storage backend is PostgreSQL? | `nixos-modules/aiida.nix` (the `createLocally` default, and the `useSqlite` assertion) |
+| Why is the `core.sqlite_dos` `--filepath` pinned rather than left to aiida-core's default, and why under `.aiida`? | `nixos-modules/aiida.nix` (`profileSetup`, and the `storage.filepath` option) |
+| Why are the two storage backends' setup flags built from a joined list rather than one indented string? | `nixos-modules/aiida.nix` (`commonProfileOptions`) |
+| Why does the sqlite VM test do the work of two PostgreSQL ones in a single boot? | `tests/aiida/vm.nix` (`daemon-sqlite`) |
 | Why `Type = "forking"` for the daemon, and where does that pid file come from? | `nixos-modules/aiida.nix` (`systemd.services.aiida-daemon`) |
 | Why is `core.zeromq` the default broker, and why is aiida-core taken from git? | `pkgs/aiida-core/default.nix` (the `src` comment) |
 | Why is nixpkgs' `pymatgen` interpreter gate lifted, and why is it a `let` binding? | `overlays/default.nix` (the `pymatgen` binding in the `aiida` extension) |

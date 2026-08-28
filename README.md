@@ -29,7 +29,7 @@ Some quantum chemistry programs come from [NixOS-QChem](https://github.com/Nix-Q
 |-------------------------------------------------------------------------------|--------------------------------------------------------------------|
 | `aiida-core`                                                                  | the workflow manager itself (`verdi`)                              |
 | `aiida-cp2k`, `aiida-gaussian`, `aiida-orca`, `aiida-octopus`, `aiida-psi4`, `aiida-quantumespresso` | calculation, parser and workflow plugins            |
-| `nixosModules.aiida`                                                          | `services.aiida.*` — a PostgreSQL-backed profile and its daemon    |
+| `nixosModules.aiida`                                                          | `services.aiida.*` — a profile and its daemon                      |
 
 A dozen dependencies that nixpkgs does not carry — `kiwipy`, `plumpy`, `disk-objectstore`,
 `archive-path`, `pgsu`, `pgtest`, `aiida-pseudo`, `qe-tools` and the rest — come with them,
@@ -38,7 +38,13 @@ reachable as `python313Packages.*` rather than as top-level attributes.
 The module defaults to the **ZeroMQ** broker (`core.zeromq`), which the daemon runs itself, so a
 working instance needs nothing but PostgreSQL. RabbitMQ is available behind
 `services.aiida.broker.backend = "core.rabbitmq"`, which also enables `services.rabbitmq` unless
-you point it elsewhere. Plugins go in `services.aiida.plugins` so their entry points land in the
+you point it elsewhere.
+
+Storage is a separate axis. `core.psql_dos` is the default and is what upstream recommends for
+production; `services.aiida.storage.backend = "core.sqlite_dos"` puts the provenance graph and
+the file repository in one directory instead and needs no service at all, which with the ZeroMQ
+default leaves an instance that runs nothing but the daemon. SQLite serialises concurrent
+writes, so it suits exploration rather than a busy machine. Plugins go in `services.aiida.plugins` so their entry points land in the
 daemon's Python environment; the programs they drive go in `services.aiida.extraPackages`, which
 is a different thing and reaches the daemon's `PATH` instead.
 

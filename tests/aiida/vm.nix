@@ -6,6 +6,7 @@
 #
 #   nix build .#checks.x86_64-linux.vm-aiida-daemon-local-db
 #   just vm-test aiida-daemon-local-db
+#   just vm-test aiida-daemon-sqlite
 #   $(nix-build tests/aiida/vm.nix -A daemon-local-db.driver)/bin/nixos-test-driver
 #
 # pkgs must arrive with the aiida overlay already applied, for the same reason
@@ -715,6 +716,116 @@ in
       # And a process has to actually get through it.
       machine.succeed(${builtins.toJSON createBashCode})
       pk = machine.succeed(${builtins.toJSON (runScript submitWorkchain)}).strip().splitlines()[-1]
+
+      ${awaitProcess checkResult "pk"}
+
+      result = int(
+          machine.succeed(
+              ${builtins.toJSON (runScript checkResult)} + f" {pk}"
+          ).strip().splitlines()[-1]
+      )
+      assert result == 19, f"expected 19, got {result}"
+    '';
+  };
+
+  # ==========================================================================
+  # Test 6: the same deployment on core.sqlite_dos instead of core.psql_dos.
+  # This is the only coverage of storage.backend, and it does the work of
+  # tests 1 and 2 together in one boot rather than two, because everything
+  # downstream of profile creation is shared with the PostgreSQL path --
+  # SqliteDosStorage subclasses PsqlDosBackend, and only the engine and the
+  # migrator differ underneath.
+  #
+  # What genuinely cannot be checked at evaluation time is the negative: that
+  # PostgreSQL is not merely unused but absent from the machine, and that
+  # `verdi profile setup core.sqlite_dos` accepts the flags the module hands
+  # it.  The flag sets of the two storage subcommands do not overlap, so a
+  # psql-only option leaking into the sqlite branch is a click error that
+  # surfaces here and in aiida-init.service's journal, nowhere else.
+  # ==========================================================================
+  daemon-sqlite = pkgs.testers.nixosTest {
+    name = "aiida-daemon-sqlite";
+
+    nodes.machine =
+      { ... }:
+      {
+        imports = [
+          minimalVM
+          aiidaModule
+        ];
+
+        services.aiida = {
+          enable = true;
+          storage.backend = "core.sqlite_dos";
+          # The migrator is one of the two pieces with a genuinely different
+          # implementation under SQLite -- SqliteDosMigrator subclasses
+          # PsqlDosMigrator and replaces the Alembic version path -- so running
+          # it is worth the ordering edge, exactly as in daemon-local-db.
+          database.autoMigrate = true;
+          configOptions = {
+            "warnings.development_version" = false;
+          };
+          # Defaults elsewhere: database.createLocally follows storage.backend
+          # and is therefore false, broker.backend = "core.zeromq",
+          # setupLocalhost = true.  So this machine runs no service at all
+          # beyond the daemon itself, which is the whole point of the backend.
+        };
+      };
+
+    testScript = ''
+      machine.start()
+      machine.wait_for_unit("multi-user.target")
+
+      machine.wait_for_unit("aiida-init.service")
+      machine.wait_for_unit("aiida-storage-migrate.service")
+      machine.wait_for_unit("aiida-daemon.service")
+
+      # Reaching a oneshot unit is not the same as it having succeeded.
+      machine.succeed(
+          "systemctl show -p Result --value aiida-storage-migrate.service | grep -x success"
+      )
+
+      # Not "PostgreSQL is unused" but "PostgreSQL is not on this machine".
+      # `systemctl cat` on a unit that was never generated exits non-zero, so
+      # this fails loudly if any part of the PostgreSQL wiring survived the
+      # backend switch.
+      machine.fail("systemctl cat postgresql.service")
+      machine.fail("systemctl cat aiida-postgresql-setup.service")
+
+      # The storage really landed at the --filepath the module pinned, rather
+      # than at the uuid-suffixed directory SqliteDosStorage.CliModel would
+      # have picked for itself.
+      machine.succeed("test -f /var/lib/aiida/.aiida/storage/main/database.sqlite")
+      machine.succeed("test -d /var/lib/aiida/.aiida/storage/main/container")
+
+      # `verdi status` exits non-zero if any component is unreachable, so this
+      # single call covers the profile, the storage connection and the daemon.
+      status = machine.succeed(${builtins.toJSON (asAiida "${verdi} status")})
+      print(status)
+      assert "Daemon is running" in status, f"daemon not running: {status}"
+
+      # And the profile is on the backend we asked for, not on a psql_dos one
+      # that happened to come up.
+      profile = machine.succeed(${builtins.toJSON (asAiida "${verdi} profile show main")})
+      assert "core.sqlite_dos" in profile, f"unexpected storage backend: {profile}"
+
+      # Type=forking tracks the circus arbiter through a pid file whose path is
+      # built from the profile name, not the storage backend -- but a restart
+      # is cheap once the machine is up, and it is what proves the daemon can
+      # reopen the SQLite database it just closed.
+      machine.succeed("systemctl restart aiida-daemon.service")
+      machine.wait_for_unit("aiida-daemon.service")
+      status = machine.succeed(${builtins.toJSON (asAiida "${verdi} status")})
+      assert "Daemon is running" in status, f"daemon did not come back: {status}"
+
+      # The real end-to-end, and the one risk the backend introduces: the
+      # submitting process and a daemon worker write to the same SQLite file
+      # concurrently.  aiida-core handles the contention (see the
+      # OperationalError note in aiida/engine/utils.py), and this is what says
+      # so on a running system.
+      machine.succeed(${builtins.toJSON createBashCode})
+      pk = machine.succeed(${builtins.toJSON (runScript submitWorkchain)}).strip().splitlines()[-1]
+      print(f"submitted MultiplyAddWorkChain as {pk}")
 
       ${awaitProcess checkResult "pk"}
 
