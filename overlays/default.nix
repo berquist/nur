@@ -348,21 +348,40 @@
           # With the tuple the assertion is true under either pandas, and it
           # tests what the library actually calls rather than one spelling of
           # it.
-          monty = psuper.monty.overridePythonAttrs (old: {
-            postPatch = (old.postPatch or "") + ''
-              substituteInPlace src/monty/json.py \
-                --replace-fail '_check_type(o, "pandas.core.frame.DataFrame")' \
-                               '_check_type(o, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
-                --replace-fail '_check_type(o, "pandas.core.series.Series")' \
-                               '_check_type(o, ("pandas.core.series.Series", "pandas.Series"))'
+          #
+          # Only for monty older than 2026.7.16.  That release restructured
+          # json.py into TypeHandler classes and fixed this upstream in the
+          # same way — PandasHandler carries `_DF_QUALNAMES` and
+          # `_SERIES_QUALNAMES`, both of them the two-spelling tuples above —
+          # so the literals these replacements look for no longer exist and
+          # every --replace-fail aborts the build.  Both unstable legs of the
+          # matrix carry 2026.7.16; nixos-26.05 carries 2025.3.3 and still
+          # needs the patch.  Delete the whole binding once 26.05 leaves
+          # ../Justfile's `channels`.
+          #
+          # Keyed on the version rather than on some attribute that would
+          # throw, unlike hasMetadataCheck above: nothing about the derivation
+          # says which shape the source has, and the source itself is not
+          # readable at evaluation time.
+          monty =
+            if final.lib.versionOlder psuper.monty.version "2026.7.16" then
+              psuper.monty.overridePythonAttrs (old: {
+                postPatch = (old.postPatch or "") + ''
+                  substituteInPlace src/monty/json.py \
+                    --replace-fail '_check_type(o, "pandas.core.frame.DataFrame")' \
+                                   '_check_type(o, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
+                    --replace-fail '_check_type(o, "pandas.core.series.Series")' \
+                                   '_check_type(o, ("pandas.core.series.Series", "pandas.Series"))'
 
-              substituteInPlace tests/test_json.py \
-                --replace-fail 'assert _check_type(df, "pandas.core.frame.DataFrame")' \
-                               'assert _check_type(df, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
-                --replace-fail 'assert _check_type(series, "pandas.core.series.Series")' \
-                               'assert _check_type(series, ("pandas.core.series.Series", "pandas.Series"))'
-            '';
-          });
+                  substituteInPlace tests/test_json.py \
+                    --replace-fail 'assert _check_type(df, "pandas.core.frame.DataFrame")' \
+                                   'assert _check_type(df, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
+                    --replace-fail 'assert _check_type(series, "pandas.core.series.Series")' \
+                                   'assert _check_type(series, ("pandas.core.series.Series", "pandas.Series"))'
+                '';
+              })
+            else
+              psuper.monty;
 
           # Dependencies missing from nixpkgs.  Not re-exported at the top level
           # or from ../default.nix: they are implementation detail, and every
