@@ -421,6 +421,7 @@
             shellHook = config.pre-commit.installationScript;
             packages = [
               pkgs.just
+              pkgs.cachix
               pkgs.nixfmt
               pkgs.statix
               pkgs.deadnix

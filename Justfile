@@ -19,6 +19,10 @@ default_channel := "nixpkgs-unstable"
 # The nixPath matrix in .github/workflows/build.yml, in the same order.
 channels := "nixpkgs-unstable nixos-unstable nixos-26.05"
 
+# The binary cache, without the ".cachix.org" suffix.  Same value as the
+# cachixName matrix entry in .github/workflows/build.yml.
+cachix_name := "nur-berquist"
+
 # GitHub Actions sets NIX_PATH itself, via install-nix-action and the workflow
 # matrix.  Honour it when present so the ci-* recipes are channel-agnostic, and
 # fall back to the default channel for local runs.
@@ -54,10 +58,11 @@ ci-eval:
 # work.  That is a property of the tool, not of the environment — switching CI
 # to Lix would break it there too.
 #
-# It bought us nothing anyway while the cachix step is disabled by the
-# <YOUR_CACHIX_NAME> placeholder: its whole point is skipping paths already in
-# *your* cache.  Worth revisiting if cachix is ever turned on, by which time
-# upstream may parse Lix's version string.
+# Its whole point is skipping paths already in *your* cache, and that cache is
+# live now, but the saving is small: with the substituter configured, `nix
+# build` fetches a cached path instead of building it anyway.  What is left is
+# the evaluation and the round trip.  Worth revisiting only if that starts to
+# hurt, and by then upstream may parse Lix's version string.
 #
 # `nix build` rather than `nix-build` because only the new CLI accepts -L, and
 # it handles ci.nix's list-valued attribute fine.
@@ -78,6 +83,38 @@ ci-matrix:
       printf '\n==> %s\n' "$channel"
       just ci "$channel"
     done
+
+# watch-exec rather than a nix.conf post-build-hook, which is the other way to
+# get every build uploaded.  The hook is permanent, needs cachix on the
+# *nix-daemon's* PATH, and needs the auth token readable by root; this is
+# scoped to one command and needs neither.
+#
+# Be clear about what that scope is: watch-exec runs watch-store for the
+# duration of the command, so it watches the whole store, not this command's
+# derivation lineage.  A concurrent build in another shell is uploaded too.
+# The bound is time, not provenance.  Paths the cache or an upstream
+# substituter already holds are skipped, so a re-run after a no-op build
+# uploads nothing.
+#
+# Wrapping `ci` rather than `ci-build` mirrors one workflow matrix leg
+# exactly, and pins the channel the same way, so a push is never at the mercy
+# of the ambient NIX_PATH.  The two eval steps it adds cost seconds.
+#
+# Needs `cachix` on PATH and a write token installed by `cachix authtoken`.
+# No signing key: this cache signs server-side.  CI does the equivalent
+# through cachix/cachix-action, which starts a store-watching daemon before
+# the ci-eval and ci-build steps.
+
+# One channel's CI sequence, pushed, e.g. `just push nixos-26.05`.
+push channel=default_channel:
+    cachix watch-exec {{ cachix_name }} -- just ci {{ channel }}
+
+# One watch-store session covers all three channels, so a path built for two
+# of them is uploaded once.
+
+# Every channel in the workflow matrix, pushed.
+push-matrix:
+    cachix watch-exec {{ cachix_name }} -- just ci-matrix
 
 # ---------------------------------------------------------------------------
 # Tests

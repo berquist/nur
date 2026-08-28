@@ -256,6 +256,8 @@ matrix leg end-to-end locally. Add CI logic there, not to the workflow.
 ```sh
 just                      # list every recipe
 just ci nixos-26.05       # one channel's full sequence; `just ci-matrix` for all three
+just push nixos-26.05     # the same leg, uploaded to nur-berquist.cachix.org
+just push-matrix          # all three legs, one upload session
 just build qcfractal      # single package, NUR style; or nix build .#qcfractal
 just check                # everything: both eval suites, every VM test, pre-commit hooks
 just tests                # every non-VM suite reachable without the flake (see tests/AGENTS.md)
