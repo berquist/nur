@@ -132,6 +132,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why do eight packages come from a git tag rather than PyPI? | `pkgs/kiwipy/default.nix` (the `src` comment) |
 | Why does `aiida-shell` rewrite its conftest's broker to `core.zeromq`? | `pkgs/aiida-shell/default.nix` (`postPatch`) |
 | Why does `aiida-shell` need `which` when two of its three path rewrites are absolute? | `pkgs/aiida-shell/default.nix` (`nativeCheckInputs`) |
+| Why does the `aiida-shell` VM test run two jobs, and why does one of them exist only to be boring? | `tests/aiida/vm.nix` (`plugin-shell`) |
+| Why does that test put `which` and `xtb` on *both* `systemPackages` and `extraPackages`? | `tests/aiida/vm.nix` (the `environment.systemPackages` note in `plugin-shell`) |
 | Why is `gpaw` deliberately *not* a check input of `aiida-ase`? | `pkgs/aiida-ase/default.nix` (`pythonImportsCheck`) |
 | Why does `aiida-nwchem` take `ase`, `pymatgen`, `seekpath` and `spglib` as check inputs? | `pkgs/aiida-nwchem/default.nix` (`nativeCheckInputs`) |
 | Why does `aiida-nwchem` ask for two MPI ranks when its tests run one water molecule? | `pkgs/aiida-nwchem/default.nix` (`postPatch`) |

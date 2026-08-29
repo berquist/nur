@@ -467,12 +467,15 @@
           # and therefore cclib, and so exist only where NixOS-QChem does:
           #   nix build .#checks.x86_64-linux.harmonwig
           #
-          # AiiDA VM tests.  The first four need only nixpkgs; the CP2K plugin
-          # round trip additionally needs a CP2K, so it is x86_64-linux only:
+          # AiiDA VM tests.  The first six need only nixpkgs -- the aiida-shell
+          # one builds xtb, which is lib.platforms.linux like the VMs themselves.
+          # The CP2K plugin round trip additionally needs a CP2K, whose nixpkgs
+          # derivation is x86_64-linux only:
           #   nix build .#checks.x86_64-linux.vm-aiida-daemon-local-db
           #   nix build .#checks.x86_64-linux.vm-aiida-workchain-arithmetic
           #   nix build .#checks.x86_64-linux.vm-aiida-daemon-rabbitmq
           #   nix build .#checks.x86_64-linux.vm-aiida-daemon-sqlite
+          #   nix build .#checks.x86_64-linux.vm-aiida-plugin-shell
           #   nix build .#checks.x86_64-linux.vm-aiida-plugin-cp2k
           #
           # And aiida-core's own SSH transport suite, which needs a real sshd
@@ -535,6 +538,7 @@
             vm-aiida-daemon-rabbitmq = aiidaVmTests.daemon-rabbitmq;
             vm-aiida-daemon-sqlite = aiidaVmTests.daemon-sqlite;
             vm-aiida-transports-ssh = aiidaVmTests.transports-ssh;
+            vm-aiida-plugin-shell = aiidaVmTests.plugin-shell;
           }
           // lib.optionalAttrs (nwchem != null) {
             vm-compute-nwchem-singlepoint = vmTests.compute-nwchem-singlepoint;
