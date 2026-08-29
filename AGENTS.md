@@ -9,9 +9,14 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 
 - the **QCArchive/QCFractal ecosystem** — Python packages (`qcportal`, `qcfractal`,
   `qcfractalcompute`, `qcarchivetesting`, `parsl`) plus two NixOS service modules.
-- the **AiiDA ecosystem** — `aiida-core`, six quantum chemistry plugins (`aiida-cp2k`,
-  `aiida-gaussian`, `aiida-orca`, `aiida-octopus`, `aiida-psi4`, `aiida-quantumespresso`), the
-  fifteen-odd dependencies of both that nixpkgs does not carry, and one NixOS service module.
+- the **AiiDA ecosystem** — `aiida-core`, thirteen plugins, the twenty-odd dependencies of
+  those that nixpkgs does not carry, and one NixOS service module. Six wrap a quantum chemistry
+  or materials program (`aiida-cp2k`, `aiida-gaussian`, `aiida-orca`, `aiida-octopus`,
+  `aiida-psi4`, `aiida-quantumespresso`); five more wrap another simulation code
+  (`aiida-ase`, `aiida-gromacs`, `aiida-lammps`, `aiida-nwchem`, `aiida-wannier90`); and two
+  are infrastructure rather than a wrapper — `aiida-shell`, which runs an arbitrary command
+  under provenance and so reaches the ~60 programs already in `pkgs.qchem.*` without a plugin
+  each, and `aiida-submission-controller`.
   That module offers both of aiida-core's read-write storage plugins: `core.psql_dos` by
   default, and `core.sqlite_dos` — which needs no service at all — behind
   `services.aiida.storage.backend`.
@@ -84,6 +89,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Question | Read |
 |---|---|
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
+| Where does a `fetchFromGitHub` hash come from with no network and no daemon? | `scripts/offline-src-hash.sh` (the header comment), `just hash-src` |
 | Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
 | Why `python313` and not `python3`? What is `meta.broken` protecting? | `pkgs/qcportal/default.nix` (`meta`), `default.nix` |
 | Why is Psi4 taken from a hand-pinned `nixpkgs-qchem`, and why not `nixos-qchem.packages.*`? | `flake.nix` (the `nixpkgs-qchem` input, and `qchemPkgs` in `perSystem`) |
@@ -115,6 +121,20 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does MDAnalysis run no tests, and why is that not `doCheck = false`? | `pkgs/mdanalysis/default.nix` (the note above `pythonImportsCheck`) |
 | Why does the AiiDA eval suite need a second, broken-allowing package set? | `tests/aiida/default.nix` (`brokenPkgs`) |
 | Why do eight packages come from a git tag rather than PyPI? | `pkgs/kiwipy/default.nix` (the `src` comment) |
+| Why does `aiida-shell` rewrite its conftest's broker to `core.zeromq`? | `pkgs/aiida-shell/default.nix` (`postPatch`) |
+| Why does `aiida-shell` need `which` when two of its three path rewrites are absolute? | `pkgs/aiida-shell/default.nix` (`nativeCheckInputs`) |
+| Why is `gpaw` deliberately *not* a check input of `aiida-ase`? | `pkgs/aiida-ase/default.nix` (`pythonImportsCheck`) |
+| Why does `aiida-nwchem` take `ase`, `pymatgen`, `seekpath` and `spglib` as check inputs? | `pkgs/aiida-nwchem/default.nix` (`nativeCheckInputs`) |
+| Why does `aiida-nwchem` ask for two MPI ranks when its tests run one water molecule? | `pkgs/aiida-nwchem/default.nix` (`postPatch`) |
+| Why do `aiida-nwchem`'s tests lose their `system crystal` cell, and what did that cover? | `pkgs/aiida-nwchem/default.nix` (`postPatch`) |
+| Why does `aiida-gromacs` patch a build-system requirement, when `pythonRelaxDeps` exists? | `pkgs/aiida-gromacs/default.nix` (`postPatch`) |
+| Why does `aiida-gromacs` put `$out/bin` on the check PATH? | `pkgs/aiida-gromacs/default.nix` (`preCheck`) |
+| Why do `aiida-gromacs`' three metadynamics tests force `-ntmpi 1`, and what would a parallel one need? | `pkgs/aiida-gromacs/default.nix` (`postPatch`), `.scratch/nixpkgs-plumed-mpi.patch` |
+| Why is `aiida-lammps`' `jsonschema~=3.2` merely relaxed, four major versions on? | `pkgs/aiida-lammps/default.nix` (`pythonRelaxDeps`) |
+| Why does `aiida-lammps` pass `--lammps-exec lmp`? | `pkgs/aiida-lammps/default.nix` (`pytestFlags`) |
+| Why does `sisl` not fetch its one submodule? | `pkgs/sisl/default.nix` (`src`) |
+| Why does `sisl` set `dontUseCmakeConfigure` while still listing `cmake`? | `pkgs/sisl/default.nix` (`nativeBuildInputs`) |
+| Why is `aiida-optimize`'s license a two-entry list, and what is the GPLv3 mention about? | `pkgs/aiida-optimize/default.nix` (`meta.license`) |
 | Why is `pycifrw` carried here when nixpkgs has one, and when should it be deleted? | `pkgs/pycifrw/default.nix` (the header), `overlays/default.nix` (the `pycifrw` binding) |
 | Why are the two `mosquito` overrides guarded, and why does 26.05 not need them? | `overlays/default.nix` (the `hasMetadataCheck` binding in the `aiida` extension) |
 | Why do the two cp2k-\*-tools packages rewrite their build backend? | `pkgs/cp2k-output-tools/default.nix` (`postPatch`) |

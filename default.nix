@@ -113,12 +113,19 @@ in
     qcarchivetesting
 
     aiida-core
+    aiida-ase
     aiida-cp2k
     aiida-gaussian
+    aiida-gromacs
+    aiida-lammps
+    aiida-nwchem
     aiida-octopus
     aiida-orca
     aiida-psi4
     aiida-quantumespresso
+    aiida-shell
+    aiida-submission-controller
+    aiida-wannier90
 
     morfeus-ml
     qmzyme

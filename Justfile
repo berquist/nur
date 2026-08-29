@@ -217,6 +217,14 @@ aiida-pollution-scan:
 check-no-daemon:
     ./scripts/no-daemon-check.sh
 
+# Neither the network nor a daemon, so this works from inside the Claude Code
+# sandbox, where nix-prefetch-url cannot.  Prints the rev, the commit date the
+# `X.Y.Z-unstable-YYYY-MM-DD` version scheme needs, and the hash.
+
+# A fetchFromGitHub hash from a clone in wc/, e.g. `just hash-src wc/aiida/aiida-shell v0.9.0`.
+hash-src clone rev="HEAD":
+    ./scripts/offline-src-hash.sh {{ clone }} {{ rev }}
+
 # ---------------------------------------------------------------------------
 # Building
 # ---------------------------------------------------------------------------

@@ -651,6 +651,8 @@ in
           # checkInputs-only position because pself is the only thing that can
           # resolve its own aiida-core to the same derivation.
           qe-tools = pself.callPackage ../pkgs/qe-tools { };
+          sisl = pself.callPackage ../pkgs/sisl { };
+          aiida-optimize = pself.callPackage ../pkgs/aiida-optimize { };
           aiida-pseudo = pself.callPackage ../pkgs/aiida-pseudo { };
           aiida-gaussian-datatypes = pself.callPackage ../pkgs/aiida-gaussian-datatypes { };
           cp2k-input-tools = pself.callPackage ../pkgs/cp2k-input-tools { };
@@ -736,7 +738,7 @@ in
             inherit (final) jq;
           };
 
-          # The six plugins.  Each finds its aiida-core through pself, so a
+          # The plugins.  Each finds its aiida-core through pself, so a
           # plugin and the core it extends are always the same derivation —
           # which is what makes entry-point discovery work when both land in one
           # python3.withPackages environment, the way
@@ -750,12 +752,26 @@ in
           # top-level `python3Packages.callPackage` would give it a *different*
           # aiida-core.  It therefore carries meta.broken on every path this repo
           # currently offers; see ../pkgs/aiida-gaussian/default.nix.
+          aiida-ase = pself.callPackage ../pkgs/aiida-ase { };
           aiida-cp2k = pself.callPackage ../pkgs/aiida-cp2k { };
           aiida-gaussian = pself.callPackage ../pkgs/aiida-gaussian { inherit pymatgen; };
+          aiida-gromacs = pself.callPackage ../pkgs/aiida-gromacs { };
+          # `final.lammps` is the program; `pself.lammps` is nixpkgs' Python
+          # binding of the same name, and pself wins.  Same trap, same fix, as
+          # aiida-core's `jq` above — see ../pkgs/aiida-lammps/default.nix for
+          # what the shadowed version costs.
+          aiida-lammps = pself.callPackage ../pkgs/aiida-lammps {
+            inherit pymatgen;
+            inherit (final) lammps;
+          };
+          aiida-nwchem = pself.callPackage ../pkgs/aiida-nwchem { inherit pymatgen; };
           aiida-octopus = pself.callPackage ../pkgs/aiida-octopus { };
           aiida-orca = pself.callPackage ../pkgs/aiida-orca { };
           aiida-psi4 = pself.callPackage ../pkgs/aiida-psi4 { };
           aiida-quantumespresso = pself.callPackage ../pkgs/aiida-quantumespresso { };
+          aiida-shell = pself.callPackage ../pkgs/aiida-shell { };
+          aiida-submission-controller = pself.callPackage ../pkgs/aiida-submission-controller { };
+          aiida-wannier90 = pself.callPackage ../pkgs/aiida-wannier90 { };
         }
       )
     ];
@@ -779,12 +795,19 @@ in
     # as `pkgs.aiida-cp2k`, not through a Python package set.
     inherit (final.python313Packages)
       aiida-core
+      aiida-ase
       aiida-cp2k
       aiida-gaussian
+      aiida-gromacs
+      aiida-lammps
+      aiida-nwchem
       aiida-octopus
       aiida-orca
       aiida-psi4
       aiida-quantumespresso
+      aiida-shell
+      aiida-submission-controller
+      aiida-wannier90
       ;
   };
 
