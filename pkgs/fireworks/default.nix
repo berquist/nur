@@ -18,22 +18,26 @@
   ruamel-yaml,
   tabulate,
   tqdm,
+  paramiko,
+  requests,
+  fabric,
+  matplotlib,
+  igraph,
+  graphviz,
+  mongomock-persistence,
 
   # tests
-  graphviz,
-  igraph,
-  matplotlib,
-  mongomock-persistence,
   pytestCheckHook,
 }:
 
-buildPythonPackage rec {
+buildPythonPackage (finalAttrs: {
   pname = "fireworks";
   # 2.1.4, not the v2.0.2 that `git describe` reports for this commit: the tag
   # is behind, and setup.py here declares `version="2.1.4"`.  atomate2 and
   # jobflow both pin `FireWorks==2.1.4`, so the source is the one to believe.
   version = "2.1.4-unstable-2026-08-11";
   pyproject = true;
+  __structuredAttrs = true;
 
   # The distribution is `FireWorks`; the import name is `fireworks`.
   src = fetchFromGitHub {
@@ -101,45 +105,28 @@ buildPythonPackage rec {
     tqdm
   ];
 
+  optional-dependencies = rec {
+    rtransfer = [ paramiko ];
+    newt = [ requests ];
+    daemon_mode = [ fabric ];
+    flask-plotting = [ matplotlib ];
+    workflow-checks = [ igraph ];
+    graph-plotting = [ graphviz ];
+    mongomock = [ mongomock-persistence ];
+    optional =
+      rtransfer
+      ++ newt
+      ++ daemon_mode
+      ++ flask-plotting
+      ++ workflow-checks
+      ++ graph-plotting
+      ++ mongomock;
+  };
+
   nativeCheckInputs = [
     pytestCheckHook
-    # setup.py's `workflow-checks` extra, needed because its tests ship inside
-    # the package.  Without it collection aborts before a single test runs:
-    #
-    #   ERROR collecting fireworks/utilities/tests/test_dagflow.py
-    #   fireworks/utilities/dagflow.py:9: in <module>
-    #       import igraph
-    #   E   ModuleNotFoundError: No module named 'igraph'
-    #   !!!! Interrupted: 1 error during collection !!!!
-    #
-    # test_dagflow.py does guard for this — DAGFlowTest.setUp raises
-    # unittest.SkipTest when igraph will not import — but the guard is dead
-    # code: line 15 does `from fireworks.utilities.dagflow import DAGFlow` at
-    # module scope, so the ImportError lands during collection and setUp is
-    # never reached.  Supplying the dependency is the fix; deselecting the
-    # module would lose the only coverage the DAG validator has.
-    igraph
-
-    #
-    # DAGFlow.to_dot writes DOT through igraph's own write_dot(), so the three
-    # to_dot tests do not need the separate `graph-plotting` extra.  The two
-    # test_visualize.py tests do, and they fail loudly rather than skipping:
-    #
-    #   FAILED test_visualize.py::test_wf_to_graph
-    #     - RuntimeError: graphviz package required for wf_to_graph.
-    #   FAILED test_visualize.py::test_plot_wf
-    #     - SystemExit: Install matplotlib. Exiting.
-    #
-    # Neither renders anything — wf_to_graph only asserts it gets a Digraph
-    # back, and plot_wf never calls plt.show() — so the Python `graphviz`
-    # binding is enough and the `dot` binary is not needed.
-    graphviz
-    matplotlib
-
-    # setup.py's `mongomock` extra, which is what lets the database tests run
-    # with no database.  See the MONGOMOCK_SERVERSTORE_FILE note below.
-    mongomock-persistence
-  ];
+  ]
+  ++ finalAttrs.passthru.optional-dependencies.optional;
 
   # Three things the check phase needs, and only the first is obvious.
   #
@@ -252,4 +239,4 @@ buildPythonPackage rec {
     mainProgram = "lpad";
     maintainers = with lib.maintainers; [ berquist ];
   };
-}
+})
