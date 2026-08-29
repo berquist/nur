@@ -951,13 +951,35 @@ in
       "d '${cfg.stateDir}' 0700 '${cfg.user}' '${cfg.group}' - -"
     ]
     ++ lib.optional cfg.setupLocalhost "d '${cfg.localhost.workDir}' 0700 '${cfg.user}' '${cfg.group}' - -"
-    # SqliteDosStorage.initialise() would create this itself, but only where
-    # the aiida user can already write -- so a storage.filepath outside
-    # stateDir would fail with a bare PermissionError from inside aiida-init.
-    # Creating it here is also safe: initialise() rejects a filepath that
-    # exists and is non-empty, and an empty directory is precisely what it
-    # accepts.
-    ++ lib.optional useSqlite "d '${cfg.storage.filepath}' 0700 '${cfg.user}' '${cfg.group}' - -";
+    # The SQLite storage directory, but *only* when it lies outside stateDir.
+    #
+    # SqliteDosStorage.initialise() mkdirs it with parents=True, which is
+    # enough wherever the service user can already write -- and everything
+    # under stateDir is such a place.  Outside it is not: a storage.filepath on
+    # another filesystem would fail with a bare PermissionError from inside
+    # aiida-init, so systemd creates that one.  Pre-creating is safe either
+    # way, since initialise() rejects a filepath that exists and is *non-empty*
+    # and an empty directory is precisely what it accepts.
+    #
+    # Restricting it to the outside case is not tidiness, it is required.
+    # systemd-tmpfiles creates missing parents as root, and everything under
+    # ${configDir} is a tree AiiDA writes into itself --
+    # _create_instance_directories() in aiida/manage/configuration/settings.py
+    # makes `daemon`, `daemon/log` and three more at *import* time, before any
+    # subcommand runs.  A rule naming the default filepath therefore creates
+    # `.aiida` as root on the way to it, and then:
+    #
+    #   systemd-tmpfiles: Detected unsafe path transition /var/lib/aiida
+    #   (owned by aiida) -> /var/lib/aiida/.aiida (owned by root)
+    #
+    # tmpfiles refuses the transition and stops, so the storage directory is
+    # not created either, and every `verdi` in the unit dies on
+    #   ConfigurationError: could not create the `/var/lib/aiida/.aiida/daemon`
+    #   configuration directory: [Errno 13] Permission denied
+    # -- an error that names neither this rule nor the storage backend.
+    ++ lib.optional (
+      useSqlite && !lib.hasPrefix "${cfg.stateDir}/" cfg.storage.filepath
+    ) "d '${cfg.storage.filepath}' 0700 '${cfg.user}' '${cfg.group}' - -";
 
     systemd.services.aiida-init = {
       description = "AiiDA - create the profile and its storage";

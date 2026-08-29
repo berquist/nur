@@ -615,6 +615,32 @@ lib.fix (self: {
     && builtins.elem "d '/srv/aiida-storage' 0700 'aiida' 'aiida' - -" cfg.systemd.tmpfiles.rules
   );
 
+  # The inverse, and the one this suite did not catch the first time: a
+  # storage.filepath *under* stateDir must get no tmpfiles rule at all.
+  #
+  # Everything below ${stateDir}/.aiida is AiiDA's own tree —
+  # _create_instance_directories() makes `daemon` and four more at import time
+  # — and systemd-tmpfiles creates missing parents as root.  So a rule naming
+  # the default filepath makes `.aiida` root-owned, tmpfiles then refuses the
+  # "unsafe path transition" out of the aiida-owned stateDir and creates
+  # nothing, and every verdi in aiida-init.service dies on a permission error
+  # against `.aiida/daemon` that names neither the rule nor the backend.
+  # tests/aiida/vm.nix's daemon-sqlite is where that surfaced; this is where it
+  # costs a second instead of a VM boot.
+  aiida-storage-sqlite-default-filepath-untouched =
+    check "aiida-storage-sqlite-default-filepath-untouched"
+      (
+        let
+          cfg = evalAiida {
+            services.aiida = {
+              enable = true;
+              storage.backend = "core.sqlite_dos";
+            };
+          };
+        in
+        !(lib.any (lib.hasInfix ".aiida") cfg.systemd.tmpfiles.rules)
+      );
+
   # Storage and broker are orthogonal in aiida-core — SqliteDosStorage touches
   # nothing about process control — and they have to stay orthogonal here, so
   # that the rabbitmq pinning step is not quietly lost to the psql branch.
