@@ -9,14 +9,17 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 
 - the **QCArchive/QCFractal ecosystem** — Python packages (`qcportal`, `qcfractal`,
   `qcfractalcompute`, `qcarchivetesting`, `parsl`) plus two NixOS service modules.
-- the **AiiDA ecosystem** — `aiida-core`, thirteen plugins, the twenty-odd dependencies of
-  those that nixpkgs does not carry, and one NixOS service module. Six wrap a quantum chemistry
-  or materials program (`aiida-cp2k`, `aiida-gaussian`, `aiida-orca`, `aiida-octopus`,
-  `aiida-psi4`, `aiida-quantumespresso`); five more wrap another simulation code
-  (`aiida-ase`, `aiida-gromacs`, `aiida-lammps`, `aiida-nwchem`, `aiida-wannier90`); and two
-  are infrastructure rather than a wrapper — `aiida-shell`, which runs an arbitrary command
-  under provenance and so reaches the ~60 programs already in `pkgs.qchem.*` without a plugin
-  each, and `aiida-submission-controller`.
+- the **AiiDA ecosystem** — `aiida-core`, twenty plugins, the thirty-odd dependencies of those
+  that nixpkgs does not carry, and one NixOS service module. Six wrap a quantum chemistry or
+  materials program (`aiida-cp2k`, `aiida-gaussian`, `aiida-orca`, `aiida-octopus`,
+  `aiida-psi4`, `aiida-quantumespresso`); six more wrap another simulation code (`aiida-ase`,
+  `aiida-gromacs`, `aiida-lammps`, `aiida-nwchem`, `aiida-siesta`, `aiida-wannier90`); two
+  build workflows on top of those (`aiida-phonopy`, `aiida-wannier90-workflows`); and six are
+  infrastructure rather than a wrapper — `aiida-shell`, which runs an arbitrary command under
+  provenance and so reaches the ~60 programs already in `pkgs.qchem.*` without a plugin each,
+  `aiida-pythonjob` and `aiida-workgraph`, which do the same for Python functions and for whole
+  graphs of them, `aiida-submission-controller`, `aiida-restapi`, and `aiida-firecrest`, whose
+  transport runs jobs through a FirecREST endpoint rather than over SSH.
   That module offers both of aiida-core's read-write storage plugins: `core.psql_dos` by
   default, and `core.sqlite_dos` — which needs no service at all — behind
   `services.aiida.storage.backend`.
@@ -90,6 +93,12 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 |---|---|
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
 | Where does a `fetchFromGitHub` hash come from with no network and no daemon? | `scripts/offline-src-hash.sh` (the header comment), `just hash-src` |
+| Why is `sisl` pinned to a tag rather than main, and what did the extra commits break? | `pkgs/sisl/default.nix` (the note above `src`) |
+| Why is `node-graph` pinned to v0.6.5 exactly, one commit behind its main? | `pkgs/node-graph/default.nix` (the note above `src`) |
+| Why does `sisl` patch `cmake.verbose` at the tag it is pinned to? | `pkgs/sisl/default.nix` (`postPatch`) |
+| Why does one `aiida-workgraph` test gain a daemon fixture and another a longer timeout? | `pkgs/aiida-workgraph/default.nix` (the note above `postPatch`) |
+| Why are `aiida-phonopy`'s two workflow tests deselected when the rest of its suite runs? | `pkgs/aiida-phonopy/default.nix` (`disabledTestPaths`) |
+| Why is `aiida-phonopy`'s `phonopy~=4.0` relaxed, and what does 26.05's phonopy 3.5.1 still get wrong? | `pkgs/aiida-phonopy/default.nix` (`pythonRelaxDeps`) |
 | Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
 | Why `python313` and not `python3`? What is `meta.broken` protecting? | `pkgs/qcportal/default.nix` (`meta`), `default.nix` |
 | Why is Psi4 taken from a hand-pinned `nixpkgs-qchem`, and why not `nixos-qchem.packages.*`? | `flake.nix` (the `nixpkgs-qchem` input, and `qchemPkgs` in `perSystem`) |
@@ -127,6 +136,24 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `aiida-nwchem` take `ase`, `pymatgen`, `seekpath` and `spglib` as check inputs? | `pkgs/aiida-nwchem/default.nix` (`nativeCheckInputs`) |
 | Why does `aiida-nwchem` ask for two MPI ranks when its tests run one water molecule? | `pkgs/aiida-nwchem/default.nix` (`postPatch`) |
 | Why do `aiida-nwchem`'s tests lose their `system crystal` cell, and what did that cover? | `pkgs/aiida-nwchem/default.nix` (`postPatch`) |
+| Why is `node-graph-widget-js` a top-level attribute rather than a Python one, and who consumes it? | `overlays/default.nix` (the `node-graph-widget-js` binding), `pkgs/node-graph-widget/default.nix` (`preBuild`) |
+| Why does `node-graph-widget` copy a bundle in before hatchling runs, and what is `skip-if-exists`? | `pkgs/node-graph-widget/default.nix` (`preBuild`) |
+| Why does `node-graph-widget-js` patch a name and version into `package.json`, and why on one line? | `pkgs/node-graph-widget-js/default.nix` (`postPatch`) |
+| Why is `firecrest-streamer` built from a subdirectory of another project, and why is `asyncio` removed? | `pkgs/firecrest-streamer/default.nix` (`sourceRoot`, `pythonRemoveDeps`) |
+| Why does `pyfirecrest` need `firecrest-streamer` when nothing advertises it? | `pkgs/pyfirecrest/default.nix` (`dependencies`) |
+| Why is `graphene-file-upload` here at all, and why is its Flask half excluded? | `pkgs/graphene-file-upload/default.nix` (`disabledTestPaths`) |
+| Why does `starlette-graphene3` rewrite its build backend? | `pkgs/starlette-graphene3/default.nix` (`postPatch`) |
+| Why can `pythonRelaxDeps` not fix a `git+https` requirement, and what does instead? | `pkgs/aiida-restapi/default.nix` and `pkgs/aiida-wannier90-workflows/default.nix` (`postPatch`) |
+| What is the risk in relaxing `aiida-restapi`'s `lark~=0.11` to 1.3? | `pkgs/aiida-restapi/default.nix` (`pythonRelaxDeps`) |
+| Which two `aiida-restapi` endpoints are broken under starlette 1.x, and why is that not `meta.broken`? | `pkgs/aiida-restapi/default.nix` (`disabledTestPaths`) |
+| Why do three plugins create an AiiDA config in `preBuild`, when `HOME` and `AIIDA_PATH` are already set? | `pkgs/aiida-pythonjob/default.nix` (`preBuild`) |
+| Why does `aiida-optimize` patch the same two lines in two different files? | `pkgs/aiida-optimize/default.nix` (`postPatch`) |
+| Why does `pyfirecrest` run its tests from `tests/`? | `pkgs/pyfirecrest/default.nix` (`preCheck`) |
+| Why does `aiida-pythonjob` delete an `addopts` line rather than add IPython? | `pkgs/aiida-pythonjob/default.nix` (`postPatch`) |
+| Why does `aiida-workgraph` rewrite its broker and put `verdi` on the check PATH? | `pkgs/aiida-workgraph/default.nix` (`postPatch`, `preCheck`) |
+| Why is `aiida-firecrest` the one plugin here with `doCheck = false`? | `pkgs/aiida-firecrest/default.nix` (the note above `doCheck`) |
+| Why does `aiida-siesta` have three different names, and which one is the attribute? | `pkgs/aiida-siesta/default.nix` (the `pname` note) |
+| Why does `aiida-siesta` hand sisl back an `R` it just read, and what did the missing one cost? | `pkgs/aiida-siesta/default.nix` (the third and fourth notes above `postPatch`) |
 | Why does `aiida-gromacs` patch a build-system requirement, when `pythonRelaxDeps` exists? | `pkgs/aiida-gromacs/default.nix` (`postPatch`) |
 | Why does `aiida-gromacs` put `$out/bin` on the check PATH? | `pkgs/aiida-gromacs/default.nix` (`preCheck`) |
 | Why do `aiida-gromacs`' three metadynamics tests force `-ntmpi 1`, and what would a parallel one need? | `pkgs/aiida-gromacs/default.nix` (`postPatch`), `.scratch/nixpkgs-plumed-mpi.patch` |

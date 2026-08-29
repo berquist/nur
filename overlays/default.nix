@@ -423,6 +423,13 @@ in
   # without dragging in qcportal's closure, and vice versa.  The two share
   # nothing but the interpreter.
   aiida = final: prev: {
+    # Not a Python package at all: a buildNpmPackage that produces the esbuild
+    # bundle node-graph-widget installs as package data.  It sits at the top
+    # level because a Python package set has nothing to offer it, and it is
+    # threaded into node-graph-widget explicitly, the way `jq` is into
+    # aiida-core.
+    node-graph-widget-js = final.callPackage ../pkgs/node-graph-widget-js { };
+
     pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
       (
         pself: psuper:
@@ -652,6 +659,28 @@ in
           # resolve its own aiida-core to the same derivation.
           qe-tools = pself.callPackage ../pkgs/qe-tools { };
           sisl = pself.callPackage ../pkgs/sisl { };
+
+          # The node-graph stack, which aiida-workgraph, aiida-pythonjob and
+          # aiida-phonopy are built on.  node-graph-widget takes its frontend
+          # from `final.node-graph-widget-js` below rather than building it
+          # here: the bundle needs npm, and a fixed-output derivation is the
+          # only thing in Nix allowed to fetch a registry.
+          node-graph = pself.callPackage ../pkgs/node-graph { };
+          node-graph-widget = pself.callPackage ../pkgs/node-graph-widget {
+            inherit (final) node-graph-widget-js;
+          };
+
+          # aiida-restapi's stack.  graphene-file-upload is test-only — it is
+          # what starlette-graphene3's conftest imports — but it has to be a
+          # member here rather than a bare checkInput, because that is the only
+          # way a package set resolves it.
+          graphene-file-upload = pself.callPackage ../pkgs/graphene-file-upload { };
+          starlette-graphene3 = pself.callPackage ../pkgs/starlette-graphene3 { };
+
+          # aiida-firecrest's.  firecrest-streamer is not an optional extra;
+          # see ../pkgs/pyfirecrest/default.nix.
+          firecrest-streamer = pself.callPackage ../pkgs/firecrest-streamer { };
+          pyfirecrest = pself.callPackage ../pkgs/pyfirecrest { };
           aiida-optimize = pself.callPackage ../pkgs/aiida-optimize { };
           aiida-pseudo = pself.callPackage ../pkgs/aiida-pseudo { };
           aiida-gaussian-datatypes = pself.callPackage ../pkgs/aiida-gaussian-datatypes { };
@@ -769,9 +798,16 @@ in
           aiida-orca = pself.callPackage ../pkgs/aiida-orca { };
           aiida-psi4 = pself.callPackage ../pkgs/aiida-psi4 { };
           aiida-quantumespresso = pself.callPackage ../pkgs/aiida-quantumespresso { };
+          aiida-phonopy = pself.callPackage ../pkgs/aiida-phonopy { };
+          aiida-pythonjob = pself.callPackage ../pkgs/aiida-pythonjob { };
+          aiida-restapi = pself.callPackage ../pkgs/aiida-restapi { };
           aiida-shell = pself.callPackage ../pkgs/aiida-shell { };
+          aiida-siesta = pself.callPackage ../pkgs/aiida-siesta { };
           aiida-submission-controller = pself.callPackage ../pkgs/aiida-submission-controller { };
           aiida-wannier90 = pself.callPackage ../pkgs/aiida-wannier90 { };
+          aiida-wannier90-workflows = pself.callPackage ../pkgs/aiida-wannier90-workflows { };
+          aiida-workgraph = pself.callPackage ../pkgs/aiida-workgraph { };
+          aiida-firecrest = pself.callPackage ../pkgs/aiida-firecrest { };
         }
       )
     ];
@@ -805,9 +841,16 @@ in
       aiida-orca
       aiida-psi4
       aiida-quantumespresso
+      aiida-firecrest
+      aiida-phonopy
+      aiida-pythonjob
+      aiida-restapi
       aiida-shell
+      aiida-siesta
       aiida-submission-controller
       aiida-wannier90
+      aiida-wannier90-workflows
+      aiida-workgraph
       ;
   };
 

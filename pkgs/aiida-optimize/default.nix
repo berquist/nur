@@ -52,6 +52,85 @@ buildPythonPackage rec {
     scipy
   ];
 
+  # `@pytest.mark.usefixtures("aiida_profile_clean")` sits on top of
+  # `@pytest.fixture` in tests/conftest.py, and pytest 9 refuses to collect it:
+  #
+  #   Failed: Marks cannot be applied to fixtures.
+  #
+  # A mark on a fixture has never done anything — pytest has warned about it
+  # for years — so the clean profile upstream wanted was never being requested
+  # either.  Making the fixture take `aiida_profile_clean` as an argument is
+  # both the fix and what the mark was reaching for; the `unused-argument`
+  # pylint suppression already on that line says the argument used to be there.
+  #
+  # Twice, because tests/test_entry_points.py has the same pair the other way
+  # up — `@pytest.fixture` above `@pytest.mark.usefixtures(...)`.  Order makes
+  # no difference to pytest; both are collection errors, and fixing only the
+  # first turns a build failure into an identical build failure one module
+  # later.
+  #
+  # The third file is a name collision rather than a deprecation.
+  # `AddInputsWorkChain` has an input port called `inputs`, and aiida-core's
+  # launchers now take `inputs` as their own second parameter —
+  # `run_get_node(process, inputs=None, **kwargs)` — so a call that passes the
+  # port as a keyword alongside others is rejected before the process sees it:
+  #
+  #   ValueError: Cannot specify both `inputs` and `kwargs`.
+  #
+  # The supported spelling is one dictionary, where a port named `inputs` is
+  # just another key, so the two calls are rewritten to it.  This is worth
+  # knowing outside the tests: anyone driving this workchain from Python hits
+  # the same collision, and the same dictionary is the way out.
+  postPatch = ''
+    substituteInPlace tests/conftest.py \
+      --replace-fail '@pytest.mark.usefixtures("aiida_profile_clean")' "" \
+      --replace-fail \
+        'def run_optimization():  # pylint: disable=unused-argument' \
+        'def run_optimization(aiida_profile_clean):  # pylint: disable=unused-argument'
+
+    substituteInPlace tests/test_entry_points.py \
+      --replace-fail '@pytest.mark.usefixtures("aiida_profile_clean")' "" \
+      --replace-fail \
+        'def check_entrypoints():' \
+        'def check_entrypoints(aiida_profile_clean):'
+
+    substituteInPlace tests/wrappers/test_add_inputs_wrapper.py \
+      --replace-fail \
+        '    res, node = run_get_node(
+            AddInputsWorkChain,
+            sub_process=EchoDictValue,
+            inputs={"x": orm.Float(1)},
+            added_input_values=orm.List(list=[2.0]),
+            added_input_keys=orm.List(list=["a:b.c"]),
+        )' \
+        '    res, node = run_get_node(
+            AddInputsWorkChain,
+            {
+                "sub_process": EchoDictValue,
+                "inputs": {"x": orm.Float(1)},
+                "added_input_values": orm.List(list=[2.0]),
+                "added_input_keys": orm.List(list=["a:b.c"]),
+            },
+        )' \
+      --replace-fail \
+        '    res, node = run_get_node(
+            AddInputsWorkChain,
+            sub_process=EchoDictValue,
+            inputs={"x": orm.Float(1)},
+            added_input_values=orm.Float(2),
+            added_input_keys=orm.Str("a:b.c"),
+        )' \
+        '    res, node = run_get_node(
+            AddInputsWorkChain,
+            {
+                "sub_process": EchoDictValue,
+                "inputs": {"x": orm.Float(1)},
+                "added_input_values": orm.Float(2),
+                "added_input_keys": orm.Str("a:b.c"),
+            },
+        )'
+  '';
+
   preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
     export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
   '';
