@@ -45,6 +45,33 @@ buildPythonPackage rec {
 
   build-system = [ setuptools ];
 
+  # monty 2026.7.16 made zopen's `mode` a required positional argument and
+  # rejects an implicit text/binary mode outright.  2025.3.3 still defaults it
+  # to "r", behind a FutureWarning whose own deadline was 2025-06-01.  FireWorks
+  # never caught up, so its five bare calls in rocket.py — the offline-mode
+  # reads at lines 150, 303, 365, 421 and 445 — are a TypeError on both unstable
+  # legs of the matrix:
+  #
+  #   with zopen(fpath) as f_in:
+  #   E  TypeError: zopen() missing 1 required positional argument: 'mode'
+  #
+  # Only one of the five is reached by the suite as it runs here —
+  # LaunchPadOfflineTest::test__recover_completed, through rocket.py:150 — so
+  # patching just that one would look like a fix and leave four TypeErrors in
+  # the paths the mongomock partition never enters.  substituteInPlace replaces
+  # every occurrence, and the indentation differs between the five while the
+  # matched text does not, so one --replace-fail covers them all.
+  #
+  # "rt" rather than "r": it is what the old default resolved to for these
+  # uncompressed .json reads, so this is equally right on nixos-26.05, where it
+  # silences the implicit-mode warning rather than adding one.
+  postPatch = ''
+    substituteInPlace fireworks/core/rocket.py \
+      --replace-fail \
+        'with zopen(fpath) as f_in:' \
+        'with zopen(fpath, "rt") as f_in:'
+  '';
+
   dependencies = [
     flask
     flask-paginate
