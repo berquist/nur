@@ -91,6 +91,7 @@ let
   # ../../default.nix re-exports through python313Packages.  Deliberately not
   # derived from either file — the point is that the hand-written lists agree.
   exportedPackages = [
+    "dough"
     "morfeus-ml"
     "qmzyme"
   ];
@@ -104,6 +105,19 @@ let
     "dbstep"
     "digichem-core"
     "harmonwig"
+    "metallogen"
+    "molcat"
+    "xyzrender"
+  ];
+
+  # graphrc is the one cclib package that is *not* in the list above, because it
+  # is not re-exported: cclib forces it to be a top-level attribute of the
+  # overlay, while nothing but xyzrender wants it.  It therefore has to satisfy
+  # both halves of a contradiction — present in overlaidPkgs, absent from
+  # ../../default.nix — which cheminformatics-graphrc-is-not-re-exported below
+  # is the only thing checking.
+  cclibDependencies = [
+    "graphrc"
   ];
 
   # The dependencies that stop at the pythonPackagesExtensions step: reachable
@@ -119,6 +133,7 @@ let
     "mdanalysis"
     "mrcfile"
     "openprattle"
+    "xyzgraph"
   ];
 
 in
@@ -196,6 +211,25 @@ lib.fix (self: {
   # overrides `python3`.  Nothing but an assertion catches that.
   cheminformatics-cclib-resolves = check "cheminformatics-cclib-resolves" (
     lib.all (name: !(cclibPkgs.${name}.meta.broken or false)) cclibPackages
+  );
+
+  # The cclib dependencies get both halves of the same treatment, since they are
+  # built the same way and would break in the same silent manner.
+  cheminformatics-cclib-dependencies-resolve = check "cheminformatics-cclib-dependencies-resolve" (
+    lib.all (
+      name: (overlaidPkgs.${name}.meta.broken or false) && !(cclibPkgs.${name}.meta.broken or false)
+    ) cclibDependencies
+  );
+
+  # ...but unlike the packages above they must not reach ../../default.nix, or
+  # ci.nix builds a dependency as though it were a product.  The pair of
+  # conditions is the whole point: "top-level in the overlay" and "absent from
+  # the NUR attrset" are individually unremarkable and jointly the contract.
+  cheminformatics-graphrc-is-not-re-exported = check "cheminformatics-graphrc-is-not-re-exported" (
+    let
+      nur = import ../../default.nix { pkgs = basePkgs; };
+    in
+    lib.all (name: (overlaidPkgs ? ${name}) && !(nur ? ${name})) cclibDependencies
   );
 
   # ==========================================================================

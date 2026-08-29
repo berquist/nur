@@ -1,0 +1,97 @@
+diff -ruN pyrr-pristine/pyrr/objects/base.py pyrr-patched/pyrr/objects/base.py
+--- a/pyrr/objects/base.py	2024-11-03 02:49:24.000000000 -0500
++++ b/pyrr/objects/base.py	2026-08-26 12:36:20.583561772 -0400
+@@ -21,6 +21,25 @@
+         obj.shape = cls._shape
+         return obj
+ 
++    def __array_wrap__(self, array, context=None, return_scalar=False):
++        # Boolean ufunc results must not come back as pyrr objects.
++        #
++        # These classes overload | and ^ as the dot and cross products, and
++        # numpy's own code combines comparison masks with those operators --
++        # isclose() computes
++        #
++        #     (less_equal(abs(x-y), atol + rtol*abs(y)) & isfinite(y)) | (x == y)
++        #
++        # Because ufunc output preserves the subclass, less_equal() returns a
++        # boolean Vector3/Quaternion, and pyrr's __eq__ returns a plain Python
++        # bool -- so that final | dispatches into the dot product with a bool
++        # argument and raises. Returning a plain ndarray for boolean results
++        # keeps arithmetic subclass propagation, which the rest of pyrr relies
++        # on, while letting numpy's internals work on masks as masks.
++        if array.dtype == bool:
++            return np.asarray(array)
++        return super().__array_wrap__(array, context, return_scalar)
++
+     def _unsupported_type(self, method, other):
+         raise ValueError('Cannot {} a {} to a {}'.format(method, type(other).__name__, type(self).__name__))
+ 
+diff -ruN pyrr-pristine/pyrr/utils.py pyrr-patched/pyrr/utils.py
+--- a/pyrr/utils.py	2024-11-03 02:49:24.000000000 -0500
++++ b/pyrr/utils.py	2026-08-26 12:36:20.583561772 -0400
+@@ -3,6 +3,7 @@
+ """
+ import inspect
+ from functools import wraps
++import math
+ import numpy as np
+ 
+ 
+@@ -93,7 +94,7 @@
+         # Why not use simple form:
+         # s1 = (-b + math.sqrt(delta)) / (2 * a)
+         # s2 = (-b - math.sqrt(delta)) / (2 * a)
+-        q = -0.5 * (b + np.math.sqrt(delta)) if b > 0 else -0.5 * (b - np.math.sqrt(delta))
++        q = -0.5 * (b + math.sqrt(delta)) if b > 0 else -0.5 * (b - math.sqrt(delta))
+         s1 = q / a
+         s2 = c / q
+         return [s1, s2]
+diff -ruN pyrr-pristine/tests/objects/test_matrix33.py pyrr-patched/tests/objects/test_matrix33.py
+--- a/tests/objects/test_matrix33.py	2024-11-03 02:49:24.000000000 -0500
++++ b/tests/objects/test_matrix33.py	2026-08-26 12:36:20.583561772 -0400
+@@ -216,7 +216,7 @@
+ 
+     def test_operators_number(self):
+         m = Matrix33.identity()
+-        fv = np.empty((1,), dtype=[('i', np.int16, 1),('f', np.float32, 1)])
++        fv = np.empty((1,), dtype=[('i', np.int16),('f', np.float32)])
+         fv[0] = (2, 2.0)
+ 
+         # add
+diff -ruN pyrr-pristine/tests/objects/test_matrix44.py pyrr-patched/tests/objects/test_matrix44.py
+--- a/tests/objects/test_matrix44.py	2024-11-03 02:49:24.000000000 -0500
++++ b/tests/objects/test_matrix44.py	2026-08-26 12:36:20.583561772 -0400
+@@ -216,7 +216,7 @@
+ 
+     def test_operators_number(self):
+         m = Matrix44.identity()
+-        fv = np.empty((1,), dtype=[('i', np.int16, 1),('f', np.float32, 1)])
++        fv = np.empty((1,), dtype=[('i', np.int16),('f', np.float32)])
+         fv[0] = (2, 2.0)
+ 
+         # add
+diff -ruN pyrr-pristine/tests/objects/test_vector3.py pyrr-patched/tests/objects/test_vector3.py
+--- a/tests/objects/test_vector3.py	2024-11-03 02:49:24.000000000 -0500
++++ b/tests/objects/test_vector3.py	2026-08-26 12:36:20.583561772 -0400
+@@ -187,7 +187,7 @@
+ 
+     def test_operators_number(self):
+         v1 = Vector3([1.,2.,3.])
+-        fv = np.empty((1,), dtype=[('i', np.int16, 1),('f', np.float32, 1)])
++        fv = np.empty((1,), dtype=[('i', np.int16),('f', np.float32)])
+         fv[0] = (2, 2.0)
+ 
+         # add
+diff -ruN pyrr-pristine/tests/objects/test_vector4.py pyrr-patched/tests/objects/test_vector4.py
+--- a/tests/objects/test_vector4.py	2024-11-03 02:49:24.000000000 -0500
++++ b/tests/objects/test_vector4.py	2026-08-26 12:36:20.583561772 -0400
+@@ -170,7 +170,7 @@
+ 
+     def test_operators_number(self):
+         v1 = Vector4([1.,2.,3.,4.])
+-        fv = np.empty((1,), dtype=[('i', np.int16, 1),('f', np.float32, 1)])
++        fv = np.empty((1,), dtype=[('i', np.int16),('f', np.float32)])
+         fv[0] = (2, 2.0)
+ 
+         # add

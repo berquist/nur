@@ -119,12 +119,26 @@ let
   # ci.nix does not build them in their own right.
   exportedPackages = [
     "aiida-core"
+    "aiida-ase"
     "aiida-cp2k"
     "aiida-gaussian"
+    "aiida-gromacs"
+    "aiida-lammps"
+    "aiida-nwchem"
     "aiida-octopus"
     "aiida-orca"
     "aiida-psi4"
     "aiida-quantumespresso"
+    "aiida-firecrest"
+    "aiida-phonopy"
+    "aiida-pythonjob"
+    "aiida-restapi"
+    "aiida-shell"
+    "aiida-siesta"
+    "aiida-submission-controller"
+    "aiida-wannier90"
+    "aiida-wannier90-workflows"
+    "aiida-workgraph"
   ];
 
   # The subset of the above that cannot be built from either entry point, and

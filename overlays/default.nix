@@ -6,6 +6,111 @@
 # Each value is a standard  final: prev: { ... }  overlay function.
 # Add new overlays here as additional attributes; default.nix composes
 # them all via lib.composeManyExtensions.
+let
+  # nixpkgs carries `disabled = pythonAtLeast "3.13"` on pymatgen, so
+  # `pkgs.python313Packages.pymatgen` throws at evaluation rather than merely
+  # failing to build.  That gate is upstream nixpkgs being conservative about an
+  # interpreter it has not tested, not pymatgen refusing to run: lifting it
+  # instantiates and its whole closure evaluates on 3.13 unchanged.
+  #
+  # It cannot simply be dropped instead.  aiida-quantumespresso depends on
+  # `aiida_core[atomic_tools]`, pymatgen is in that extra, and the alternative —
+  # pinning that whole family to 3.12 — would put a third interpreter in the
+  # repo for the sake of one nixpkgs annotation.  The materials overlay needs
+  # the same lift for a different reason: custodian's suite imports pymatgen in
+  # seven of its twenty-one modules.
+  #
+  # **A function returning a `let`-bindable value, never a member of a package
+  # set.**  Injecting a repaired pymatgen into the set would silently change
+  # pymatgen for everything else in a consumer's package set, which taking
+  # `overlays.aiida` or `overlays.materials` has no business doing.  Each
+  # caller binds it locally and passes it to the packages that need it — for
+  # aiida that is aiida-core and aiida-gaussian, for materials it is custodian.
+  # The aiida-overlay-pymatgen-override-is-local eval test asserts it stays
+  # invisible from outside.
+  #
+  # Shared rather than copied because the nine deselections and the plotting
+  # patch below are the expensive part to keep in step, and two overlays
+  # drifting apart on which pymatgen tests fail would be invisible until one of
+  # them broke.
+  #
+  # Those nine are none of them ours and none of them about the interpreter.
+  # They are pymatgen 2025.10.7 against dependency versions newer than it was
+  # released for, in three groups:
+  #
+  #   pandas 3.0 removed DataFrame.swapaxes, which is what made
+  #   `np.array_split` return DataFrames rather than plain arrays.  The
+  #   LammpsData writers slice the result with `.iloc` immediately afterwards.
+  #
+  #   The thermal-displacement eigenvectors come back complex, and `np.degrees`
+  #   refuses a complex argument.  Upstream assumes a real result from the
+  #   diagonalisation.
+  #
+  #   The Heisenberg mapper's least-squares fit does not converge here, so
+  #   `ex_params` stays None and both tests that read it fail.  nixpkgs already
+  #   deselects `test_mean_field` on aarch64-linux for this exact error; the fit
+  #   is evidently sensitive to which BLAS it finds, and x86_64 with our overlay
+  #   is another such combination.
+  #
+  #   `pmg view` opens a viewer and takes the xdist worker down with it when
+  #   there is no display.  nixpkgs deselects the neighbouring
+  #   tests/cli/test_pmg_plot.py on darwin for the same reason.
+  #
+  # Node ids rather than bare names: `disabledTests` becomes a `-k` expression,
+  # and `test_get_str` and `test_write_file` are common enough in a suite this
+  # size to take unrelated tests with them.  An entry containing `::` is passed
+  # to pytest as `--deselect`, which is exact.
+  pymatgenFor =
+    pself:
+    pself.pymatgen.overridePythonAttrs (old: {
+      disabled = false;
+      disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
+        "tests/io/lammps/test_data.py::TestLammpsData::test_get_str"
+        "tests/io/lammps/test_data.py::TestLammpsData::test_write_file"
+        "tests/io/lammps/test_data.py::TestCombinedData::test_get_str"
+        "tests/io/lammps/test_data.py::TestCombinedData::test_as_lammpsdata"
+        "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_compute_directionality_quality_criterion"
+        "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_visualization_directionality_criterion"
+        "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_mean_field"
+        "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_get_igraph"
+        "tests/cli/test_pmg.py::test_pmg_view"
+      ];
+
+      # A tenth failure that is not a deselect, because it is a flake
+      # rather than a broken test, and deselecting it would drop real
+      # coverage of van_arkel_triangle:
+      #
+      #   assert ax.get_title() == ""
+      #   E  AssertionError: assert 'Coordination numbers' == ''
+      #
+      # van_arkel_triangle sets no title.  It ends with `ax = plt.gca()`
+      # — pyplot's *current* axes, whatever that happens to be — and
+      # tests/analysis/chemenv/coordination_environments/test_structure_environments.py
+      # calls get_environments_figure, whose title defaults to
+      # "Coordination numbers", and never closes the figure.  When both
+      # land in one xdist worker in that order the assertion reads the
+      # leftover.  Which tests share a worker is a scheduling accident
+      # under xdist's default --dist load, so this appears and vanishes
+      # between runs; --numprocesses is $NIX_BUILD_CORES, and 128 workers
+      # make it likely enough to matter here and rare enough that nixpkgs
+      # has never had to deselect it.
+      #
+      # Retrying would not help, and pytest-rerunfailures is deliberately
+      # not the answer as it is for aiida-core: a rerun runs in the same
+      # process and finds the same stale figure.
+      #
+      # So give the test the clean state it assumes.  `plt` is already
+      # imported at the top of that file, and the second van_arkel_triangle
+      # call in the test only asserts isinstance, so nothing else moves.
+      postPatch = (old.postPatch or "") + ''
+        substituteInPlace tests/util/test_plotting.py \
+          --replace-fail \
+            '        random_list = [("Fe", "C"), ("Ni", "F")]' \
+            '        plt.close("all")
+                random_list = [("Fe", "C"), ("Ni", "F")]'
+      '';
+    });
+in
 {
   # dotdrop is a standalone CLI application — nothing here imports it as a
   # library — so it is a plain top-level package rather than a
@@ -109,6 +214,23 @@
 
         morfeus-ml = pself.callPackage ../pkgs/morfeus-ml { };
         qmzyme = pself.callPackage ../pkgs/qmzyme { };
+
+        # dough parses simulation-code output files into typed dataclasses.  It
+        # belongs with cclib and openprattle above rather than with the
+        # materials overlay: its ase/pymatgen/aiida-core converters are optional
+        # extras imported lazily, so nothing of those closures is pulled in.
+        dough = pself.callPackage ../pkgs/dough { };
+
+        # xyzgraph is here rather than in cheminformatics-cclib below because it
+        # is the one link in that chain that does *not* need cclib — it wants
+        # rdkit and networkx only.  That matters structurally: because this
+        # extension is injected into every pythonX.pkgs set, `final.python3.pkgs`
+        # gets an xyzgraph too, which is what lets ../pkgs/graphrc and
+        # ../pkgs/xyzrender resolve it from the one set that does have cclib.
+        #
+        # A dependency of those two, so it stops at this line and is not
+        # re-exported.
+        xyzgraph = pself.callPackage ../pkgs/xyzgraph { };
       })
     ];
 
@@ -120,6 +242,7 @@
     # cclib use is test-only and lazy — see ../pkgs/qmzyme/default.nix.  It
     # builds on both paths; the flake path additionally runs one more test.
     inherit (final.python313Packages)
+      dough
       morfeus-ml
       qmzyme
       ;
@@ -155,6 +278,139 @@
     ccreg = final.python3.pkgs.callPackage ../pkgs/ccreg { };
     dbstep = final.python3.pkgs.callPackage ../pkgs/dbstep { };
     digichem-core = final.python3.pkgs.callPackage ../pkgs/digichem-core { };
+    metallogen = final.python3.pkgs.callPackage ../pkgs/metallogen { };
+    molcat = final.python3.pkgs.callPackage ../pkgs/molcat { };
+    xyzrender = final.python3.pkgs.callPackage ../pkgs/xyzrender { };
+
+    # graphrc breaks the rule this file otherwise keeps, and it has to.
+    #
+    # Nothing but xyzrender wants it, so by the convention in ../AGENTS.md it
+    # should stop at a `pythonPackagesExtensions` entry and never become a
+    # top-level attribute.  But it needs cclib, and `final.python313Packages` —
+    # the set that extension feeds — is precisely the set cclib's overlay never
+    # touches.  So it must be a top-level `final.python3.pkgs.callPackage` like
+    # its neighbours here, while still not being re-exported from
+    # ../default.nix, so ci.nix does not build it in its own right.
+    #
+    # ../tests/cheminformatics asserts that exact shape, because it is the only
+    # thing keeping the two halves of it from drifting.
+    graphrc = final.python3.pkgs.callPackage ../pkgs/graphrc { };
+  };
+
+  # Standalone computational chemistry tools that share no closure with each
+  # other and none with the families above: angular-momentum coefficients, a
+  # strain-analysis CLI, a terminal structure viewer, a saddle-point optimizer,
+  # and the chemfiles trajectory library with its Python binding.
+  #
+  # A single overlay rather than five, because the alternative is five overlay
+  # attributes whose only content is one callPackage each.  Nothing here is
+  # heavy to *evaluate* — a consumer taking this overlay pays for nothing it
+  # does not build — so the usual reason to split on closure boundaries does not
+  # apply.  Note that molara does drag PySide6 and sella drags jax, so both are
+  # real costs once ci.nix starts building them.
+  chemtools = final: prev: {
+    pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+      (pself: _psuper: {
+        wignernj = pself.callPackage ../pkgs/wignernj { };
+        strainjedi = pself.callPackage ../pkgs/strainjedi { };
+        sella = pself.callPackage ../pkgs/sella { };
+        # `mesaDrivers` is threaded in from `final` for the same reason
+        # chemfiles-python's `chemfilesLib` is: the plain name resolves inside
+        # the Python set first, and `python3Packages.mesa` there is a removal
+        # stub that throws on evaluation rather than merely being wrong.
+        molara = pself.callPackage ../pkgs/molara { mesaDrivers = final.mesa; };
+
+        # Carried for molara alone, because nixpkgs *removed* pyrr rather than
+        # merely lacking it — so unlike the other dependencies here there is no
+        # attribute to fall back to, and `python-aliases.nix` throws on the
+        # name.  Not re-exported; see the header of ../pkgs/pyrr for when to
+        # delete this.
+        pyrr = pself.callPackage ../pkgs/pyrr { };
+
+        # The Python binding, for moltui's `trexio` extra.  Emphatically **not**
+        # re-exported to the top level, and this is the one case in this file
+        # where that would do real damage rather than merely being untidy:
+        # nixpkgs already has a top-level `trexio`, and it is the C library.
+        # Lifting this over it would replace a C library with a Python module
+        # for every consumer of the overlay, and the two are not substitutes.
+        #
+        # The reverse of ../pkgs/chemfiles-python's problem, and it needs no
+        # `chemfilesLib`-style rename because this derivation takes no `trexio`
+        # argument — it builds the C sources itself out of the sdist.
+        trexio = pself.callPackage ../pkgs/trexio { };
+
+        # The C++ library is threaded in from `final` by hand.  It has to be:
+        # this attribute is also called `chemfiles`, and a python-set callPackage
+        # resolves the Python attribute before falling back to the top level, so
+        # a defaulted `chemfiles` argument in the derivation would bind to this
+        # very package and recurse.  Naming the argument `chemfilesLib` and
+        # passing it explicitly is what breaks the cycle — the same shape as
+        # aiida-core's `jq` and postopus's `octopus`.
+        chemfiles = pself.callPackage ../pkgs/chemfiles-python {
+          chemfilesLib = final.chemfiles;
+        };
+      })
+    ];
+
+    # The C++ library itself is not a Python package and so is a plain
+    # top-level callPackage, not a member of the extension above.
+    chemfiles = final.callPackage ../pkgs/chemfiles { };
+
+    # moltui is a standalone TUI application — nothing here imports it as a
+    # library — so it is a `buildPythonApplication`, and that is precisely why
+    # it cannot go in the extension above: a buildPythonApplication is not a
+    # Python module, and nixpkgs rejects one that turns up in a package set with
+    #
+    #   error: moltui should use `buildPythonPackage` or `toPythonModule` if it
+    #   is to be part of the Python packages set.
+    #
+    # Same arrangement as dotdrop and harmonwig at the top of this file,
+    # including following the default `python3` rather than the 3.13 pin.
+    moltui = final.python3Packages.callPackage ../pkgs/moltui { };
+
+    # Keep in sync with the `inherit (py)` list in ../default.nix.
+    inherit (final.python313Packages)
+      wignernj
+      strainjedi
+      sella
+      molara
+      ;
+  };
+
+  # The materials-project workflow family.  Only custodian and fireworks today,
+  # which between them need nothing nixpkgs lacks — but they are the two leaves
+  # of a much larger tree (jobflow, atomate2, quacc, matgl, …) that is gated on
+  # six missing shared dependencies: pymatgen-core, emmet-core, maggma,
+  # mp-pyrho, qtoolkit and mp-api.  This overlay exists now so that work has an
+  # obvious home when those land, rather than being wedged into cheminformatics.
+  materials = final: prev: {
+    pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+      (
+        pself: _psuper:
+        let
+          # custodian's suite imports pymatgen in seven of its twenty-one
+          # modules, and nixpkgs gates pymatgen off 3.13.  Same lift the aiida
+          # overlay needs; see `pymatgenFor` at the top of this file, including
+          # why it stays a `let` binding rather than entering the package set.
+          pymatgen = pymatgenFor pself;
+        in
+        {
+          custodian = pself.callPackage ../pkgs/custodian { inherit pymatgen; };
+          fireworks = pself.callPackage ../pkgs/fireworks { };
+
+          # A test-only dependency of fireworks, so it stops here rather than
+          # being re-exported: it stays reachable as python313Packages.* without
+          # ci.nix building it in its own right.
+          mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
+        }
+      )
+    ];
+
+    # Keep in sync with the `inherit (py)` list in ../default.nix.
+    inherit (final.python313Packages)
+      custodian
+      fireworks
+      ;
   };
 
   # The AiiDA ecosystem: aiida-core, the six quantum chemistry plugins, and
@@ -167,107 +423,26 @@
   # without dragging in qcportal's closure, and vice versa.  The two share
   # nothing but the interpreter.
   aiida = final: prev: {
+    # Not a Python package at all: a buildNpmPackage that produces the esbuild
+    # bundle node-graph-widget installs as package data.  It sits at the top
+    # level because a Python package set has nothing to offer it, and it is
+    # threaded into node-graph-widget explicitly, the way `jq` is into
+    # aiida-core.
+    node-graph-widget-js = final.callPackage ../pkgs/node-graph-widget-js { };
+
     pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
       (
         pself: psuper:
         let
-          # nixpkgs carries `disabled = pythonAtLeast "3.13"` on pymatgen, so
-          # `pkgs.python313Packages.pymatgen` throws at evaluation rather than
-          # merely failing to build.  That gate is upstream nixpkgs being
-          # conservative about an interpreter it has not tested, not pymatgen
-          # refusing to run: lifting it instantiates and its whole closure
-          # evaluates on 3.13 unchanged.
+          # The interpreter gate lifted and nine unrelated tests deselected.
+          # Shared with the materials overlay below rather than spelled out
+          # twice; the whole explanation lives at `pymatgenFor` at the top of
+          # this file, including why it must stay a `let` binding and never
+          # become a member of the attrset below.
           #
-          # It cannot simply be dropped instead.  aiida-quantumespresso depends
-          # on `aiida_core[atomic_tools]`, pymatgen is in that extra, and the
-          # alternative — pinning this whole family to 3.12 — would put a third
-          # interpreter in the repo for the sake of one nixpkgs annotation.
-          #
-          # A `let` binding rather than a member of the attrset below, so that
-          # taking overlays.aiida does not silently change pymatgen for
-          # everything else in the consumer's package set.  It is passed
-          # explicitly to the two packages that need it — aiida-core, and
-          # aiida-gaussian, which depends on pymatgen directly.  The
-          # aiida-overlay-pymatgen-override-is-local eval test asserts it stays
-          # invisible from outside.
-          #
-          # Nine tests are deselected on top of that, none of them ours and none
-          # of them about the interpreter.  They are pymatgen 2025.10.7 against
-          # dependency versions newer than it was released for, in three
-          # groups:
-          #
-          #   pandas 3.0 removed DataFrame.swapaxes, which is what made
-          #   `np.array_split` return DataFrames rather than plain arrays.  The
-          #   LammpsData writers slice the result with `.iloc` immediately
-          #   afterwards.
-          #
-          #   The thermal-displacement eigenvectors come back complex, and
-          #   `np.degrees` refuses a complex argument.  Upstream assumes a real
-          #   result from the diagonalisation.
-          #
-          #   The Heisenberg mapper's least-squares fit does not converge here,
-          #   so `ex_params` stays None and both tests that read it fail.
-          #   nixpkgs already deselects `test_mean_field` on aarch64-linux for
-          #   this exact error; the fit is evidently sensitive to which BLAS it
-          #   finds, and x86_64 with our overlay is another such combination.
-          #
-          #   `pmg view` opens a viewer and takes the xdist worker down with it
-          #   when there is no display.  nixpkgs deselects the neighbouring
-          #   tests/cli/test_pmg_plot.py on darwin for the same reason.
-          #
-          # Node ids rather than bare names: `disabledTests` becomes a `-k`
-          # expression, and `test_get_str` and `test_write_file` are common
-          # enough in a suite this size to take unrelated tests with them.  An
-          # entry containing `::` is passed to pytest as `--deselect`, which is
-          # exact.
-          pymatgen = pself.pymatgen.overridePythonAttrs (old: {
-            disabled = false;
-            disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
-              "tests/io/lammps/test_data.py::TestLammpsData::test_get_str"
-              "tests/io/lammps/test_data.py::TestLammpsData::test_write_file"
-              "tests/io/lammps/test_data.py::TestCombinedData::test_get_str"
-              "tests/io/lammps/test_data.py::TestCombinedData::test_as_lammpsdata"
-              "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_compute_directionality_quality_criterion"
-              "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_visualization_directionality_criterion"
-              "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_mean_field"
-              "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_get_igraph"
-              "tests/cli/test_pmg.py::test_pmg_view"
-            ];
-
-            # A tenth failure that is not a deselect, because it is a flake
-            # rather than a broken test, and deselecting it would drop real
-            # coverage of van_arkel_triangle:
-            #
-            #   assert ax.get_title() == ""
-            #   E  AssertionError: assert 'Coordination numbers' == ''
-            #
-            # van_arkel_triangle sets no title.  It ends with `ax = plt.gca()`
-            # — pyplot's *current* axes, whatever that happens to be — and
-            # tests/analysis/chemenv/coordination_environments/test_structure_environments.py
-            # calls get_environments_figure, whose title defaults to
-            # "Coordination numbers", and never closes the figure.  When both
-            # land in one xdist worker in that order the assertion reads the
-            # leftover.  Which tests share a worker is a scheduling accident
-            # under xdist's default --dist load, so this appears and vanishes
-            # between runs; --numprocesses is $NIX_BUILD_CORES, and 128 workers
-            # make it likely enough to matter here and rare enough that nixpkgs
-            # has never had to deselect it.
-            #
-            # Retrying would not help, and pytest-rerunfailures is deliberately
-            # not the answer as it is for aiida-core: a rerun runs in the same
-            # process and finds the same stale figure.
-            #
-            # So give the test the clean state it assumes.  `plt` is already
-            # imported at the top of that file, and the second van_arkel_triangle
-            # call in the test only asserts isinstance, so nothing else moves.
-            postPatch = (old.postPatch or "") + ''
-              substituteInPlace tests/util/test_plotting.py \
-                --replace-fail \
-                  '        random_list = [("Fe", "C"), ("Ni", "F")]' \
-                  '        plt.close("all")
-                      random_list = [("Fe", "C"), ("Ni", "F")]'
-            '';
-          });
+          # Passed explicitly to the two packages that need it: aiida-core, and
+          # aiida-gaussian, which depends on pymatgen directly.
+          pymatgen = pymatgenFor pself;
 
           # nixpkgs' pythonMetadataCheckPhase — which compares a built wheel's
           # METADATA against the `version` its derivation declares — and the
@@ -483,6 +658,30 @@
           # checkInputs-only position because pself is the only thing that can
           # resolve its own aiida-core to the same derivation.
           qe-tools = pself.callPackage ../pkgs/qe-tools { };
+          sisl = pself.callPackage ../pkgs/sisl { };
+
+          # The node-graph stack, which aiida-workgraph, aiida-pythonjob and
+          # aiida-phonopy are built on.  node-graph-widget takes its frontend
+          # from `final.node-graph-widget-js` below rather than building it
+          # here: the bundle needs npm, and a fixed-output derivation is the
+          # only thing in Nix allowed to fetch a registry.
+          node-graph = pself.callPackage ../pkgs/node-graph { };
+          node-graph-widget = pself.callPackage ../pkgs/node-graph-widget {
+            inherit (final) node-graph-widget-js;
+          };
+
+          # aiida-restapi's stack.  graphene-file-upload is test-only — it is
+          # what starlette-graphene3's conftest imports — but it has to be a
+          # member here rather than a bare checkInput, because that is the only
+          # way a package set resolves it.
+          graphene-file-upload = pself.callPackage ../pkgs/graphene-file-upload { };
+          starlette-graphene3 = pself.callPackage ../pkgs/starlette-graphene3 { };
+
+          # aiida-firecrest's.  firecrest-streamer is not an optional extra;
+          # see ../pkgs/pyfirecrest/default.nix.
+          firecrest-streamer = pself.callPackage ../pkgs/firecrest-streamer { };
+          pyfirecrest = pself.callPackage ../pkgs/pyfirecrest { };
+          aiida-optimize = pself.callPackage ../pkgs/aiida-optimize { };
           aiida-pseudo = pself.callPackage ../pkgs/aiida-pseudo { };
           aiida-gaussian-datatypes = pself.callPackage ../pkgs/aiida-gaussian-datatypes { };
           cp2k-input-tools = pself.callPackage ../pkgs/cp2k-input-tools { };
@@ -568,7 +767,7 @@
             inherit (final) jq;
           };
 
-          # The six plugins.  Each finds its aiida-core through pself, so a
+          # The plugins.  Each finds its aiida-core through pself, so a
           # plugin and the core it extends are always the same derivation —
           # which is what makes entry-point discovery work when both land in one
           # python3.withPackages environment, the way
@@ -582,12 +781,33 @@
           # top-level `python3Packages.callPackage` would give it a *different*
           # aiida-core.  It therefore carries meta.broken on every path this repo
           # currently offers; see ../pkgs/aiida-gaussian/default.nix.
+          aiida-ase = pself.callPackage ../pkgs/aiida-ase { };
           aiida-cp2k = pself.callPackage ../pkgs/aiida-cp2k { };
           aiida-gaussian = pself.callPackage ../pkgs/aiida-gaussian { inherit pymatgen; };
+          aiida-gromacs = pself.callPackage ../pkgs/aiida-gromacs { };
+          # `final.lammps` is the program; `pself.lammps` is nixpkgs' Python
+          # binding of the same name, and pself wins.  Same trap, same fix, as
+          # aiida-core's `jq` above — see ../pkgs/aiida-lammps/default.nix for
+          # what the shadowed version costs.
+          aiida-lammps = pself.callPackage ../pkgs/aiida-lammps {
+            inherit pymatgen;
+            inherit (final) lammps;
+          };
+          aiida-nwchem = pself.callPackage ../pkgs/aiida-nwchem { inherit pymatgen; };
           aiida-octopus = pself.callPackage ../pkgs/aiida-octopus { };
           aiida-orca = pself.callPackage ../pkgs/aiida-orca { };
           aiida-psi4 = pself.callPackage ../pkgs/aiida-psi4 { };
           aiida-quantumespresso = pself.callPackage ../pkgs/aiida-quantumespresso { };
+          aiida-phonopy = pself.callPackage ../pkgs/aiida-phonopy { };
+          aiida-pythonjob = pself.callPackage ../pkgs/aiida-pythonjob { };
+          aiida-restapi = pself.callPackage ../pkgs/aiida-restapi { };
+          aiida-shell = pself.callPackage ../pkgs/aiida-shell { };
+          aiida-siesta = pself.callPackage ../pkgs/aiida-siesta { };
+          aiida-submission-controller = pself.callPackage ../pkgs/aiida-submission-controller { };
+          aiida-wannier90 = pself.callPackage ../pkgs/aiida-wannier90 { };
+          aiida-wannier90-workflows = pself.callPackage ../pkgs/aiida-wannier90-workflows { };
+          aiida-workgraph = pself.callPackage ../pkgs/aiida-workgraph { };
+          aiida-firecrest = pself.callPackage ../pkgs/aiida-firecrest { };
         }
       )
     ];
@@ -611,12 +831,26 @@
     # as `pkgs.aiida-cp2k`, not through a Python package set.
     inherit (final.python313Packages)
       aiida-core
+      aiida-ase
       aiida-cp2k
       aiida-gaussian
+      aiida-gromacs
+      aiida-lammps
+      aiida-nwchem
       aiida-octopus
       aiida-orca
       aiida-psi4
       aiida-quantumespresso
+      aiida-firecrest
+      aiida-phonopy
+      aiida-pythonjob
+      aiida-restapi
+      aiida-shell
+      aiida-siesta
+      aiida-submission-controller
+      aiida-wannier90
+      aiida-wannier90-workflows
+      aiida-workgraph
       ;
   };
 

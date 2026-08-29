@@ -9,24 +9,46 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 
 - the **QCArchive/QCFractal ecosystem** — Python packages (`qcportal`, `qcfractal`,
   `qcfractalcompute`, `qcarchivetesting`, `parsl`) plus two NixOS service modules.
-- the **AiiDA ecosystem** — `aiida-core`, six quantum chemistry plugins (`aiida-cp2k`,
-  `aiida-gaussian`, `aiida-orca`, `aiida-octopus`, `aiida-psi4`, `aiida-quantumespresso`), the
-  fifteen-odd dependencies of both that nixpkgs does not carry, and one NixOS service module.
+- the **AiiDA ecosystem** — `aiida-core`, twenty plugins, the thirty-odd dependencies of those
+  that nixpkgs does not carry, and one NixOS service module. Six wrap a quantum chemistry or
+  materials program (`aiida-cp2k`, `aiida-gaussian`, `aiida-orca`, `aiida-octopus`,
+  `aiida-psi4`, `aiida-quantumespresso`); six more wrap another simulation code (`aiida-ase`,
+  `aiida-gromacs`, `aiida-lammps`, `aiida-nwchem`, `aiida-siesta`, `aiida-wannier90`); two
+  build workflows on top of those (`aiida-phonopy`, `aiida-wannier90-workflows`); and six are
+  infrastructure rather than a wrapper — `aiida-shell`, which runs an arbitrary command under
+  provenance and so reaches the ~60 programs already in `pkgs.qchem.*` without a plugin each,
+  `aiida-pythonjob` and `aiida-workgraph`, which do the same for Python functions and for whole
+  graphs of them, `aiida-submission-controller`, `aiida-restapi`, and `aiida-firecrest`, whose
+  transport runs jobs through a FirecREST endpoint rather than over SSH.
   That module offers both of aiida-core's read-write storage plugins: `core.psql_dos` by
   default, and `core.sqlite_dos` — which needs no service at all — behind
   `services.aiida.storage.backend`.
   Together with QCArchive this is the bulk of the repo. It shares the `python313` pin with
   QCArchive and nothing else; the two overlays are separate so that a consumer can take one
   without the other's closure.
-- the **cheminformatics family** — `morfeus-ml`, `qmzyme`, `dbstep`, `aqme`, `ccreg`,
-  `digichem-core`, plus the nine dependencies of those that nixpkgs lacks (`mdanalysis`,
-  `griddataformats`, `mda-xdrlib`, `mrcfile`, `basis-set-exchange`, `colour-science`,
-  `configurables`, `openprattle`, `lwreg`). Two overlays rather than one, split on whether the
-  package needs cclib — see the cclib split below.
+- the **cheminformatics family** — `morfeus-ml`, `qmzyme`, `dough`, `dbstep`, `aqme`, `ccreg`,
+  `digichem-core`, `metallogen`, `molcat`, `xyzrender`, plus the dependencies of those that
+  nixpkgs lacks (`mdanalysis`, `griddataformats`, `mda-xdrlib`, `mrcfile`, `basis-set-exchange`,
+  `colour-science`, `configurables`, `openprattle`, `lwreg`, `xyzgraph`, `graphrc`). Two overlays
+  rather than one, split on whether the package needs cclib — see the cclib split below.
+  `graphrc` is the awkward one: a dependency that cclib forces to be a top-level attribute
+  anyway, so it is the sole member of `cclibDependencies` in `tests/cheminformatics`.
 - **dotdrop** — a standalone dotfile-manager CLI, not in nixpkgs. It shares nothing with the
   above and is deliberately kept separate: its own overlay, its own test subdirectory, and the
   default `python3` rather than the 3.13 pin.
 - **harmonwig** — likewise a standalone CLI.
+- the **chemtools family** — `wignernj`, `strainjedi`, `sella`, `molara`, `moltui`, and the
+  `chemfiles` C++ library with its Python binding, plus two dependencies that stay internal:
+  `pyrr` (which nixpkgs *removed*, so there is no attribute to fall back to) and the `trexio`
+  Python binding. These share no closure with each other or with anything above; they are one
+  overlay rather than several because each would otherwise be an overlay attribute holding a
+  single `callPackage`. `moltui` is a top-level attribute rather than a package-set member, like
+  dotdrop and harmonwig — see the table below. Two names in here collide with something else:
+  `chemfiles` (ours, C++ versus Python) and `trexio` (nixpkgs', C library versus Python), and
+  the second is the dangerous one.
+- the **materials family** — `custodian` and `fireworks` today, plus `mongomock-persistence`,
+  which is carried for fireworks' tests alone and is not re-exported. Its own overlay because it is
+  the seed of a much larger tree that is not yet reachable; see "Deferred packaging" below.
 
 ### The cclib split
 
@@ -70,6 +92,13 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Question | Read |
 |---|---|
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
+| Where does a `fetchFromGitHub` hash come from with no network and no daemon? | `scripts/offline-src-hash.sh` (the header comment), `just hash-src` |
+| Why is `sisl` pinned to a tag rather than main, and what did the extra commits break? | `pkgs/sisl/default.nix` (the note above `src`) |
+| Why is `node-graph` pinned to v0.6.5 exactly, one commit behind its main? | `pkgs/node-graph/default.nix` (the note above `src`) |
+| Why does `sisl` patch `cmake.verbose` at the tag it is pinned to? | `pkgs/sisl/default.nix` (`postPatch`) |
+| Why does one `aiida-workgraph` test gain a daemon fixture and another a longer timeout? | `pkgs/aiida-workgraph/default.nix` (the note above `postPatch`) |
+| Why are `aiida-phonopy`'s two workflow tests deselected when the rest of its suite runs? | `pkgs/aiida-phonopy/default.nix` (`disabledTestPaths`) |
+| Why is `aiida-phonopy`'s `phonopy~=4.0` relaxed, and what does 26.05's phonopy 3.5.1 still get wrong? | `pkgs/aiida-phonopy/default.nix` (`pythonRelaxDeps`) |
 | Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
 | Why `python313` and not `python3`? What is `meta.broken` protecting? | `pkgs/qcportal/default.nix` (`meta`), `default.nix` |
 | Why is Psi4 taken from a hand-pinned `nixpkgs-qchem`, and why not `nixos-qchem.packages.*`? | `flake.nix` (the `nixpkgs-qchem` input, and `qchemPkgs` in `perSystem`) |
@@ -101,6 +130,40 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does MDAnalysis run no tests, and why is that not `doCheck = false`? | `pkgs/mdanalysis/default.nix` (the note above `pythonImportsCheck`) |
 | Why does the AiiDA eval suite need a second, broken-allowing package set? | `tests/aiida/default.nix` (`brokenPkgs`) |
 | Why do eight packages come from a git tag rather than PyPI? | `pkgs/kiwipy/default.nix` (the `src` comment) |
+| Why does `aiida-shell` rewrite its conftest's broker to `core.zeromq`? | `pkgs/aiida-shell/default.nix` (`postPatch`) |
+| Why does `aiida-shell` need `which` when two of its three path rewrites are absolute? | `pkgs/aiida-shell/default.nix` (`nativeCheckInputs`) |
+| Why does the `aiida-shell` VM test run two jobs, and why does one of them exist only to be boring? | `tests/aiida/vm.nix` (`plugin-shell`) |
+| Why does that test put `which` and `xtb` on *both* `systemPackages` and `extraPackages`? | `tests/aiida/vm.nix` (the `environment.systemPackages` note in `plugin-shell`) |
+| Why is `gpaw` deliberately *not* a check input of `aiida-ase`? | `pkgs/aiida-ase/default.nix` (`pythonImportsCheck`) |
+| Why does `aiida-nwchem` take `ase`, `pymatgen`, `seekpath` and `spglib` as check inputs? | `pkgs/aiida-nwchem/default.nix` (`nativeCheckInputs`) |
+| Why does `aiida-nwchem` ask for two MPI ranks when its tests run one water molecule? | `pkgs/aiida-nwchem/default.nix` (`postPatch`) |
+| Why do `aiida-nwchem`'s tests lose their `system crystal` cell, and what did that cover? | `pkgs/aiida-nwchem/default.nix` (`postPatch`) |
+| Why is `node-graph-widget-js` a top-level attribute rather than a Python one, and who consumes it? | `overlays/default.nix` (the `node-graph-widget-js` binding), `pkgs/node-graph-widget/default.nix` (`preBuild`) |
+| Why does `node-graph-widget` copy a bundle in before hatchling runs, and what is `skip-if-exists`? | `pkgs/node-graph-widget/default.nix` (`preBuild`) |
+| Why does `node-graph-widget-js` patch a name and version into `package.json`, and why on one line? | `pkgs/node-graph-widget-js/default.nix` (`postPatch`) |
+| Why is `firecrest-streamer` built from a subdirectory of another project, and why is `asyncio` removed? | `pkgs/firecrest-streamer/default.nix` (`sourceRoot`, `pythonRemoveDeps`) |
+| Why does `pyfirecrest` need `firecrest-streamer` when nothing advertises it? | `pkgs/pyfirecrest/default.nix` (`dependencies`) |
+| Why is `graphene-file-upload` here at all, and why is its Flask half excluded? | `pkgs/graphene-file-upload/default.nix` (`disabledTestPaths`) |
+| Why does `starlette-graphene3` rewrite its build backend? | `pkgs/starlette-graphene3/default.nix` (`postPatch`) |
+| Why can `pythonRelaxDeps` not fix a `git+https` requirement, and what does instead? | `pkgs/aiida-restapi/default.nix` and `pkgs/aiida-wannier90-workflows/default.nix` (`postPatch`) |
+| What is the risk in relaxing `aiida-restapi`'s `lark~=0.11` to 1.3? | `pkgs/aiida-restapi/default.nix` (`pythonRelaxDeps`) |
+| Which two `aiida-restapi` endpoints are broken under starlette 1.x, and why is that not `meta.broken`? | `pkgs/aiida-restapi/default.nix` (`disabledTestPaths`) |
+| Why do three plugins create an AiiDA config in `preBuild`, when `HOME` and `AIIDA_PATH` are already set? | `pkgs/aiida-pythonjob/default.nix` (`preBuild`) |
+| Why does `aiida-optimize` patch the same two lines in two different files? | `pkgs/aiida-optimize/default.nix` (`postPatch`) |
+| Why does `pyfirecrest` run its tests from `tests/`? | `pkgs/pyfirecrest/default.nix` (`preCheck`) |
+| Why does `aiida-pythonjob` delete an `addopts` line rather than add IPython? | `pkgs/aiida-pythonjob/default.nix` (`postPatch`) |
+| Why does `aiida-workgraph` rewrite its broker and put `verdi` on the check PATH? | `pkgs/aiida-workgraph/default.nix` (`postPatch`, `preCheck`) |
+| Why is `aiida-firecrest` the one plugin here with `doCheck = false`? | `pkgs/aiida-firecrest/default.nix` (the note above `doCheck`) |
+| Why does `aiida-siesta` have three different names, and which one is the attribute? | `pkgs/aiida-siesta/default.nix` (the `pname` note) |
+| Why does `aiida-siesta` hand sisl back an `R` it just read, and what did the missing one cost? | `pkgs/aiida-siesta/default.nix` (the third and fourth notes above `postPatch`) |
+| Why does `aiida-gromacs` patch a build-system requirement, when `pythonRelaxDeps` exists? | `pkgs/aiida-gromacs/default.nix` (`postPatch`) |
+| Why does `aiida-gromacs` put `$out/bin` on the check PATH? | `pkgs/aiida-gromacs/default.nix` (`preCheck`) |
+| Why do `aiida-gromacs`' three metadynamics tests force `-ntmpi 1`, and what would a parallel one need? | `pkgs/aiida-gromacs/default.nix` (`postPatch`), `.scratch/nixpkgs-plumed-mpi.patch` |
+| Why is `aiida-lammps`' `jsonschema~=3.2` merely relaxed, four major versions on? | `pkgs/aiida-lammps/default.nix` (`pythonRelaxDeps`) |
+| Why does `aiida-lammps` pass `--lammps-exec lmp`? | `pkgs/aiida-lammps/default.nix` (`pytestFlags`) |
+| Why does `sisl` not fetch its one submodule? | `pkgs/sisl/default.nix` (`src`) |
+| Why does `sisl` set `dontUseCmakeConfigure` while still listing `cmake`? | `pkgs/sisl/default.nix` (`nativeBuildInputs`) |
+| Why is `aiida-optimize`'s license a two-entry list, and what is the GPLv3 mention about? | `pkgs/aiida-optimize/default.nix` (`meta.license`) |
 | Why is `pycifrw` carried here when nixpkgs has one, and when should it be deleted? | `pkgs/pycifrw/default.nix` (the header), `overlays/default.nix` (the `pycifrw` binding) |
 | Why are the two `mosquito` overrides guarded, and why does 26.05 not need them? | `overlays/default.nix` (the `hasMetadataCheck` binding in the `aiida` extension) |
 | Why do the two cp2k-\*-tools packages rewrite their build backend? | `pkgs/cp2k-output-tools/default.nix` (`postPatch`) |
@@ -153,6 +216,35 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `disk-objectstore` want `rsync` and `openssh` as check inputs? | `pkgs/disk-objectstore/default.nix` (`nativeCheckInputs`) |
 | Why is `profilehooks` here at all, and why does it keep upstream's `addopts`? | `pkgs/profilehooks/default.nix` |
 | Why does `pgsu` need `glibcLocalesUtf8` and a `LOCALE_ARCHIVE` export? | `pkgs/pgsu/default.nix` (`preCheck`) |
+| Why is the pymatgen interpreter lift a shared `pymatgenFor` function, and why must it never join a package set? | `overlays/default.nix` (the `pymatgenFor` binding at the top) |
+| Why does `pkgs.chemfiles` mean the C++ library while `python313Packages.chemfiles` means the binding? | `default.nix` (the `inherit (pkgs') chemfiles` note), `overlays/default.nix` (the `chemtools` callPackage) |
+| Why does `chemfiles-python` refuse to fetch its own submodule, and what does `postInstall` assert? | `pkgs/chemfiles-python/default.nix` (`src`, `postInstall`) |
+| Why does `chemfiles-python` run `unittest discover` instead of `pytestCheckHook`? | `pkgs/chemfiles-python/default.nix` (`checkPhase`) |
+| How does the chemfiles C++ suite get its test data with no network, and why `ctest` rather than a check target? | `pkgs/chemfiles/default.nix` (the note above `preConfigure`, and `checkPhase`) |
+| Why does `chemfiles-python` ask for chemfiles 0.11 when upstream's CMakeLists says 0.10? | `pkgs/chemfiles-python/default.nix` (`postPatch`) |
+| Why is `pyrr` carried here at all, and when should it be deleted? | `pkgs/pyrr/default.nix` (the header) |
+| What was pyrr's NumPy 2 incompatibility, actually? It is three defects, not one | `pkgs/pyrr/default.nix` (the note above `patches`), `pkgs/pyrr/numpy2.patch` |
+| Why does `molara` relax PySide6 with `pythonRelaxDeps` when `sella` had to patch its pin instead? | `pkgs/molara/default.nix` (`pythonRelaxDeps`), `pkgs/sella/default.nix` (`postPatch`) |
+| Why is the `trexio` Python binding built from a PyPI sdist rather than the git tag? | `pkgs/trexio/default.nix` (the `src` comment) |
+| Why does `trexio` restore one test file from GitHub, and where did its sdist hash come from? | `pkgs/trexio/default.nix` (the `testSrc` note) |
+| Why must the `trexio` binding never become a top-level attribute? | `overlays/default.nix` (the `trexio` binding in `chemtools`), `tests/chemtools/default.nix` (the trexio split) |
+| Why does `xyzgraph` live in `cheminformatics` when `graphrc` and `xyzrender` need cclib? | `overlays/default.nix` (the `xyzgraph` binding) |
+| Why is `graphrc` a top-level attribute *and* not re-exported? | `overlays/default.nix` (the `graphrc` binding), `tests/cheminformatics/default.nix` (`cclibDependencies`) |
+| Why does `xyzrender` need neither `vmol` nor `shelxfile`, which nixpkgs lacks? | `pkgs/xyzrender/default.nix` (`nativeCheckInputs`) |
+| Where do `metallogen`'s tests come from, when upstream ships none? | `pkgs/metallogen/tests/test_examples.py` (the module docstring), `pkgs/metallogen/default.nix` (the note above `preCheck`) |
+| Why does `wignernj` delete its own source directory before the check phase? | `pkgs/wignernj/default.nix` (`preCheck`) |
+| Why is `moltui` a top-level attribute rather than a `python313Packages` member? | `overlays/default.nix` (the `moltui` binding in `chemtools`), `tests/chemtools/default.nix` (`applicationPackages`) |
+| Why does `sella` derive `SETUPTOOLS_SCM_PRETEND_VERSION` from `version` instead of repeating it? | `pkgs/sella/default.nix` (the `env` note) |
+| Why does `custodian` take pymatgen as a *check* input, and why does that need the gate lifted? | `pkgs/custodian/default.nix` (`nativeCheckInputs`) |
+| Why does `sella` delete its own source directory before the check phase? | `pkgs/sella/default.nix` (the note above `preCheck`), `pkgs/wignernj/default.nix` (the same trap, silent) |
+| Why does `sella` set `HOME` when nothing in it writes to one? | `pkgs/sella/default.nix` (the note above `preBuild`) |
+| How do `fireworks`' database tests run with no MongoDB, and why not just deselect them? | `pkgs/fireworks/default.nix` (the `MONGOMOCK_SERVERSTORE_FILE` note above `preCheck`) |
+| Why is `mongomock-persistence` carried here, and why is it not a top-level attribute? | `pkgs/mongomock-persistence/default.nix` (the `src` comment), `tests/chemtools/default.nix` (`internalDependencies`) |
+| Why does `fireworks` need `igraph`, `graphviz` and `matplotlib` to test, and why is `mainProgram` `lpad`? | `pkgs/fireworks/default.nix` (`nativeCheckInputs`, `meta.mainProgram`) |
+| Why does `metallogen` set `doCheck = false` when `MetalloGen/test.py` exists? | `pkgs/metallogen/default.nix` (the `doCheck` note) |
+| Why does `molcat` install a top-level `src` module, and why is it marked unfree? | `pkgs/molcat/default.nix` (`pythonImportsCheck`, `meta.license`) |
+| Why is `molcat` absent from the flake's `packages` when the other cclib packages are there? | `flake.nix` (the note in the `cclibPkgs` override block) |
+| Why does the chemtools python-pin test compose *every* overlay when the cheminformatics one does not? | `tests/chemtools/default.nix` (the `fullyOverlaidPkgs` binding) |
 
 ### The sdist-has-no-tests trap
 
@@ -283,6 +375,30 @@ Note that `nixConfig.extra-substituters` is ignored unless the invoking user is 
 `trusted-users`. Without that, `nix flake check` silently builds Psi4 from source no matter how
 correct the pinning is — check for `warning: ignoring untrusted flake configuration setting`
 before blaming the derivation hashes.
+
+## Deferred packaging
+
+`wc/` holds upstream clones of the projects packaged here, and of several that are not yet.
+This section records why the remainder are not, so the survey does not have to be redone. All
+availability claims were probed against the locked nixpkgs with
+`nix-instantiate --eval --store dummy://` over `python313Packages`, `python3.pkgs` and the top
+level.
+
+**The materials-project chain** is gated on six shared dependencies nixpkgs lacks —
+`pymatgen-core`, `emmet-core`, `maggma`, `mp-pyrho`, `qtoolkit`, `mp-api` — plus a `pymatgen`
+bump from 2025.10.7, where consumers ask for `>=2026.x`. In dependency order it unlocks
+`jobflow` → `jobflow-remote`, `pymatgen-analysis-defects`, `matgl`, `matcalc`, `atomate2`,
+`quacc`. `overlays.materials` already exists for it.
+
+| Not packaged | Blocker |
+|---|---|
+| `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs |
+| `ShakeNBreak` | needs `doped` (missing, large) and `hiphive` (missing), on top of the chain above |
+| `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
+| `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
+| `fairchem` | 13-distribution monorepo, torch plus pretrained model weights |
+| `PsiDataViz` | uv workspace, never released, includes a React/TS frontend; only `packages/psidata` is plausible |
+| `crest` | Fortran/meson with vendored subprojects; not in nixpkgs. Feasible, just different work — `tblite` and `xtb` are already there to build against |
 
 ## Template leftovers
 

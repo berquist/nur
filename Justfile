@@ -149,6 +149,12 @@ aiida-eval-tests:
 cheminformatics-eval-tests:
     nix-build tests -A cheminformatics.all --no-out-link
 
+# chemtools and materials overlay evaluation tests only — fast, no VM, nothing
+# real built. This is where the chemfiles name split and the shared pymatgen
+# lift are asserted.
+chemtools-eval-tests:
+    nix-build tests -A chemtools.all --no-out-link
+
 # dotdrop integration tests. No VM, but these build the real package.
 dotdrop-tests:
     nix-build tests -A dotdrop.all --no-out-link
@@ -210,6 +216,14 @@ aiida-pollution-scan:
 # Every check that works without a nix-daemon.
 check-no-daemon:
     ./scripts/no-daemon-check.sh
+
+# Neither the network nor a daemon, so this works from inside the Claude Code
+# sandbox, where nix-prefetch-url cannot.  Prints the rev, the commit date the
+# `X.Y.Z-unstable-YYYY-MM-DD` version scheme needs, and the hash.
+
+# A fetchFromGitHub hash from a clone in wc/, e.g. `just hash-src wc/aiida/aiida-shell v0.9.0`.
+hash-src clone rev="HEAD":
+    ./scripts/offline-src-hash.sh {{ clone }} {{ rev }}
 
 # ---------------------------------------------------------------------------
 # Building

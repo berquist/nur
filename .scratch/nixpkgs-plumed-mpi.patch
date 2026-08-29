@@ -1,0 +1,104 @@
+From: Eric Berquist <eric.berquist@gmail.com>
+Subject: [PATCH] plumed: add enableMpi, so parallel PLUMED runs are possible
+
+plumed is built with `buildInputs = [ blas ]` and nothing else, so the
+library has no MPI support at all. Any PLUMED run on more than one rank
+therefore fails, and a GROMACS patched with it -- `gromacs.override
+{ enablePlumed = true; }` -- fails in whichever way the rank count picks:
+
+    $ gmx mdrun -s prod.tpr -plumed plumed.dat -ntmpi 2
+    Program:     gmx mdrun, version 2024.2-plumed_2.10.1
+    MPI rank:    0 (out of 2)
+    Unknown exception: (exception type: N4PLMD6Plumed14ExceptionErrorE)
+    (tools/Communicator.cpp:110) void PLMD::Communicator::Set_comm(...)
+    you are trying to use an MPI function, but PLUMED has been compiled
+    without MPI support
+
+Four rank counts, same 15270-atom system, same tpr and plumed.dat:
+
+    (default: 128 thread-MPI ranks)  exit 139  double free or corruption
+                                               (fasttop)
+    -ntmpi 1                         exit 0    HILLS, COLVAR, .gro written
+    -ntmpi 2                         exit 1    the message above
+    -ntmpi 4                         exit 1    the message above
+
+Only the serial run works. The default is the one that matters for a user
+who does not know to cap it: a thread-MPI gmx takes a rank per core, and
+the missing MPI support surfaces there as a crash rather than as the
+diagnostic, because 128 ranks throw at once.
+
+PLUMED is unusual in how it is told about MPI, and `--enable-mpi` is not
+it. From user-doc/Installation.md:
+
+    The flag `--enable-mpi` is perfectly valid but is not needed here.
+    Autoconf will check if a code containing MPI calls can be compiled,
+    and if so it will enable it. [...] Thus the correct way to enable MPI
+    is to pass to ./configure the name of a C++ compiler that implements
+    MPI using the CXX option.
+
+PLUMED's own CI does exactly that: .github/workflows/linuxWF.yml sets
+CC=mpicc and CXX=mpic++ for every `-mpi-` variant and passes no MPI flag
+to configure. So this sets the two compilers, and puts mpi in
+nativeBuildInputs so the wrappers are on PATH to be found.
+
+The serial branch gains `--disable-mpi`, which is not redundant. MPI
+search is on by default and searches `mpic++`/`mpicxx` before the plain
+compilers, so without it a serial plumed stays serial only for as long as
+no MPI wrapper appears in the build closure.
+
+Left off by default, so nothing that builds today changes. A parallel
+GROMACS then wants both halves:
+
+    gromacs.override {
+      enablePlumed = true;
+      enableMpi = true;
+      plumed = plumed.override { enableMpi = true; };
+    }
+
+Found through aiida-gromacs, whose three metadynamics tests drive
+`gmx mdrun -plumed` and currently have to force `-ntmpi 1` to run at all.
+
+---
+--- a/pkgs/by-name/pl/plumed/package.nix
++++ b/pkgs/by-name/pl/plumed/package.nix
+@@ -3,6 +3,8 @@
+   lib,
+   fetchFromGitHub,
+   blas,
++  mpi,
++  enableMpi ? false,
+ }:
+ 
+ assert !blas.isILP64;
+@@ -22,7 +24,30 @@
+     patchShebangs .
+   '';
+ 
+-  buildInputs = [ blas ];
++  # `mpic++` has to be on PATH for configure to use it, hence mpi in
++  # nativeBuildInputs as well as buildInputs.
++  nativeBuildInputs = lib.optionals enableMpi [ mpi ];
++
++  buildInputs = [ blas ] ++ lib.optionals enableMpi [ mpi ];
++
++  # PLUMED does not take `--enable-mpi` as the switch, unlike most autoconf
++  # projects.  user-doc/Installation.md: "The flag `--enable-mpi` is perfectly
++  # valid but is not needed here [...] the correct way to enable MPI is to pass
++  # to ./configure the name of a C++ compiler that implements MPI using the CXX
++  # option."  PLUMED's own CI agrees -- .github/workflows/linuxWF.yml sets
++  # CC=mpicc and CXX=mpic++ for its `-mpi-` variants and passes no flag.
++  #
++  # `--disable-mpi` on the other branch is not redundant: MPI search is on by
++  # default and looks for `mpic++`/`mpicxx` first, so a serial build stays
++  # serial only as long as no MPI wrapper wanders into the build closure.
++  configureFlags =
++    if enableMpi then
++      [
++        "CC=mpicc"
++        "CXX=mpic++"
++      ]
++    else
++      [ "--disable-mpi" ];
+ 
+   enableParallelBuilding = true;
+ 

@@ -375,7 +375,21 @@
                 ccreg
                 dbstep
                 digichem-core
+                metallogen
+                xyzrender
                 ;
+              # molcat is deliberately absent, for the same reason
+              # aiida-gaussian is: `nix flake check` forces every attribute of
+              # `packages`, and molcat has no licence at all — no LICENSE file,
+              # no metadata field — so ../pkgs/molcat marks it
+              # `lib.licenses.unfree` and nixpkgs refuses to evaluate it.
+              # Naming it here would take the whole check down with a
+              # "refusing to evaluate" throw.
+              #
+              # It stays reachable through legacyPackages and through
+              # python313Packages, neither of which flake check forces, so
+              # `nix build .#legacyPackages.x86_64-linux.molcat` still works for
+              # anyone who has set allowUnfree.
             };
 
           # -------------------------------------------------------------------
@@ -443,6 +457,9 @@
           # built, including the packages under test):
           #   nix build .#checks.x86_64-linux.eval-cheminformatics
           #
+          # chemtools/materials overlay evaluation tests (likewise stubbed):
+          #   nix build .#checks.x86_64-linux.eval-chemtools
+          #
           # dotdrop integration tests (no VM, but they build the real package):
           #   nix build .#checks.x86_64-linux.dotdrop
           #
@@ -450,12 +467,15 @@
           # and therefore cclib, and so exist only where NixOS-QChem does:
           #   nix build .#checks.x86_64-linux.harmonwig
           #
-          # AiiDA VM tests.  The first four need only nixpkgs; the CP2K plugin
-          # round trip additionally needs a CP2K, so it is x86_64-linux only:
+          # AiiDA VM tests.  The first six need only nixpkgs -- the aiida-shell
+          # one builds xtb, which is lib.platforms.linux like the VMs themselves.
+          # The CP2K plugin round trip additionally needs a CP2K, whose nixpkgs
+          # derivation is x86_64-linux only:
           #   nix build .#checks.x86_64-linux.vm-aiida-daemon-local-db
           #   nix build .#checks.x86_64-linux.vm-aiida-workchain-arithmetic
           #   nix build .#checks.x86_64-linux.vm-aiida-daemon-rabbitmq
           #   nix build .#checks.x86_64-linux.vm-aiida-daemon-sqlite
+          #   nix build .#checks.x86_64-linux.vm-aiida-plugin-shell
           #   nix build .#checks.x86_64-linux.vm-aiida-plugin-cp2k
           #
           # And aiida-core's own SSH transport suite, which needs a real sshd
@@ -497,6 +517,13 @@
             # it goes wrong.  See tests/cheminformatics/default.nix.
             eval-cheminformatics = tests.cheminformatics.all;
 
+            # The chemtools and materials overlays.  Same shape as the line
+            # above and for the same reason — the two failures worth catching
+            # here (a `chemfiles` that resolves to itself, a pymatgen repair
+            # that leaks into the package set) are both silent.  See
+            # tests/chemtools/default.nix.
+            eval-chemtools = tests.chemtools.all;
+
             # dotdrop integration tests — no VM, but they do build dotdrop and
             # run upstream's tests-ng scripts against the installed binary.
             dotdrop = tests.dotdrop.all;
@@ -511,6 +538,7 @@
             vm-aiida-daemon-rabbitmq = aiidaVmTests.daemon-rabbitmq;
             vm-aiida-daemon-sqlite = aiidaVmTests.daemon-sqlite;
             vm-aiida-transports-ssh = aiidaVmTests.transports-ssh;
+            vm-aiida-plugin-shell = aiidaVmTests.plugin-shell;
           }
           // lib.optionalAttrs (nwchem != null) {
             vm-compute-nwchem-singlepoint = vmTests.compute-nwchem-singlepoint;

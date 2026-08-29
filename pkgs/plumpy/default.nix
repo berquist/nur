@@ -90,12 +90,24 @@ buildPythonPackage rec {
   # straight through it.  The failure came back with the lock in place.  No lock
   # is the right answer to shared state that can be reached without threads.
   #
-  # So the state goes instead.  `spec` becomes a local, the flag moves onto that
-  # spec object, and cls._spec is assigned only once the spec is complete.  Two
-  # concurrent builders then each get their own spec and their own flag, both
-  # asserts pass, the last assignment to cls._spec wins, and no caller can
-  # observe a half-built spec.  That holds under threads, greenlets and asyncio
-  # alike, because there is nothing left to race on.
+  # So the *flag* goes instead.  `spec` becomes a local and the flag moves onto
+  # that spec object, so two concurrent builders each get their own flag and
+  # both asserts pass.  The last assignment to cls._spec wins, exactly as
+  # upstream.
+  #
+  # **cls._spec is still published before define() runs, and that is not an
+  # oversight.** Assigning it afterwards was tried, on the reasoning that no
+  # caller should be able to observe a half-built spec, and it broke plugins
+  # that read the spec they are in the middle of defining.  aiida-siesta's
+  # `BaseIterator.iteration_input` is the example — called from inside
+  # `define()`, its first line is
+  #
+  #     if name in cls._spec.inputs.ports:
+  #
+  # which is an AttributeError the moment `cls._spec` is not there yet.  That is
+  # ten of its tests, and it would be every user of that workchain too, not just
+  # the suite.  The half-built spec is part of the contract whether or not it
+  # ought to be, so the fix keeps it and takes only the shared flag away.
   #
   # `spec.__called` inside the Process body mangles to `spec._Process__called`,
   # in the assignment and in define() alike, so the two still agree.  It is
@@ -103,12 +115,31 @@ buildPythonPackage rec {
   # really does forget super() still gets the assertion and its message rather
   # than an AttributeError.
   #
-  # Upstream's `except Exception: del cls._spec; cls.__called = False; raise`
-  # goes with it.  It existed to undo a half-built publication that can no
-  # longer happen -- _spec is not assigned until the assert has passed -- and
-  # `del` on an attribute that was never set would raise on the way out.  That
-  # removes the property the aiida-core rerun comment leans on, so keep the
-  # pattern there as a backstop and expect it to stop firing.
+  # Upstream's `except Exception: del cls._spec; ...; raise` stays, minus the
+  # flag reset that no longer has anything to reset.  Dropping it was tried
+  # while cls._spec was being assigned late, where there was nothing to undo;
+  # once the spec is published before define() again there is, and plumpy's own
+  # suite says so:
+  #
+  #   tests/test_processes.py::TestProcess::test_raise_in_define
+  #   AssertionError: ValueError not raised
+  #
+  # That test calls `spec()` twice on a class whose define() raises, and
+  # requires the error both times.  Without the cleanup the first call leaves
+  # the half-built spec published, so the second returns it instead of raising.
+  # `del cls._spec` is safe here precisely because the assignment above always
+  # happened first.
+  #
+  # Three behaviours have to hold at once, and they are what this shape is
+  # tuned to: a define() that raises leaves no spec behind and raises again on
+  # the next call (plumpy's test_raise_in_define); a define() that reads
+  # `cls._spec` while building finds it (aiida-siesta's iteration_input); and a
+  # subclass that really does forget `super().define(spec)` still gets the
+  # assertion rather than an AttributeError.
+  #
+  # This keeps the property the aiida-core rerun comment leans on, so leave
+  # `--only-rerun Process.define...was.not.called` there as a backstop and
+  # expect it to stop firing.
   postPatch = ''
     substituteInPlace src/plumpy/processes.py \
       --replace-fail \
@@ -138,12 +169,16 @@ buildPythonPackage rec {
                     raise" \
         "            spec: ProcessSpec = cls._spec_class()  # type: ignore
                 spec.__called = False  # type: ignore
-                cls.define(spec)  # type: ignore
-                assert spec.__called, (  # type: ignore
-                    f'Process.define() was not called by {cls}\nHint: Did you forget to call the superclass method in '
-                    'your define? Try: super().define(spec)'
-                )
                 cls._spec = spec  # type: ignore
+                try:
+                    cls.define(spec)  # type: ignore
+                    assert spec.__called, (  # type: ignore
+                        f'Process.define() was not called by {cls}\nHint: Did you forget to call the superclass method in '
+                        'your define? Try: super().define(spec)'
+                    )
+                except Exception:
+                    del cls._spec  # type: ignore
+                    raise
                 return spec" \
       --replace-fail \
         "        cls.__called = True" \

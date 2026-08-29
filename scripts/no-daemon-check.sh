@@ -10,8 +10,8 @@
 # Runs four checks:
 #
 #   1. every eval test in tests/qcarchive/, tests/aiida/ and
-#      tests/cheminformatics/, reported PASS/FAIL without building — see
-#      eval_suites below
+#      tests/cheminformatics/ and tests/chemtools/, reported PASS/FAIL without
+#      building — see eval_suites below
 #   2. instantiation of every VM test in tests/qcarchive/vm.nix and
 #      tests/aiida/vm.nix
 #   3. instantiation of every test in tests/dotdrop/
@@ -130,7 +130,7 @@ psi4_stub='(import <nixpkgs> { }).runCommand "psi4-stub" { } "mkdir -p $out/bin 
 # Every suite whose check{} helper bakes the verdict into the derivation's
 # build command, which is what makes PASS/FAIL readable without a daemon.  A
 # suite that builds something real instead (tests/dotdrop) belongs further down.
-eval_suites=(qcarchive aiida cheminformatics)
+eval_suites=(qcarchive aiida cheminformatics chemtools)
 
 for suite in "${eval_suites[@]}"; do
     echo

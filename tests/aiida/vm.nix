@@ -1,12 +1,13 @@
 # tests/aiida/vm.nix
 #
 # VM-based integration tests for the AiiDA NixOS module.  These boot a real
-# NixOS VM, so the real aiida-core — and, for the plugin test, the real
-# aiida-cp2k and cp2k — have to be buildable.
+# NixOS VM, so the real aiida-core — and, for the two plugin tests, the real
+# aiida-cp2k and cp2k, and the real aiida-shell and xtb — have to be buildable.
 #
 #   nix build .#checks.x86_64-linux.vm-aiida-daemon-local-db
 #   just vm-test aiida-daemon-local-db
 #   just vm-test aiida-daemon-sqlite
+#   just vm-test aiida-plugin-shell
 #   $(nix-build tests/aiida/vm.nix -A daemon-local-db.driver)/bin/nixos-test-driver
 #
 # pkgs must arrive with the aiida overlay already applied, for the same reason
@@ -836,5 +837,216 @@ in
       )
       assert result == 19, f"expected 19, got {result}"
     '';
+  };
+
+  # ==========================================================================
+  # Test 7: aiida-shell — an arbitrary program run under provenance, with no
+  # plugin of its own.
+  #
+  # This is the one plugin here that is infrastructure rather than a wrapper:
+  # `launch_shell_job` builds the Code, the ShellJob and the provenance graph
+  # for any executable on the computer, which is what lets this repo reach the
+  # ~60 programs in `pkgs.qchem.*` without packaging a plugin for each.  The
+  # package's own checkPhase runs in a build sandbox with no daemon, so the
+  # submit-to-daemon path — the one an actual user takes — is untested until
+  # here.
+  #
+  # Two jobs in one boot, for the reason daemon-sqlite gives for doing two
+  # things at once: the boot costs far more than a second short job, and the
+  # pair separate two failures that would otherwise look identical.
+  #
+  #   1. `sort` over a file input, writing a file output.  Deterministic to
+  #      the byte and depends on nothing but coreutils, so it answers "does
+  #      aiida-shell work" on its own.
+  #   2. `xtb`, a real semiempirical quantum chemistry program that has no
+  #      AiiDA plugin anywhere.  This is the claim aiida-shell is carried for,
+  #      and nothing else in this repo demonstrates it.
+  #
+  # If 2 fails while 1 passes, the fault is xtb or its output format, not the
+  # plugin — which is the whole point of paying for the first job.
+  # ==========================================================================
+  plugin-shell = pkgs.testers.nixosTest {
+    name = "aiida-plugin-shell";
+
+    nodes.machine =
+      { ... }:
+      {
+        imports = [
+          minimalVM
+          aiidaModule
+        ];
+
+        # xtb is a Fortran closure and the semiempirical run wants more than
+        # the daemon alone, though nothing like CP2K's DFT.
+        virtualisation.memorySize = 3072; # MiB
+        virtualisation.diskSize = 8192; # MiB
+
+        # `which` and the programs are needed in *two* places, and they are not
+        # the same PATH.
+        #
+        # extraPackages reaches the daemon worker, which is what runs the job —
+        # the same mechanism plugin-cp2k uses for cp2k.
+        #
+        # systemPackages is for `launch_shell_job` itself.  With the default
+        # `resolve_command=True` it turns the command into an absolute path
+        # before submitting, by running `transport.exec_command_wait('which
+        # "xtb"')` (aiida_shell/launch.py, `prepare_code`).  That happens in the
+        # *submitting* interpreter — here, `verdi run` under the test driver —
+        # and LocalTransport runs it as `bash -l -c`, so it resolves against the
+        # login shell's PATH, which is the system profile and not the daemon
+        # unit's.  Without this the launch fails before a job is ever created:
+        #
+        #   ValueError: failed to determine the absolute path of the command
+        #
+        # Passing `resolve_command=False` would sidestep it, but then the test
+        # would stop covering the path every documented example takes.
+        environment.systemPackages = [
+          pkgs.which
+          pkgs.coreutils
+          pkgs.xtb
+        ];
+
+        services.aiida = {
+          enable = true;
+          plugins = [ pkgs.python313Packages.aiida-shell ];
+          extraPackages = [
+            pkgs.which
+            pkgs.xtb
+          ];
+        };
+      };
+
+    testScript =
+      let
+        # Deliberately out of order, and numeric rather than lexical, so that
+        # `sort -n` has something to prove: a lexical sort puts 10 before 9.
+        numbers = pkgs.writeText "numbers.txt" ''
+          10
+          2
+          33
+          4
+        '';
+
+        # Water at its experimental geometry.  Small enough that GFN2-xTB
+        # finishes in about a second.
+        structure = pkgs.writeText "water.xyz" ''
+          3
+
+          O   0.0000000   0.0000000   0.1173000
+          H   0.0000000   0.7572000  -0.4692000
+          H   0.0000000  -0.7572000  -0.4692000
+        '';
+
+        submitSort = pkgs.writeText "submit-shell-sort.py" ''
+          from aiida import orm
+          from aiida_shell import launch_shell_job
+
+          # `submit=True` returns ({}, node) rather than the results dict --
+          # the results cannot exist yet, since the daemon has not run the job.
+          _results, node = launch_shell_job(
+              "sort",
+              arguments=["-n", "-o", "sorted.txt", "{numbers}"],
+              nodes={"numbers": orm.SinglefileData(file="${numbers}")},
+              outputs=["sorted.txt"],
+              submit=True,
+          )
+          print(node.pk)
+        '';
+
+        # `redirect_stderr` is not decoration.  Without it this job finishes
+        # with exit code 410, ERROR_STDERR_NOT_EMPTY: aiida-shell's parser
+        # treats *any* output on stderr as a failure when the command itself
+        # exited zero (parsers/shell.py, `if stderr: return
+        # self.exit_code("ERROR_STDERR_NOT_EMPTY")`), and xtb writes its banner
+        # and timings there while exiting 0.  The process reaches FINISHED, so
+        # nothing crashes and nothing says "xtb failed" — the only sign is the
+        # exit code:
+        #
+        #   ShellJob<xtb@localhost>  ⏹ Finished [410]
+        #
+        # Setting the option makes ShellJob pass `join_files` to the scheduler,
+        # so the command runs as `> stdout 2>&1`: no stderr file is produced,
+        # the parser's FileNotFoundError branch leaves `stderr` empty, and the
+        # energy is in `outputs.stdout` no matter which stream xtb chose.
+        #
+        # This is the normal shape of a well-behaved CLI, not an xtb quirk, so
+        # anything else driven through aiida-shell here will want it too.
+        submitXtb = pkgs.writeText "submit-shell-xtb.py" ''
+          from aiida import orm
+          from aiida_shell import launch_shell_job
+
+          _results, node = launch_shell_job(
+              "xtb",
+              arguments=["{structure}", "--gfn", "2", "--sp"],
+              nodes={"structure": orm.SinglefileData(file="${structure}")},
+              metadata={"options": {"redirect_stderr": True}},
+              submit=True,
+          )
+          print(node.pk)
+        '';
+
+        # ShellParser.format_link_label rewrites every non-alphanumeric
+        # character to an underscore, so `sorted.txt` arrives as `sorted_txt`.
+        # Joined on commas because the poller reads a single line back.
+        checkSorted = checkProcess ''",".join(node.outputs.sorted_txt.get_content().split())'';
+
+        # xtb prints the energy on a line of its own, as
+        #
+        #   | TOTAL ENERGY               -5.070544440612 Eh   |
+        #
+        # Taking the first token on that line that parses as a number, rather
+        # than a fixed column, so a change to the box drawing or the units does
+        # not break this.  `stdout` is aiida-shell's default output node.
+        checkXtbEnergy = checkProcess ''
+          next(
+                  token
+                  for line in node.outputs.stdout.get_content().splitlines()
+                  if "TOTAL ENERGY" in line
+                  for token in line.split()
+                  if token.lstrip("-").replace(".", "", 1).isdigit()
+              )
+        '';
+      in
+      ''
+        machine.start()
+        machine.wait_for_unit("aiida-daemon.service")
+
+        # As in plugin-cp2k: an entry-point regression should fail here and say
+        # so, not fifteen minutes later as an unknown-entry-point error.
+        plugins = machine.succeed(${builtins.toJSON (asAiida "${verdi} plugin list aiida.calculations")})
+        assert "core.shell" in plugins, f"aiida-shell entry points not visible: {plugins}"
+
+        # ---- 1. sort: the plugin on its own, with no scientific code ------
+        pk = machine.succeed(${builtins.toJSON (runScript submitSort)}).strip().splitlines()[-1]
+        print(f"submitted ShellJob(sort) as {pk}")
+
+        ${awaitProcess checkSorted "pk"}
+
+        sorted_numbers = machine.succeed(
+            ${builtins.toJSON (runScript checkSorted)} + f" {pk}"
+        ).strip().splitlines()[-1]
+
+        # Numeric, so 10 comes after 4 and before 33.  Exact: this is coreutils
+        # sorting four integers, and there is nothing here to be tolerant of.
+        assert sorted_numbers == "2,4,10,33", f"expected 2,4,10,33, got {sorted_numbers}"
+
+        # ---- 2. xtb: a real program with no plugin ------------------------
+        pk = machine.succeed(${builtins.toJSON (runScript submitXtb)}).strip().splitlines()[-1]
+        print(f"submitted ShellJob(xtb) as {pk}")
+
+        ${awaitProcess checkXtbEnergy "pk"}
+
+        energy = float(
+            machine.succeed(
+                ${builtins.toJSON (runScript checkXtbEnergy)} + f" {pk}"
+            ).strip().splitlines()[-1]
+        )
+        print(f"GFN2-xTB total energy for H2O: {energy} Eh")
+
+        # About -5.07 Eh.  Bracketed the way plugin-cp2k brackets its own:
+        # loosely enough to survive an xtb version bump, tightly enough that a
+        # wrong molecule, method or unit would fail.
+        assert -6.0 < energy < -4.0, f"energy out of range: {energy}"
+      '';
   };
 }
