@@ -524,6 +524,165 @@ lib.fix (self: {
   );
 
   # ==========================================================================
+  # Storage backend
+  #
+  # The whole PostgreSQL half of the module hangs off one predicate, so the
+  # tests worth having are the ones that check it took everything with it.
+  # ==========================================================================
+
+  # PostgreSQL stays the default: `core.sqlite_dos` is opt-in, and an existing
+  # deployment that never heard of storage.backend must be untouched by this.
+  aiida-storage-psql-is-default = check "aiida-storage-psql-is-default" (
+    let
+      cfg = evalAiida { services.aiida.enable = true; };
+    in
+    lib.hasInfix "profile setup core.psql_dos" (initScript cfg)
+    && cfg.services.postgresql.enable
+    && cfg.services.aiida.database.createLocally
+  );
+
+  # The point of the option.  Not "PostgreSQL is unused" but "no part of the
+  # PostgreSQL wiring is present": no service, no setup unit, no ordering edge,
+  # no PGHOST.  Each of those is a separate `lib.optional` in the module, and
+  # any one of them left behind would start a database server nothing talks to.
+  aiida-storage-sqlite-no-postgres = check "aiida-storage-sqlite-no-postgres" (
+    let
+      cfg = evalAiida {
+        services.aiida = {
+          enable = true;
+          storage.backend = "core.sqlite_dos";
+        };
+      };
+      units = [
+        "aiida-init"
+        "aiida-storage-migrate"
+        "aiida-daemon"
+      ];
+    in
+    !cfg.services.postgresql.enable
+    && !(cfg.systemd.services ? aiida-postgresql-setup)
+    && lib.all (
+      unit:
+      !(builtins.elem "postgresql.target" cfg.systemd.services.${unit}.requires)
+      && !(builtins.elem "postgresql.target" cfg.systemd.services.${unit}.after)
+      && !(cfg.systemd.services.${unit}.environment ? PGHOST)
+    ) units
+  );
+
+  # `verdi profile setup` builds one subcommand per aiida.storage entry point
+  # out of that backend's CliModel, so the flag sets do not overlap: passing
+  # --database-hostname or --repository-uri to core.sqlite_dos is a click "no
+  # such option" error, and the first place it would show is aiida-init.service
+  # failing on a freshly deployed machine.  The negative half of this is the
+  # half that matters.
+  aiida-storage-sqlite-setup-script = check "aiida-storage-sqlite-setup-script" (
+    let
+      cfg = evalAiida {
+        services.aiida = {
+          enable = true;
+          storage.backend = "core.sqlite_dos";
+        };
+      };
+      s = initScript cfg;
+    in
+    lib.hasInfix "profile setup core.sqlite_dos" s
+    && lib.hasInfix "--filepath '/var/lib/aiida/.aiida/storage/main'" s
+    && !(lib.hasInfix "core.psql_dos" s)
+    && !(lib.hasInfix "--database-hostname" s)
+    && !(lib.hasInfix "--repository-uri" s)
+    # The password shell variable is inside the PostgreSQL branch too, so a
+    # sqlite profile never even reads one.
+    && !(lib.hasInfix "AIIDA_DB_PASSWORD" s)
+  );
+
+  # A storage directory outside stateDir has to be created — AiiDA only
+  # mkdirs where the service user can already write — and declared, because
+  # ProtectSystem = "strict" otherwise makes it read-only to the daemon that
+  # writes every node into it.
+  aiida-storage-sqlite-filepath-writable = check "aiida-storage-sqlite-filepath-writable" (
+    let
+      cfg = evalAiida {
+        services.aiida = {
+          enable = true;
+          storage.backend = "core.sqlite_dos";
+          storage.filepath = "/srv/aiida-storage";
+        };
+      };
+      s = initScript cfg;
+    in
+    lib.hasInfix "--filepath '/srv/aiida-storage'" s
+    && builtins.elem "/srv/aiida-storage" cfg.systemd.services.aiida-daemon.serviceConfig.ReadWritePaths
+    && builtins.elem "d '/srv/aiida-storage' 0700 'aiida' 'aiida' - -" cfg.systemd.tmpfiles.rules
+  );
+
+  # The inverse, and the one this suite did not catch the first time: a
+  # storage.filepath *under* stateDir must get no tmpfiles rule at all.
+  #
+  # Everything below ${stateDir}/.aiida is AiiDA's own tree —
+  # _create_instance_directories() makes `daemon` and four more at import time
+  # — and systemd-tmpfiles creates missing parents as root.  So a rule naming
+  # the default filepath makes `.aiida` root-owned, tmpfiles then refuses the
+  # "unsafe path transition" out of the aiida-owned stateDir and creates
+  # nothing, and every verdi in aiida-init.service dies on a permission error
+  # against `.aiida/daemon` that names neither the rule nor the backend.
+  # tests/aiida/vm.nix's daemon-sqlite is where that surfaced; this is where it
+  # costs a second instead of a VM boot.
+  aiida-storage-sqlite-default-filepath-untouched =
+    check "aiida-storage-sqlite-default-filepath-untouched"
+      (
+        let
+          cfg = evalAiida {
+            services.aiida = {
+              enable = true;
+              storage.backend = "core.sqlite_dos";
+            };
+          };
+        in
+        !(lib.any (lib.hasInfix ".aiida") cfg.systemd.tmpfiles.rules)
+      );
+
+  # Storage and broker are orthogonal in aiida-core — SqliteDosStorage touches
+  # nothing about process control — and they have to stay orthogonal here, so
+  # that the rabbitmq pinning step is not quietly lost to the psql branch.
+  aiida-storage-sqlite-keeps-broker = check "aiida-storage-sqlite-keeps-broker" (
+    let
+      cfg = evalAiida {
+        services.aiida = {
+          enable = true;
+          storage.backend = "core.sqlite_dos";
+          broker = {
+            backend = "core.rabbitmq";
+            createLocally = false;
+            host = "mq.example.com";
+          };
+        };
+      };
+      s = initScript cfg;
+    in
+    lib.hasInfix "--broker 'core.rabbitmq'" s
+    && lib.hasInfix "profile configure-broker core.rabbitmq" s
+    && lib.hasInfix "--broker-host 'mq.example.com'" s
+  );
+
+  # SQLite serialises writers, so extra workers contend rather than
+  # parallelise.  A warning and not an assertion: it is a working deployment,
+  # only a slow one, and the operator may well have meant it.
+  aiida-storage-sqlite-workers-warning = check "aiida-storage-sqlite-workers-warning" (
+    let
+      warnings =
+        workers:
+        (evalAiida {
+          services.aiida = {
+            enable = true;
+            storage.backend = "core.sqlite_dos";
+            inherit workers;
+          };
+        }).warnings;
+    in
+    warnings 4 != [ ] && warnings 1 == [ ]
+  );
+
+  # ==========================================================================
   # Storage migration
   # ==========================================================================
 
@@ -662,6 +821,23 @@ lib.fix (self: {
             enable = true;
             database.createLocally = false;
             database.host = "/run/postgresql";
+          };
+        }
+      ]);
+
+  # database.createLocally defaults to whether the backend is PostgreSQL, so
+  # this can only be reached by setting it explicitly — which is exactly the
+  # case worth catching, since it would start a PostgreSQL server, create a
+  # role and a database, and never connect to any of them.
+  aiida-assertion-sqlite-with-local-postgres =
+    assertFails "aiida-assertion-sqlite-with-local-postgres"
+      (nixosEval [
+        ../../nixos-modules/aiida.nix
+        {
+          services.aiida = {
+            enable = true;
+            storage.backend = "core.sqlite_dos";
+            database.createLocally = true;
           };
         }
       ]);

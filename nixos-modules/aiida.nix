@@ -1,8 +1,9 @@
 # nixos-modules/aiida.nix
 #
-# NixOS module for an AiiDA instance: a PostgreSQL-backed profile and the
-# `verdi` daemon that runs its processes.  Import this file directly, or
-# reference it as
+# NixOS module for an AiiDA instance: a profile and the `verdi` daemon that
+# runs its processes.  The profile is PostgreSQL-backed by default; see
+# services.aiida.storage.backend for the serviceless SQLite alternative.
+# Import this file directly, or reference it as
 #   inputs.nur.nixosModules.aiida
 # from your system flake.
 #
@@ -17,11 +18,24 @@
 let
   cfg = config.services.aiida;
 
+  # Which storage plugin backs the profile.  Everything PostgreSQL in this
+  # module hangs off usePostgres, and everything the SQLite backend needs off
+  # useSqlite; the two are exhaustive because storage.backend is an enum of
+  # exactly these two.
+  usePostgres = cfg.storage.backend == "core.psql_dos";
+  useSqlite = cfg.storage.backend == "core.sqlite_dos";
+
   # True when we should wire up a local PostgreSQL instance.  Mirrors the idiom
   # in ./qcfractal-server.nix, which took it from services.gitea: "/run/postgresql"
   # as the host value is the canonical signal that peer-authenticated local
   # PostgreSQL is intended.
-  localDB = cfg.enable && cfg.database.createLocally && cfg.database.host == "/run/postgresql";
+  #
+  # usePostgres comes first because this one predicate is what makes the whole
+  # PostgreSQL half of the module disappear under core.sqlite_dos: it gates
+  # services.postgresql, the aiida-postgresql-setup unit, and every
+  # postgresql.target ordering edge on the three units below.
+  localDB =
+    cfg.enable && usePostgres && cfg.database.createLocally && cfg.database.host == "/run/postgresql";
 
   localRabbit = cfg.broker.backend == "core.rabbitmq" && cfg.broker.createLocally;
 
@@ -126,33 +140,87 @@ let
   # /tmp to /run/postgresql, so an operator running `verdi` by hand reaches the
   # default cluster anyway.  Setting it explicitly is what keeps a non-default
   # database.host working.
-  socketEnvironment = lib.optionalAttrs hostIsSocketDir { PGHOST = cfg.database.host; };
+  #
+  # Gated on usePostgres as well, so that a core.sqlite_dos deployment carries
+  # no PGHOST on any unit.  With the defaults it would not anyway --
+  # database.createLocally is false there, which makes database.host
+  # "localhost" rather than a socket directory -- but saying so explicitly is
+  # what keeps that from depending on the interaction of two other defaults.
+  socketEnvironment = lib.optionalAttrs (usePostgres && hostIsSocketDir) {
+    PGHOST = cfg.database.host;
+  };
 
-  # `verdi profile setup core.psql_dos` both creates the profile and initialises
-  # the storage -- create_profile() calls storage_cls.initialise().  There is no
-  # separate schema-creation step the way qcfractal has `init-db`.
+  # The options every `verdi profile setup` subcommand shares, whichever storage
+  # plugin is named.  Split out so the two branches below differ only in what is
+  # genuinely backend-specific.
+  #
+  # A joined list rather than an indented string: the last entry ends in a
+  # single quote, and `'''` is how a Nix indented string escapes a literal `''`
+  # -- so writing this the obvious way swallows the string terminator and the
+  # file stops parsing several hundred lines later.
+  commonProfileOptions = lib.concatStringsSep " \\\n    " [
+    "--non-interactive"
+    "--profile-name '${cfg.profileName}'"
+    "--set-as-default"
+    "--email '${cfg.userEmail}'"
+    "--first-name '${cfg.firstName}'"
+    "--last-name '${cfg.lastName}'"
+    "--institution '${cfg.institution}'"
+    "--broker '${cfg.broker.backend}'"
+  ];
+
+  # The backend-specific half of the setup, and the only place the two storage
+  # plugins diverge: everything after this in the script -- configure-broker,
+  # `verdi config set`, the localhost computer -- is backend-agnostic.
+  #
+  # The psql_dos flags have no counterpart on the sqlite_dos subcommand and vice
+  # versa.  `verdi profile setup` builds one subcommand per aiida.storage entry
+  # point out of that class's CliModel (DynamicEntryPointCommandGroup in
+  # aiida/cmdline/groups/dynamic.py), so passing --database-hostname to
+  # core.sqlite_dos is a click "no such option" error rather than an ignored
+  # flag.  That is what the negative assertions in ../tests/aiida/default.nix
+  # are guarding.
+  profileSetup =
+    if usePostgres then
+      ''
+        ${dbPasswordSetup}
+
+        if ! ${verdi} profile show '${cfg.profileName}' >/dev/null 2>&1; then
+          ${verdi} profile setup core.psql_dos \
+            ${commonProfileOptions} \
+            --database-hostname '${profileHostname}' \
+            --database-port '${toString cfg.database.port}' \
+            --database-name '${cfg.database.name}' \
+            --database-username '${cfg.database.user}' \
+            --database-password "$AIIDA_DB_PASSWORD" \
+            --repository-uri 'file://${configDir}/repository/${cfg.profileName}'
+        fi
+      ''
+    else
+      ''
+        # --filepath is core.sqlite_dos's single backend option, and it is
+        # pinned rather than left out because SqliteDosStorage.CliModel defaults
+        # it to `<configDir>/repository/sqlite_dos_<uuid4>.hex` -- a fresh UUID
+        # per invocation, so the path would be neither predictable nor
+        # reproducible, and nothing else here could name it.
+        #
+        # SqliteDosStorage.initialise() refuses a filepath that exists and is
+        # *non-empty*, mkdir(parents=True, exist_ok=True)-ing it otherwise.  The
+        # tmpfiles rule below therefore creates it empty, which it accepts.
+        if ! ${verdi} profile show '${cfg.profileName}' >/dev/null 2>&1; then
+          ${verdi} profile setup core.sqlite_dos \
+            ${commonProfileOptions} \
+            --filepath '${cfg.storage.filepath}'
+        fi
+      '';
+
+  # `verdi profile setup` both creates the profile and initialises the storage
+  # -- create_profile() calls storage_cls.initialise().  There is no separate
+  # schema-creation step the way qcfractal has `init-db`, for either backend.
   setupScript = pkgs.writeShellScript "aiida-init" ''
     set -euo pipefail
 
-    ${dbPasswordSetup}
-
-    if ! ${verdi} profile show '${cfg.profileName}' >/dev/null 2>&1; then
-      ${verdi} profile setup core.psql_dos \
-        --non-interactive \
-        --profile-name '${cfg.profileName}' \
-        --set-as-default \
-        --email '${cfg.userEmail}' \
-        --first-name '${cfg.firstName}' \
-        --last-name '${cfg.lastName}' \
-        --institution '${cfg.institution}' \
-        --broker '${cfg.broker.backend}' \
-        --database-hostname '${profileHostname}' \
-        --database-port '${toString cfg.database.port}' \
-        --database-name '${cfg.database.name}' \
-        --database-username '${cfg.database.user}' \
-        --database-password "$AIIDA_DB_PASSWORD" \
-        --repository-uri 'file://${configDir}/repository/${cfg.profileName}'
-    fi
+    ${profileSetup}
 
     ${lib.optionalString (cfg.broker.backend == "core.rabbitmq") ''
       # Pin the connection parameters explicitly.  `profile setup --broker
@@ -568,22 +636,85 @@ in
       };
     };
 
+    storage = {
+      backend = lib.mkOption {
+        type = lib.types.enum [
+          "core.psql_dos"
+          "core.sqlite_dos"
+        ];
+        default = "core.psql_dos";
+        description = ''
+          AiiDA storage plugin backing the profile.
+
+          `core.psql_dos` (the default) keeps the provenance graph in
+          PostgreSQL and the file repository in a disk-objectstore container.
+          It is what upstream recommends for production, and the whole
+          {option}`services.aiida.database` group configures it.
+
+          `core.sqlite_dos` keeps both in one directory —
+          {option}`services.aiida.storage.filepath` — and requires no external
+          service at all.  Combined with the default `core.zeromq` broker that
+          gives a complete instance, daemon included, with nothing else
+          running.  The cost is SQLite's: concurrent writes are serialised, and
+          the QueryBuilder loses `has_key`/`contains` and
+          `get_creation_statistics`.  The whole
+          {option}`services.aiida.database` group is inert under it.
+
+          aiida-core's other two SQLite plugins are deliberately absent.
+          `core.sqlite_zip` is `read_only`, so it can hold an exported archive
+          but not a running profile, and `core.sqlite_temp` destroys its
+          storage when the backend is garbage collected.
+        '';
+      };
+
+      filepath = lib.mkOption {
+        type = lib.types.path;
+        default = "${configDir}/storage/${cfg.profileName}";
+        defaultText = lib.literalExpression ''
+          "''${config.services.aiida.stateDir}/.aiida/storage/''${config.services.aiida.profileName}"
+        '';
+        description = ''
+          Directory holding the `core.sqlite_dos` database and file repository.
+
+          Ignored by `core.psql_dos`, which puts its repository at
+          {file}`''${stateDir}/.aiida/repository/''${profileName}` and its
+          database in PostgreSQL.
+
+          The `.aiida` in the default is aiida-core's own: it appends that name
+          to every entry of `AIIDA_PATH`, so it is where the file repository
+          already lives for the PostgreSQL backend.  Keeping the two together
+          means one directory to back up whichever backend is in use.  Point
+          this elsewhere to put the provenance graph on a different filesystem;
+          the module creates it and grants the daemon write access wherever it
+          is.
+        '';
+      };
+    };
+
     database = {
 
       createLocally = lib.mkOption {
         type = lib.types.bool;
-        default = true;
+        default = usePostgres;
+        defaultText = lib.literalExpression ''
+          config.services.aiida.storage.backend == "core.psql_dos"
+        '';
         description = ''
           Manage a local PostgreSQL database for AiiDA.
 
-          When true (the default) the module enables {option}`services.postgresql`,
-          creates the role and the database, and connects over the local Unix
-          socket at {file}`/run/postgresql` using peer authentication, so no
-          password is needed.
+          When true (the default under `core.psql_dos`) the module enables
+          {option}`services.postgresql`, creates the role and the database, and
+          connects over the local Unix socket at {file}`/run/postgresql` using
+          peer authentication, so no password is needed.
 
           Set to false to use a PostgreSQL instance elsewhere, and supply
           {option}`database.host`, {option}`database.port`,
           {option}`database.user` and {option}`database.passwordFile`.
+
+          The default follows {option}`services.aiida.storage.backend`, so
+          selecting `core.sqlite_dos` is a one-line change rather than two, and
+          setting this to true alongside it is an evaluation error rather than
+          a PostgreSQL server nothing ever connects to.
         '';
       };
 
@@ -704,6 +835,16 @@ in
         '';
       }
       {
+        assertion = useSqlite -> !cfg.database.createLocally;
+        message = ''
+          services.aiida: storage.backend is "core.sqlite_dos", which needs no
+          database server, but database.createLocally is true.  That would
+          start PostgreSQL and create a role and a database that nothing ever
+          connects to.  Either drop database.createLocally, which defaults to
+          false under this backend, or set storage.backend to "core.psql_dos".
+        '';
+      }
+      {
         assertion = !cfg.database.createLocally -> (cfg.database.host != "/run/postgresql");
         message = ''
           services.aiida: database.host is "/run/postgresql" but
@@ -729,11 +870,23 @@ in
       }
     ];
 
-    warnings = lib.optional (cfg.broker.backend == "none") ''
-      services.aiida: broker.backend is "none", so the daemon cannot run and
-      aiida-daemon.service will not be started.  Processes can only be executed
-      with run() in the caller's own process; submit() is unavailable.
-    '';
+    warnings =
+      lib.optional (cfg.broker.backend == "none") ''
+        services.aiida: broker.backend is "none", so the daemon cannot run and
+        aiida-daemon.service will not be started.  Processes can only be executed
+        with run() in the caller's own process; submit() is unavailable.
+      ''
+      # A warning rather than an assertion: this is a working configuration,
+      # only a slow one.  SQLite serialises writers, so extra workers contend
+      # rather than parallelise -- aiida/engine/utils.py already swallows the
+      # OperationalError that contention raises on the process-state timestamp
+      # write, noting that with core.sqlite_dos "this is to be expected".
+      ++ lib.optional (useSqlite && cfg.workers > 1) ''
+        services.aiida: workers is ${toString cfg.workers} with storage.backend
+        "core.sqlite_dos".  SQLite serialises concurrent writes, so additional
+        daemon workers contend for the database rather than run in parallel.
+        Use "core.psql_dos" for a deployment that needs real concurrency.
+      '';
 
     users.users = lib.mkIf (cfg.user == "aiida") {
       aiida = {
@@ -797,7 +950,36 @@ in
     systemd.tmpfiles.rules = [
       "d '${cfg.stateDir}' 0700 '${cfg.user}' '${cfg.group}' - -"
     ]
-    ++ lib.optional cfg.setupLocalhost "d '${cfg.localhost.workDir}' 0700 '${cfg.user}' '${cfg.group}' - -";
+    ++ lib.optional cfg.setupLocalhost "d '${cfg.localhost.workDir}' 0700 '${cfg.user}' '${cfg.group}' - -"
+    # The SQLite storage directory, but *only* when it lies outside stateDir.
+    #
+    # SqliteDosStorage.initialise() mkdirs it with parents=True, which is
+    # enough wherever the service user can already write -- and everything
+    # under stateDir is such a place.  Outside it is not: a storage.filepath on
+    # another filesystem would fail with a bare PermissionError from inside
+    # aiida-init, so systemd creates that one.  Pre-creating is safe either
+    # way, since initialise() rejects a filepath that exists and is *non-empty*
+    # and an empty directory is precisely what it accepts.
+    #
+    # Restricting it to the outside case is not tidiness, it is required.
+    # systemd-tmpfiles creates missing parents as root, and everything under
+    # ${configDir} is a tree AiiDA writes into itself --
+    # _create_instance_directories() in aiida/manage/configuration/settings.py
+    # makes `daemon`, `daemon/log` and three more at *import* time, before any
+    # subcommand runs.  A rule naming the default filepath therefore creates
+    # `.aiida` as root on the way to it, and then:
+    #
+    #   systemd-tmpfiles: Detected unsafe path transition /var/lib/aiida
+    #   (owned by aiida) -> /var/lib/aiida/.aiida (owned by root)
+    #
+    # tmpfiles refuses the transition and stops, so the storage directory is
+    # not created either, and every `verdi` in the unit dies on
+    #   ConfigurationError: could not create the `/var/lib/aiida/.aiida/daemon`
+    #   configuration directory: [Errno 13] Permission denied
+    # -- an error that names neither this rule nor the storage backend.
+    ++ lib.optional (
+      useSqlite && !lib.hasPrefix "${cfg.stateDir}/" cfg.storage.filepath
+    ) "d '${cfg.storage.filepath}' 0700 '${cfg.user}' '${cfg.group}' - -";
 
     systemd.services.aiida-init = {
       description = "AiiDA - create the profile and its storage";
@@ -969,7 +1151,15 @@ in
         PrivateTmp = true;
         ProtectSystem = "strict";
         ProtectHome = true;
-        ReadWritePaths = [ cfg.stateDir ] ++ lib.optional cfg.setupLocalhost cfg.localhost.workDir;
+        # storage.filepath is redundant while it sits under stateDir, which is
+        # its default, and load-bearing the moment it does not: every write the
+        # daemon makes to the provenance graph goes there, and ProtectSystem
+        # would otherwise make the whole filesystem read-only to it.
+        ReadWritePaths = [
+          cfg.stateDir
+        ]
+        ++ lib.optional cfg.setupLocalhost cfg.localhost.workDir
+        ++ lib.optional useSqlite cfg.storage.filepath;
         RestrictAddressFamilies = [
           "AF_UNIX"
           "AF_INET"
