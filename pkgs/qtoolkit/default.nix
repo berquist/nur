@@ -10,12 +10,14 @@
   # optional-dependencies
   fabric,
   monty,
+  numpy,
 
   # tests
   pytestCheckHook,
   pytest-mock,
   pydantic,
   ruamel-yaml,
+  procps,
 }:
 
 buildPythonPackage (finalAttrs: {
@@ -70,7 +72,29 @@ buildPythonPackage (finalAttrs: {
 
   optional-dependencies = {
     remote = [ fabric ];
-    msonable = [ monty ];
+    # numpy is not upstream's, and not ours either — it belongs to monty, which
+    # imports it unconditionally at the top of json.py.  On nixos-26.05 that is
+    # monty 2025.3.3, whose nixpkgs derivation propagates only msgpack and
+    # ruamel-yaml, so anything reaching `from monty.json import MSONable` dies:
+    #
+    #   .../monty/json.py:24: in <module>
+    #       import numpy as np
+    #   E   ModuleNotFoundError: No module named 'numpy'
+    #
+    # Both unstable legs carry monty 2026.7.16, where nixpkgs *has* fixed this
+    # and numpy is propagated, so listing it here is a no-op there rather than
+    # a second copy.  Beside monty rather than in `dependencies` because that
+    # is the only thing that drags monty in — qtoolkit itself imports it lazily,
+    # inside QTKEnum._validate_monty, and a consumer without this extra never
+    # reaches the import at all.
+    #
+    # Delete it with the `monty` binding in ../../overlays/default.nix, which
+    # is version-guarded against the same 26.05/unstable split and carries the
+    # note about when 26.05 leaves ../../Justfile's `channels`.
+    msonable = [
+      monty
+      numpy
+    ];
   };
 
   # monty is an extra upstream, but the suite is not optional about it: the io
@@ -85,11 +109,25 @@ buildPythonPackage (finalAttrs: {
   # survives a round trip through a BaseModel.  It is guarded on monty being
   # importable but not on pydantic, so a set without it does not skip the test,
   # it fails it.
+  # procps for `ps`.  ShellIO is qtoolkit's own scheduler-less backend — it
+  # launches a job with `nohup bash …&` and then lists it by building a literal
+  # ["ps", …] argv in _get_jobs_list_cmd — so TestShellIO::test_get_jobs_list
+  # submits a real sleep and asks for it back.  Without it the build sees
+  #
+  #   CommandFailedError: command ps failed: stdout: .
+  #     stderr: …/bin/sh: line 1: ps: command not found
+  #
+  # A check input rather than a runtime dependency, and rewriting that "ps" to
+  # a store path would be wrong rather than merely heavy: ShellIO is also what
+  # runs over a fabric connection to another machine, where an absolute path
+  # into *this* closure names nothing.  It is the same call qtoolkit makes for
+  # qsub, sbatch and qstat, all of which it likewise leaves to PATH.
   nativeCheckInputs = [
     pytestCheckHook
     pytest-mock
     pydantic
     ruamel-yaml
+    procps
   ]
   ++ finalAttrs.passthru.optional-dependencies.msonable;
 

@@ -91,12 +91,17 @@ buildPythonPackage (finalAttrs: {
     #     import numpy as np
     #   ModuleNotFoundError: No module named 'numpy'
     #
-    # monty imports numpy unconditionally at the top of json.py, but nixpkgs
-    # lists numpy only in monty's `optional-dependencies`, never in
-    # `dependencies`.  So every monty dependant that reaches serialization has
-    # to carry numpy itself.  That is a latent nixpkgs bug rather than ours;
-    # repairing monty here instead would change it for every consumer of this
-    # overlay, which is a bigger blast radius than the problem deserves.
+    # monty imports numpy unconditionally at the top of json.py, and on
+    # nixos-26.05 — monty 2025.3.3 — the nixpkgs derivation propagates only
+    # msgpack and ruamel-yaml, so every monty dependant that reaches
+    # serialization has to carry numpy itself.  A latent nixpkgs bug rather
+    # than ours, and repairing monty here would change it for every consumer of
+    # this overlay, a bigger blast radius than the problem deserves.
+    #
+    # Both unstable legs carry monty 2026.7.16, where nixpkgs propagates numpy
+    # and this line is redundant.  Keeping it costs nothing — numpy is already
+    # in that closure — and it is what holds the 26.05 leg up.  ../qtoolkit
+    # needs the same thing beside its own monty, for the same reason.
     numpy
     pymongo
     python-dateutil
