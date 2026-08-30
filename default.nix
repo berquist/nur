@@ -148,6 +148,8 @@ in
     jobflow-remote
     maggma
     pubchempy
+    pymatgen
+    pymatgen-core
     qtoolkit
     ;
 }

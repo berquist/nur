@@ -46,10 +46,12 @@ buildPythonPackage rec {
   # modules do (vasp, qchem, cp2k, feff), so leaving it out would quietly
   # reduce the suite to the two top-level modules.
   #
-  # It needs the interpreter gate lifted — nixpkgs marks pymatgen
-  # `disabled = pythonAtLeast "3.13"`, so on this repo's 3.13 pin the attribute
-  # throws rather than builds.  That fix is shared with the aiida overlay; see
-  # the `pymatgenFor` binding in ../../overlays/default.nix.
+  # `pymatgen` here is the materials overlay's, which is upstream's post-split
+  # metapackage rather than nixpkgs' 2025.10.7 monolith — see
+  # ../pymatgen-core.  It used to be threaded in by hand from a `let` binding
+  # that lifted nixpkgs' `disabled = pythonAtLeast "3.13"` gate; the
+  # replacement carries no such gate, so the set's own attribute now resolves
+  # to the right thing on its own.
   nativeCheckInputs = [
     pytestCheckHook
     pymatgen

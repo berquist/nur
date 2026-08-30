@@ -16,27 +16,34 @@ let
   # It cannot simply be dropped instead.  aiida-quantumespresso depends on
   # `aiida_core[atomic_tools]`, pymatgen is in that extra, and the alternative —
   # pinning that whole family to 3.12 — would put a third interpreter in the
-  # repo for the sake of one nixpkgs annotation.  The materials overlay needs
-  # the same lift for a different reason: custodian's suite imports pymatgen in
-  # seven of its twenty-one modules.
+  # repo for the sake of one nixpkgs annotation.
   #
   # **A function returning a `let`-bindable value, never a member of a package
   # set.**  Injecting a repaired pymatgen into the set would silently change
   # pymatgen for everything else in a consumer's package set, which taking
-  # `overlays.aiida` or `overlays.materials` has no business doing.  Each
-  # caller binds it locally and passes it to the packages that need it — for
-  # aiida that is aiida-core and aiida-gaussian, for materials it is custodian.
-  # The aiida-overlay-pymatgen-override-is-local eval test asserts it stays
-  # invisible from outside.
+  # `overlays.aiida` has no business doing.  The caller binds it locally and
+  # passes it to the packages that need it — aiida-core, aiida-gaussian and
+  # aiida-nwchem.  The aiida-overlay-pymatgen-override-is-local eval test
+  # asserts it stays invisible from outside.
   #
-  # Shared rather than copied because the nine deselections and the plotting
-  # patch below are the expensive part to keep in step, and two overlays
-  # drifting apart on which pymatgen tests fail would be invisible until one of
-  # them broke.
+  # The materials overlay used to share this binding and no longer does.  It
+  # replaces `pymatgen` in the package set outright with upstream's post-split
+  # pair — see ../pkgs/pymatgen-core — which is a different kind of change and
+  # one that overlay exists to make.
   #
-  # Those nine are none of them ours and none of them about the interpreter.
-  # They are pymatgen 2025.10.7 against dependency versions newer than it was
-  # released for, in three groups:
+  # **Hence the version guard.**  ../default.nix composes every overlay, and the
+  # materials extension is applied after this one, so under a full composition
+  # `pself.pymatgen` is already the 2026 split: no interpreter gate to lift, and
+  # none of the files the repairs below name.  Applying them anyway is not a
+  # harmless no-op — the `--replace-fail` on tests/util/test_plotting.py aborts
+  # the build, because that module went to pymatgen-core along with the rest of
+  # `pymatgen.util`.  Keyed on the version rather than on the presence of some
+  # attribute, for the same reason the `monty` binding below is: nothing about
+  # the derivation says which shape its source has.
+  #
+  # The nine deselections are none of them ours and none of them about the
+  # interpreter.  They are pymatgen 2025.10.7 against dependency versions newer
+  # than it was released for, in three groups:
   #
   #   pandas 3.0 removed DataFrame.swapaxes, which is what made
   #   `np.array_split` return DataFrames rather than plain arrays.  The
@@ -56,60 +63,72 @@ let
   #   there is no display.  nixpkgs deselects the neighbouring
   #   tests/cli/test_pmg_plot.py on darwin for the same reason.
   #
+  # Upstream has since fixed the first two — `np.array_split` now has a note
+  # about it and `_angle_dot` runs everything through `np.real_if_close` — and
+  # rewrote `test_pmg_view` to monkeypatch `show`.  That is another way of
+  # saying the guard above is the whole future of this binding: these entries
+  # describe 2025.10.7 and nothing else.
+  #
   # Node ids rather than bare names: `disabledTests` becomes a `-k` expression,
   # and `test_get_str` and `test_write_file` are common enough in a suite this
   # size to take unrelated tests with them.  An entry containing `::` is passed
   # to pytest as `--deselect`, which is exact.
   pymatgenFor =
     pself:
-    pself.pymatgen.overridePythonAttrs (old: {
-      disabled = false;
-      disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
-        "tests/io/lammps/test_data.py::TestLammpsData::test_get_str"
-        "tests/io/lammps/test_data.py::TestLammpsData::test_write_file"
-        "tests/io/lammps/test_data.py::TestCombinedData::test_get_str"
-        "tests/io/lammps/test_data.py::TestCombinedData::test_as_lammpsdata"
-        "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_compute_directionality_quality_criterion"
-        "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_visualization_directionality_criterion"
-        "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_mean_field"
-        "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_get_igraph"
-        "tests/cli/test_pmg.py::test_pmg_view"
-      ];
+    if builtins.compareVersions pself.pymatgen.version "2026" >= 0 then
+      pself.pymatgen
+    else
+      pself.pymatgen.overridePythonAttrs (old: {
+        disabled = false;
+        disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
+          "tests/io/lammps/test_data.py::TestLammpsData::test_get_str"
+          "tests/io/lammps/test_data.py::TestLammpsData::test_write_file"
+          "tests/io/lammps/test_data.py::TestCombinedData::test_get_str"
+          "tests/io/lammps/test_data.py::TestCombinedData::test_as_lammpsdata"
+          "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_compute_directionality_quality_criterion"
+          "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_visualization_directionality_criterion"
+          "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_mean_field"
+          "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_get_igraph"
+          "tests/cli/test_pmg.py::test_pmg_view"
+        ];
 
-      # A tenth failure that is not a deselect, because it is a flake
-      # rather than a broken test, and deselecting it would drop real
-      # coverage of van_arkel_triangle:
-      #
-      #   assert ax.get_title() == ""
-      #   E  AssertionError: assert 'Coordination numbers' == ''
-      #
-      # van_arkel_triangle sets no title.  It ends with `ax = plt.gca()`
-      # — pyplot's *current* axes, whatever that happens to be — and
-      # tests/analysis/chemenv/coordination_environments/test_structure_environments.py
-      # calls get_environments_figure, whose title defaults to
-      # "Coordination numbers", and never closes the figure.  When both
-      # land in one xdist worker in that order the assertion reads the
-      # leftover.  Which tests share a worker is a scheduling accident
-      # under xdist's default --dist load, so this appears and vanishes
-      # between runs; --numprocesses is $NIX_BUILD_CORES, and 128 workers
-      # make it likely enough to matter here and rare enough that nixpkgs
-      # has never had to deselect it.
-      #
-      # Retrying would not help, and pytest-rerunfailures is deliberately
-      # not the answer as it is for aiida-core: a rerun runs in the same
-      # process and finds the same stale figure.
-      #
-      # So give the test the clean state it assumes.  `plt` is already
-      # imported at the top of that file, and the second van_arkel_triangle
-      # call in the test only asserts isinstance, so nothing else moves.
-      postPatch = (old.postPatch or "") + ''
-        substituteInPlace tests/util/test_plotting.py \
-          --replace-fail \
-            '        random_list = [("Fe", "C"), ("Ni", "F")]' \
-            '        plt.close("all")
-                random_list = [("Fe", "C"), ("Ni", "F")]'
-      '';
-    });
+        # A tenth failure that is not a deselect, because it is a flake
+        # rather than a broken test, and deselecting it would drop real
+        # coverage of van_arkel_triangle:
+        #
+        #   assert ax.get_title() == ""
+        #   E  AssertionError: assert 'Coordination numbers' == ''
+        #
+        # van_arkel_triangle sets no title.  It ends with `ax = plt.gca()`
+        # — pyplot's *current* axes, whatever that happens to be — and
+        # tests/analysis/chemenv/coordination_environments/test_structure_environments.py
+        # calls get_environments_figure, whose title defaults to
+        # "Coordination numbers", and never closes the figure.  When both
+        # land in one xdist worker in that order the assertion reads the
+        # leftover.  Which tests share a worker is a scheduling accident
+        # under xdist's default --dist load, so this appears and vanishes
+        # between runs; --numprocesses is $NIX_BUILD_CORES, and 128 workers
+        # make it likely enough to matter here and rare enough that nixpkgs
+        # has never had to deselect it.
+        #
+        # Retrying would not help, and pytest-rerunfailures is deliberately
+        # not the answer as it is for aiida-core: a rerun runs in the same
+        # process and finds the same stale figure.
+        #
+        # So give the test the clean state it assumes.  `plt` is already
+        # imported at the top of that file, and the second van_arkel_triangle
+        # call in the test only asserts isinstance, so nothing else moves.
+        #
+        # Upstream's split fixed this too, with an autouse fixture in
+        # tests/conftest.py that closes every figure a test leaves open.
+        postPatch = (old.postPatch or "") + ''
+          substituteInPlace tests/util/test_plotting.py \
+            --replace-fail \
+              '        random_list = [("Fe", "C"), ("Ni", "F")]' \
+              '        plt.close("all")
+                  random_list = [("Fe", "C"), ("Ni", "F")]'
+        '';
+      });
 in
 {
   # dotdrop is a standalone CLI application — nothing here imports it as a
@@ -376,59 +395,99 @@ in
       ;
   };
 
-  # The materials-project workflow family.  custodian, fireworks and qtoolkit
-  # today — leaves of a much larger tree (jobflow, jobflow-remote, atomate2,
-  # quacc, matgl, …) still gated on six packages nixpkgs lacks: maggma,
-  # emmet-core, pymatgen-core, mongomock-ng, pubchempy and
-  # pymatgen-io-validation.  qtoolkit was the seventh and is done; it went
-  # first because its `dependencies` list is empty, so it needed nothing else
-  # to land ahead of it.  See "Deferred packaging" in ../AGENTS.md for the rest,
-  # including why pymatgen-core is a replacement for nixpkgs' pymatgen rather
-  # than an addition beside it.
+  # The materials-project workflow family, and the overlay that owns upstream
+  # pymatgen's 2026 split.  custodian, fireworks, qtoolkit, maggma, jobflow,
+  # jobflow-remote and pubchempy today; what is still gated is emmet-core and
+  # pymatgen-io-validation, and through them atomate2 and quacc.  See "Deferred
+  # packaging" in ../AGENTS.md.
+  #
+  # **This overlay replaces `monty` and `pymatgen` in the package set.**  Both
+  # are nixpkgs packages and neither replacement can be kept local the way
+  # `pymatgenFor` keeps its repair local: an import path admits exactly one
+  # implementation, so a consumer who takes `overlays.materials` takes these.
+  # That is the deal the overlay exists to offer, and it is documented at each
+  # binding below and in the headers of ../pkgs/monty and ../pkgs/pymatgen-core.
   materials = final: prev: {
     pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
-      (
-        pself: _psuper:
-        let
-          # custodian's suite imports pymatgen in seven of its twenty-one
-          # modules, and nixpkgs gates pymatgen off 3.13.  Same lift the aiida
-          # overlay needs; see `pymatgenFor` at the top of this file, including
-          # why it stays a `let` binding rather than entering the package set.
-          pymatgen = pymatgenFor pself;
-        in
-        {
-          custodian = pself.callPackage ../pkgs/custodian { inherit pymatgen; };
-          fireworks = pself.callPackage ../pkgs/fireworks { };
-          qtoolkit = pself.callPackage ../pkgs/qtoolkit { };
+      (pself: psuper: {
+        # ../pkgs/pymatgen-core declares `monty>=2026.7.16`, and
+        # pythonRuntimeDepsCheckHook fails the wheel outright when that is not
+        # met — it is a hard floor rather than a pin to relax.  The nixpkgs
+        # pinned in ../flake.lock carries 2025.3.3.
+        #
+        # A backport, not a package of ours, so it is shaped like the `pycifrw`
+        # binding in the aiida overlay below: take the channel's monty whenever
+        # it is new enough, and fall back to ../pkgs/monty for the legs that are
+        # not.  Pinning ours unconditionally would *downgrade* a channel that
+        # has moved past 2026.7.16.
+        #
+        # `psuper`, not `pself`, or the fallback test would refer to itself.
+        # And a fresh `callPackage` rather than an override of `psuper.monty`:
+        # under a full composition the aiida overlay has already patched that
+        # derivation's 2025.3.3 source for pandas 3, so layering a version bump
+        # on top would abort on a `--replace-fail` whose literal the new source
+        # does not have.  Replacing the derivation outright sidesteps the
+        # ordering entirely.  When the channel *is* new enough, `psuper.monty`
+        # is that same aiida-patched derivation and the patch it carries is the
+        # bson fix ../pkgs/monty applies itself — the two branches agree.
+        monty =
+          if final.lib.versionAtLeast psuper.monty.version "2026.7.16" then
+            psuper.monty
+          else
+            pself.callPackage ../pkgs/monty { };
 
-          # maggma needs the pymatgen interpreter gate lifted for its `vasp`
-          # extra, the same lift custodian needs above.
-          maggma = pself.callPackage ../pkgs/maggma { inherit pymatgen; };
-          jobflow = pself.callPackage ../pkgs/jobflow { };
-          jobflow-remote = pself.callPackage ../pkgs/jobflow-remote { };
+        # Upstream split `pymatgen` in two in 2026.  Both halves are ours
+        # because nixpkgs is still on the pre-split monolith and the three
+        # cannot coexist — read ../pkgs/pymatgen-core's header for what that
+        # means and why the two halves do not collide with each other.
+        #
+        # This is what the `pymatgenFor` version guard at the top of this file
+        # is about: the aiida overlay is applied before this one, so under a
+        # full composition its `pself.pymatgen` is what these two lines
+        # produce, and none of its repairs apply to it.
+        pymatgen-core = pself.callPackage ../pkgs/pymatgen-core { };
+        pymatgen = pself.callPackage ../pkgs/pymatgen { };
 
-          # emmet-core's, and so far only emmet-core's — but re-exported rather
-          # than left internal like mongomock-ng, because emmet-core is blocked
-          # behind pymatgen-core and being a top-level attribute is the only
-          # thing that gets ci.nix to build this at all in the meantime.  It is
-          # a general-purpose PubChem client, not an implementation detail of
-          # the consumer that happens to want it.
-          pubchempy = pself.callPackage ../pkgs/pubchempy { };
+        # custodian and maggma both want pymatgen — custodian's suite imports
+        # it in seven of its twenty-one modules, maggma offers it as the
+        # `vasp` extra — and both used to be handed the `pymatgenFor` repair
+        # by hand.  Neither needs threading any more: the set's own attribute
+        # is now the one they want.
+        custodian = pself.callPackage ../pkgs/custodian { };
+        fireworks = pself.callPackage ../pkgs/fireworks { };
+        qtoolkit = pself.callPackage ../pkgs/qtoolkit { };
 
-          # Dependencies of one package each, so they stop here rather than
-          # being re-exported: they stay reachable as python313Packages.*
-          # without ci.nix building them in their own right.
-          #
-          # mongomock-persistence is fireworks'.  mongomock-ng is maggma's, and
-          # is a third distinct mongomock rather than a version of either — see
-          # the note at the top of ../pkgs/mongomock-ng.
-          mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
-          mongomock-ng = pself.callPackage ../pkgs/mongomock-ng { };
-        }
-      )
+        maggma = pself.callPackage ../pkgs/maggma { };
+        jobflow = pself.callPackage ../pkgs/jobflow { };
+        jobflow-remote = pself.callPackage ../pkgs/jobflow-remote { };
+
+        # emmet-core's, and so far only emmet-core's — but re-exported rather
+        # than left internal like mongomock-ng, because emmet-core is blocked
+        # behind pymatgen-io-validation and being a top-level attribute is the
+        # only thing that gets ci.nix to build this at all in the meantime.
+        # It is a general-purpose PubChem client, not an implementation detail
+        # of the consumer that happens to want it.
+        pubchempy = pself.callPackage ../pkgs/pubchempy { };
+
+        # Dependencies of one package each, so they stop here rather than
+        # being re-exported: they stay reachable as python313Packages.*
+        # without ci.nix building them in their own right.
+        #
+        # mongomock-persistence is fireworks'.  mongomock-ng is maggma's, and
+        # is a third distinct mongomock rather than a version of either — see
+        # the note at the top of ../pkgs/mongomock-ng.
+        mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
+        mongomock-ng = pself.callPackage ../pkgs/mongomock-ng { };
+      })
     ];
 
     # Keep in sync with the `inherit (py)` list in ../default.nix.
+    #
+    # `monty` is deliberately absent.  It is a replacement for a package
+    # nixpkgs already ships rather than something this repo publishes, and
+    # nixpkgs has no top-level `monty` to shadow; adding one would only give
+    # ci.nix another thing to build.  `pymatgen` and `pymatgen-core` are here
+    # for the opposite reason — they are the deliverable.
     inherit (final.python313Packages)
       custodian
       fireworks
@@ -436,6 +495,8 @@ in
       jobflow-remote
       maggma
       pubchempy
+      pymatgen
+      pymatgen-core
       qtoolkit
       ;
   };

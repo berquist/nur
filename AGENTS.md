@@ -46,9 +46,16 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   dotdrop and harmonwig — see the table below. Two names in here collide with something else:
   `chemfiles` (ours, C++ versus Python) and `trexio` (nixpkgs', C library versus Python), and
   the second is the dangerous one.
-- the **materials family** — `custodian` and `fireworks` today, plus `mongomock-persistence`,
-  which is carried for fireworks' tests alone and is not re-exported. Its own overlay because it is
-  the seed of a much larger tree that is not yet reachable; see "Deferred packaging" below.
+- the **materials family** — `custodian`, `fireworks`, `qtoolkit`, `maggma`, `jobflow`,
+  `jobflow-remote`, `pubchempy`, and both halves of upstream pymatgen's 2026 split,
+  `pymatgen-core` and `pymatgen`. Plus three carried for a dependant alone and not re-exported:
+  `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's) and `monty`, a backport that
+  exists only because `pymatgen-core` needs a version no channel here ships yet.
+  **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
+  upstream split it and the two layouts cannot coexist, and `monty` on the legs that are behind.
+  Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
+  itself and in `pkgs/pymatgen-core/default.nix`. See "Deferred packaging" below for what is
+  still gated.
 
 ### The cclib split
 
@@ -255,6 +262,17 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `fireworks` need `igraph`, `graphviz` and `matplotlib` to test, and why is `mainProgram` `lpad`? | `pkgs/fireworks/default.nix` (`nativeCheckInputs`, `meta.mainProgram`) |
 | Why does `metallogen` set `doCheck = false` when `MetalloGen/test.py` exists? | `pkgs/metallogen/default.nix` (the `doCheck` note) |
 | Why does the chemtools python-pin test compose *every* overlay when the cheminformatics one does not? | `tests/chemtools/default.nix` (the `fullyOverlaidPkgs` binding) |
+| Why does this repo carry a `monty` at all, and when should it go? | `pkgs/monty/default.nix` (the header), `overlays/default.nix` (the `monty` binding in the materials overlay) |
+| Why does `monty` need a bson fix its own test suite cannot see? | `pkgs/monty/default.nix` (`postPatch`), `overlays/default.nix` (the aiida overlay's `monty` binding) |
+| Why does `pymatgen-core` *replace* nixpkgs' `pymatgen` rather than sit beside it? | `pkgs/pymatgen-core/default.nix` (the header) |
+| How do two distributions share the `pymatgen/` tree without colliding in a `withPackages`? | `pkgs/pymatgen-core/default.nix` (the header) |
+| Why does `pymatgen-core` delete its own `pmg` console script? | `pkgs/pymatgen-core/default.nix` (`postPatch`) |
+| Why is `pymatgen` pinned to a commit when it has a tag, and why is the submodule left empty? | `pkgs/pymatgen/default.nix` (the `src` note) |
+| Why does the pure-Python half of pymatgen still need Cython to build? | `pkgs/pymatgen/default.nix` (`build-system`) |
+| Why does `pymatgen` feed setuptools-scm only the part of `version` before the dash? | `pkgs/pymatgen/default.nix` (the `env` note) |
+| Why do both pymatgen halves export `PMG_TEST_FILES_DIR`, and why a different directory each? | `pkgs/pymatgen-core/default.nix` and `pkgs/pymatgen/default.nix` (`preCheck`) |
+| Why is `pymatgenFor` keyed on a version now, and what aborts without the guard? | `overlays/default.nix` (`pymatgenFor`) |
+| Why does `tests/aiida`'s python-pin test compose every overlay too, when it did not have to before? | `tests/aiida/default.nix` (the `fullyOverlaidBrokenPkgs` binding) |
 
 ### The sdist-has-no-tests trap
 
@@ -394,11 +412,9 @@ availability claims were probed against the locked nixpkgs with
 `nix-instantiate --eval --store dummy://` over `python313Packages`, `python3.pkgs` and the top
 level.
 
-**The materials-project chain.** `jobflow`, `jobflow-remote` and `atomate2` are the near-term
-targets; `pymatgen-analysis-defects`, `matgl`, `matcalc` and `quacc` follow.
-`overlays.materials` already exists for it and `custodian` is already in it. Reading those three
-targets' own `pyproject.toml` against the locked nixpkgs, seven packages are missing, in two
-layers:
+**The materials-project chain.** `atomate2` is the near-term target;
+`pymatgen-analysis-defects`, `matgl`, `matcalc` and `quacc` follow. Reading those targets' own
+`pyproject.toml` against the locked nixpkgs, this is where the survey stands:
 
 | Missing | Wanted by | Status |
 |---|---|---|
@@ -406,25 +422,15 @@ layers:
 | `qtoolkit` | `jobflow-remote` — its only gap | **done**; `dependencies = []`, which is why it went first |
 | `mongomock-ng` | `maggma` | **done**; *not* the `mongomock` nixpkgs already has |
 | `pubchempy` | `emmet-core` | **done** |
-| `pymatgen-io-validation` | `emmet-core` | blocked on `pymatgen-core` |
+| `monty` | `pymatgen-core` | **done**; a backport, guarded — see `pkgs/monty/default.nix` |
+| `pymatgen-core` | everything left | **done**; the split below |
+| `pymatgen` | `emmet-core`, `atomate2` | **done**; the other half of the same split |
+| `pymatgen-io-validation` | `emmet-core` | next; needs `pymatgen-core>=2026.4.16`, which is now here |
 | `emmet-core` | `atomate2`, `quacc` | blocked on the above; `materialsproject/emmet`, in `emmet-core/` |
-| `pymatgen-core` | everything left | the split below, and the real blocker |
 
-`jobflow`, `jobflow-remote` and their four dependencies are packaged. What is left of the
-near-term set is `atomate2`, and it is gated on one thing.
-
-**`pymatgen-core` gates the whole remainder, and there is no way round it.** An earlier note here
-said `emmet-core` could be built against nixpkgs' pre-split pymatgen because it only asks for
-`pymatgen>=2024.6.10`. That is true of `emmet-core` itself and false of the chain:
-`emmet-core` → `pymatgen-io-validation` → `pymatgen-core>=2026.4.16`. Relaxing that pin onto
-nixpkgs' `pymatgen` does not work either — `pymatgen-io-validation` imports
-`MP24RelaxSet` from `pymatgen.io.vasp.sets`, which 2025.10.7 does not have.
-
-Two further things to expect when it is attempted. `pymatgen-core` wants `monty>=2026.7.16`,
-which **nixos-26.05 does not have** — it carries 2025.3.3, so that leg needs a monty override or
-`meta.broken`. And `pymatgen-io-validation` installs *into* the `pymatgen.io.validation`
-namespace, so it shares a package directory with `pymatgen-core` and will meet
-`pythonCatchConflictsPhase`.
+One thing to expect from `pymatgen-io-validation`: it installs *into* the
+`pymatgen.io.validation` namespace, so it shares a package directory with `pymatgen-core` and
+will meet `pythonCatchConflictsPhase`.
 
 Everything else resolves: `pydash`, `flufl-lock`, `schedule`, `networkx`, `supervisor`, `typer`,
 `rich`, `tomlkit`, `aioitertools`, `blake3`, `inflect`, `pyzmq`, `jsonlines`, `pandas` and the
@@ -434,16 +440,29 @@ rest are all in nixpkgs.
 said: `mp-pyrho` is wanted by `pymatgen-analysis-defects` alone, and `mp-api` only by `matcalc`
 and by atomate2's optional `mp` extra.
 
-**pymatgen has split, and that is the hard part — it is not a version bump.** Upstream `pymatgen`
-is now a metapackage whose sole dependency is `pymatgen-core>=2026.7.16`; the code moved to its
-own repository, which the `pymatgen` repo carries as a git submodule at `pymatgen-core/` (so a
-plain `--depth 1` clone leaves that directory empty — see `.gitmodules` there). nixpkgs is still
-on the pre-split monolith, 2025.10.7, which owns the same `pymatgen/…` import paths. So
-`pymatgen-core` cannot be added *beside* it: the two collide in any environment holding both, and
-atomate2 asks for both names at once. Packaging `pymatgen-core` means replacing nixpkgs'
-`pymatgen` with the two-package layout. The override point already exists — `pymatgenFor` in
-`overlays/default.nix` rebuilds `pymatgen` for an unrelated reason — but note the warning at that
-binding about never letting the result join a package set.
+**pymatgen split in 2026, and that was the hard part — it was not a version bump.** Upstream
+moved the core out into its own repository, which the `pymatgen` repo carries as a git submodule
+at `pymatgen-core/` (so a plain `--depth 1` clone leaves that directory empty — see `.gitmodules`
+there). "Metapackage" overstates what is left: `pymatgen`'s only *dependency* is
+`pymatgen-core>=2026.7.16`, but it still ships `analysis` (bar the three phase-diagram modules),
+`apps`, `cli`, `entries`, `ext` and `vis`. Both are PEP 420 namespace packages, neither ships
+`pymatgen/__init__.py`, and no installed file path appears in both — which is what lets
+`python3.withPackages` merge them.
+
+nixpkgs is still on the pre-split monolith, 2025.10.7, which owns the same `pymatgen/…` import
+paths, so `pymatgen-core` could not be added *beside* it. `overlays.materials` therefore
+**replaces** nixpkgs' `pymatgen` with the pair. That is exactly what `pymatgenFor`'s own note
+says must never happen to a *repair*, and the two are not in tension: `overlays.aiida` keeps its
+repair local so that a consumer who wants only AiiDA is left alone, while `overlays.materials`
+exists to deliver the split. `pymatgenFor` is now guarded on the version for that reason — under
+a full composition its `pself.pymatgen` is already the 2026 pair, and its deselections name test
+files that moved to the other half.
+
+Two consequences worth knowing before touching this. The AiiDA family now builds against
+pymatgen 2026 rather than 2025.10.7 whenever the overlays are composed, which
+`default.nix` always does — `aiida-core`, `aiida-nwchem` and `aiida-gaussian` are the three that
+take it. And `tests/aiida`'s `aiida-overlay-python-pin` had to start comparing against a fully
+composed set, for the same reason `tests/chemtools`' `chemtools-python-pin` already did.
 
 One further version conflict, unrelated to the split: `jobflow-remote` pins
 `pymongo >= 4.4, < 4.11` where nixpkgs has 4.17.0. (`atomate2` wants `<= 4.17.0`, satisfied

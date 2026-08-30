@@ -46,13 +46,14 @@ let
 
   # The *whole* stack, exactly as ../../default.nix composes it.
   #
-  # Needed because two of the packages here are not isolated from the other
-  # overlays: the aiida overlay patches `monty` in the package set — a pandas 3
-  # fix, see the `monty` binding in ../../overlays/default.nix — and both
-  # custodian and fireworks depend on monty.  So under a partial composition
-  # they are built against nixpkgs' monty and under the full one against the
-  # patched monty, and comparing the two says nothing about the interpreter pin
-  # that the test below is actually about.
+  # Needed because the packages here are not isolated from the other overlays.
+  # `monty` is the standing example: the aiida overlay patches whatever monty
+  # the channel supplies, the materials overlay replaces it outright, and both
+  # of them touch a package custodian, fireworks and pymatgen-core all depend
+  # on.  Which one wins is a function of how many overlays are composed, so a
+  # partial composition and the full one can produce different derivations for
+  # reasons that have nothing to do with the interpreter pin the test below is
+  # actually about.
   #
   # ../cheminformatics gets away with a partial composition only because none of
   # its packages happens to touch anything the other overlays repair.  That is a
@@ -62,6 +63,12 @@ let
   # Whether custodian instantiates at all.  See materials-custodian-evaluates
   # below for why this is a binding rather than an inline expression.
   custodianEvaluates = (builtins.tryEval overlaidPkgs.python313Packages.custodian.drvPath).success;
+
+  # The same shape for the two halves of the pymatgen split, and for the same
+  # statix reason: a bare select expression cannot be wrapped in parentheses,
+  # and these do not fit on one line inline.
+  pymatgenEvaluates = (builtins.tryEval overlaidPkgs.python313Packages.pymatgen.drvPath).success;
+  basePymatgenThrows = !(builtins.tryEval basePkgs.python313Packages.pymatgen.drvPath).success;
 
   # Everything the two overlays lift to the top level and ../../default.nix
   # re-exports through python313Packages.  Deliberately not derived from either
@@ -77,6 +84,8 @@ let
     "jobflow-remote"
     "maggma"
     "pubchempy"
+    "pymatgen"
+    "pymatgen-core"
     "qtoolkit"
   ];
 
@@ -92,11 +101,19 @@ let
 
   # Carried for a dependant rather than for their own sake, so they must stay
   # reachable through python313Packages and stay *out* of the top level, or
-  # ci.nix builds each of them in its own right.  The materials overlay's only
-  # one today: fireworks needs it to test its database code without a database.
+  # ci.nix builds each of them in its own right.  fireworks needs
+  # mongomock-persistence to test its database code without a database, and
+  # maggma needs mongomock-ng.
+  #
+  # `monty` is the odd one: it is a *replacement* for a package nixpkgs already
+  # ships rather than something missing from it, carried only because
+  # pymatgen-core's floor is newer than any channel here — see ../../pkgs/monty.
+  # nixpkgs has no top-level `monty` either, so lifting one would invent an
+  # attribute rather than shadow one.
   internalDependencies = [
     "mongomock-persistence"
     "mongomock-ng"
+    "monty"
     "pyrr"
   ];
 
@@ -212,24 +229,43 @@ lib.fix (self: {
   );
 
   # ==========================================================================
-  # The shared pymatgen lift
+  # The pymatgen split
   # ==========================================================================
 
-  # `pymatgenFor` repairs pymatgen for the aiida and materials overlays, and it
-  # must stay a `let` binding: injecting it into the package set would silently
-  # change pymatgen for everything else in a consumer's set.  nixpkgs gates
-  # pymatgen off 3.13 with `disabled = pythonAtLeast "3.13"`, and a gated
-  # package throws on instantiation — so the set's own attribute still refusing
-  # to evaluate is the evidence that the repair stayed local.
+  # This overlay *replaces* nixpkgs' pymatgen, which is the one thing
+  # ../aiida's mirror test asserts must never happen there.  The two are not in
+  # tension: `overlays.aiida` keeps its repair in a `let` binding precisely so
+  # that a consumer who wants only AiiDA is left alone, while
+  # `overlays.materials` exists to deliver upstream's post-split pair and
+  # cannot do that without taking the name.
   #
-  # The mirror of aiida-overlay-pymatgen-override-is-local in ../aiida, for the
-  # second consumer of the same binding, and deliberately spelled the same way.
-  materials-pymatgen-override-is-local = check "materials-pymatgen-override-is-local" (
-    !(builtins.tryEval overlaidPkgs.python313Packages.pymatgen.drvPath).success
+  # nixpkgs gates its pymatgen off 3.13 with `disabled = pythonAtLeast "3.13"`,
+  # and a gated package throws on instantiation rather than merely failing to
+  # build.  So the base set throwing and the overlaid set evaluating is exactly
+  # the evidence that the replacement happened — the inverse of what
+  # aiida-overlay-pymatgen-override-is-local asserts.
+  materials-pymatgen-replaces-nixpkgs = check "materials-pymatgen-replaces-nixpkgs" (
+    basePymatgenThrows && pymatgenEvaluates
   );
 
-  # ...while custodian, which needs it lifted, still evaluates.  Without the
-  # shared binding this throws rather than fails.
+  # ...and what replaced it is the two-package layout rather than a newer
+  # monolith.  If pymatgen ever stops depending on pymatgen-core, the halves
+  # have been merged again somewhere and every note about the split is stale.
+  materials-pymatgen-is-the-split = check "materials-pymatgen-is-the-split" (
+    lib.elem overlaidPkgs.python313Packages.pymatgen-core overlaidPkgs.python313Packages.pymatgen.propagatedBuildInputs
+  );
+
+  # pymatgen-core's floor, asserted rather than assumed.  It is the reason
+  # ../../pkgs/monty exists, and the assertion is written as the constraint
+  # rather than as an equality so that it keeps passing — and the package
+  # becomes deletable — the day a channel ships something new enough.
+  materials-monty-satisfies-pymatgen-core = check "materials-monty-satisfies-pymatgen-core" (
+    lib.versionAtLeast overlaidPkgs.python313Packages.monty.version "2026.7.16"
+  );
+
+  # custodian takes pymatgen as a check input and is the package that first
+  # needed the gate lifted, so it is the canary for the replacement being
+  # usable rather than merely present.
   #
   # Bound in the `let` above rather than inline: statix rejects parentheses
   # around a bare select expression, and without them the assertion does not fit

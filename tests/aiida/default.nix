@@ -108,6 +108,22 @@ let
 
   brokenOverlaidPkgs = brokenPkgs.extend (import ../../overlays).aiida;
 
+  # The *whole* stack, exactly as ../../default.nix composes it, and the set
+  # aiida-overlay-python-pin below has to compare against.
+  #
+  # `overlays.aiida` alone is not what ../../default.nix builds.  The materials
+  # overlay replaces `monty` and `pymatgen` in the package set — see its header
+  # in ../../overlays/default.nix — and both are in aiida-core's closure, so an
+  # aiida package built under a partial composition is a different derivation
+  # from the same package built under the full one.  That is by design and says
+  # nothing about the interpreter pin, which is what the test is for.
+  #
+  # The mirror of `fullyOverlaidPkgs` in ../chemtools, which spells out the same
+  # trap from the other side.
+  fullyOverlaidBrokenPkgs = brokenPkgs.extend (
+    lib.composeManyExtensions (builtins.attrValues (import ../../overlays))
+  );
+
   # Everything the aiida overlay lifts to the top level of pkgs and
   # ../../default.nix re-exports.  Deliberately not derived from either file:
   # the point of the two tests below is that three hand-written lists — this
@@ -191,11 +207,16 @@ lib.fix (self: {
   # two to agree.  If they drift, `nix-build -A aiida-core` and pkgs.aiida-core
   # silently become different derivations and every consumer builds the closure
   # twice.
+  #
+  # Against fullyOverlaidBrokenPkgs rather than brokenOverlaidPkgs, for the
+  # reason given at that binding: ../../default.nix composes every overlay, so
+  # this has to as well, or it compares two differently-built aiida-cores and
+  # fails for a reason that has nothing to do with the pin.
   aiida-overlay-python-pin = check "aiida-overlay-python-pin" (
     let
       nur = import ../../default.nix { pkgs = brokenPkgs; };
     in
-    lib.all (name: nur ? ${name} && nur.${name} == brokenOverlaidPkgs.${name}) exportedPackages
+    lib.all (name: nur ? ${name} && nur.${name} == fullyOverlaidBrokenPkgs.${name}) exportedPackages
   );
 
   # The module invokes the package through a withPackages environment, but
