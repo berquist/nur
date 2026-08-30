@@ -348,21 +348,25 @@
 
           # Flake-style packages (derivations only, filtered).
           #
-          # The five cclib-dependent packages are replaced rather than
+          # The seven cclib-dependent packages are replaced rather than
           # inherited: the ones in nurAttrs come from the bare ./overlays and
           # carry meta.broken because ./overlays cannot reach the cclib flake
           # input.  These are the working ones.  `nix build .#dbstep` therefore
           # succeeds while `nix-build -A dbstep` does not, which is the same
           # split the Psi4-backed VM checks already live with.
           #
-          # aiida-gaussian is the one cclib dependant *not* replaced here; see
-          # the cclibPkgs binding above for why.
+          # Three cclib dependants are *not* replaced here, for three different
+          # reasons.  aiida-gaussian cannot be — see the cclibPkgs binding above.
+          # qmzyme does not need to be: its cclib use is test-only and lazy, so
+          # it is not meta.broken and the inherited one works.  And graphrc is
+          # not in nurAttrs at all, ../default.nix having deliberately declined
+          # to re-export it, so there is nothing here to override.
           #
           # Broken derivations are filtered out rather than left to fail.
           # `nix flake check` forces every member of `packages`, and forcing a
           # meta.broken derivation throws — so leaving `aiida-gaussian` in would
-          # take the whole check down, and so would the four below on any system
-          # where cclibPkgs is null.  They stay reachable through
+          # take the whole check down, and so would the seven below on any
+          # system where cclibPkgs is null.  They stay reachable through
           # legacyPackages, which flake check does not force, and which answers
           # with nixpkgs' own "marked as broken" message rather than an
           # attribute-not-found.

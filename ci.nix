@@ -31,6 +31,31 @@ let
     || n == "flakeModules"
     || n == "python313Packages";
   isDerivation = p: isAttrs p && p ? type && p.type == "derivation";
+
+  # Two halves, and the second one is not what it looks like.
+  #
+  # `meta.broken` is the ordinary case.  The licence half is the same mechanism
+  # wearing a different message:
+  #
+  #   error: Refusing to evaluate package '...' because it has an unfree license
+  #
+  # That is an *evaluation* error, not a build failure.  `cacheOutputs` is what
+  # `just ci-build` forces, nothing in the Justfile or .github/workflows sets
+  # allowUnfree, and `--keep-going` has no bearing on eval.  So one unfree
+  # attribute does not cost one package — it costs the whole cache-population
+  # build, unattempted.  flake.nix's `packages` block declines to name such an
+  # attribute for exactly the same reason.
+  #
+  # Since molcat was removed this half matches nothing: every top-level
+  # attribute of ./default.nix is free.  It stays as a guard rather than going
+  # as dead code because the input recurs — molcat was an unremarkable academic
+  # log parser published with no LICENSE file at all, and `lib.licenses.unfree`
+  # is the accurate spelling of that.
+  #
+  # Its reach is narrow, though, and worth knowing before relying on it: this
+  # reads the licence of top-level attributes of ./default.nix and nothing else.
+  # An unfree *dependency* throws just the same and is not caught here, and
+  # neither the VM tests nor `just ci-eval` come through this file at all.
   isBuildable =
     p:
     let

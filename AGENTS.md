@@ -27,7 +27,7 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   QCArchive and nothing else; the two overlays are separate so that a consumer can take one
   without the other's closure.
 - the **cheminformatics family** — `morfeus-ml`, `qmzyme`, `dough`, `dbstep`, `aqme`, `ccreg`,
-  `digichem-core`, `metallogen`, `molcat`, `xyzrender`, plus the dependencies of those that
+  `digichem-core`, `metallogen`, `xyzrender`, plus the dependencies of those that
   nixpkgs lacks (`mdanalysis`, `griddataformats`, `mda-xdrlib`, `mrcfile`, `basis-set-exchange`,
   `colour-science`, `configurables`, `openprattle`, `lwreg`, `xyzgraph`, `graphrc`). Two overlays
   rather than one, split on whether the package needs cclib — see the cclib split below.
@@ -54,20 +54,25 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 
 cclib is in neither nixpkgs nor NixOS-QChem and upstream ships its own flake, so that is where it
 comes from. `overlays/` holds plain `final: prev:` functions and is imported **without flakes** by
-`default.nix`, `overlay.nix` and `ci.nix`, so it cannot reach a flake input. Six packages need
-cclib and each takes it as a defaulted `cclib ? null` argument:
+`default.nix`, `overlay.nix` and `ci.nix`, so it cannot reach a flake input. Ten packages need
+cclib and each takes it as a defaulted `cclib ? null` argument. `rg -l 'cclib \? null' pkgs/` is
+the list; keep this table in step with it:
 
 | Package | Where it lives | Buildable through |
 |---|---|---|
 | `harmonwig` | `overlays.harmonwig` | the flake only |
-| `dbstep`, `aqme`, `ccreg`, `digichem-core` | `overlays.cheminformatics-cclib` | the flake only |
+| `dbstep`, `aqme`, `ccreg`, `digichem-core`, `metallogen`, `xyzrender` | `overlays.cheminformatics-cclib` | the flake only |
+| `graphrc` | `overlays.cheminformatics-cclib` | the flake only, and never a NUR attribute — see below |
 | `aiida-gaussian` | `overlays.aiida` | **neither**, today |
 | `qmzyme` | `overlays.cheminformatics` | both — its cclib use is test-only and lazy |
 
-The first five are `meta.broken` on the NUR path and replaced in `flake.nix`'s `packages` by the
-ones from `cclibPkgs`. `aiida-gaussian` is broken everywhere: a plugin must come from the same
-package set as its `aiida-core`, and putting the `aiida` overlay into `cclibPkgs` would rebuild
-that whole closure against NixOS-QChem's nixpkgs rather than ours.
+The first seven are `meta.broken` on the NUR path and replaced in `flake.nix`'s `packages` by the
+ones from `cclibPkgs`. `graphrc` carries the same `broken = cclib == null;` but is not in that
+override, because `default.nix` never re-exports it — it reaches the flake through
+`legacyPackages` and `python313Packages` alone. `qmzyme` is the one dependant with no
+`meta.broken` at all; it skips a test instead. And `aiida-gaussian` is broken everywhere: a plugin
+must come from the same package set as its `aiida-core`, and putting the `aiida` overlay into
+`cclibPkgs` would rebuild that whole closure against NixOS-QChem's nixpkgs rather than ours.
 
 Note that cclib's overlay overrides the **top-level `python3` attribute** and nothing else, so
 `final.python3.pkgs` is the only set that has it. Two traps follow, and both are silent — a
@@ -107,6 +112,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is a QC program built for another Python an eval error rather than one that is quietly skipped? | `nixos-modules/qcfractal-compute.nix` (the first entry in `assertions`) |
 | Why three systemd units on the server, and why is `upgrade-db` manual by default? | `nixos-modules/qcfractal-server.nix` |
 | Why no `nix-build-uncached`, and what breaks between CppNix and Lix? | `Justfile` (the note above `ci-build`) |
+| Why does `ci.nix` filter on `meta.license.free` when nothing here is unfree any more? | `ci.nix` (the note above `isBuildable`) |
 | Why is `repeated_keys` disabled? Why does the whitespace hook skip `*.patch`? | `statix.toml`, `flake.nix` |
 | Why does `qcfractalcompute` carry a patch? Why is `parsl` built from the sdist? | the respective `pkgs/*/default.nix` |
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
@@ -245,8 +251,6 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `mongomock-persistence` carried here, and why is it not a top-level attribute? | `pkgs/mongomock-persistence/default.nix` (the `src` comment), `tests/chemtools/default.nix` (`internalDependencies`) |
 | Why does `fireworks` need `igraph`, `graphviz` and `matplotlib` to test, and why is `mainProgram` `lpad`? | `pkgs/fireworks/default.nix` (`nativeCheckInputs`, `meta.mainProgram`) |
 | Why does `metallogen` set `doCheck = false` when `MetalloGen/test.py` exists? | `pkgs/metallogen/default.nix` (the `doCheck` note) |
-| Why does `molcat` install a top-level `src` module, and why is it marked unfree? | `pkgs/molcat/default.nix` (`pythonImportsCheck`, `meta.license`) |
-| Why is `molcat` absent from the flake's `packages` when the other cclib packages are there? | `flake.nix` (the note in the `cclibPkgs` override block) |
 | Why does the chemtools python-pin test compose *every* overlay when the cheminformatics one does not? | `tests/chemtools/default.nix` (the `fullyOverlaidPkgs` binding) |
 
 ### The sdist-has-no-tests trap
