@@ -86,6 +86,36 @@ buildPythonPackage (finalAttrs: {
   # See ../../overlays/default.nix (the `monty` binding in the aiida overlay)
   # for the full reasoning; this is the same substitution, applied at the
   # source rather than through an override.
+  # The second hunk is the mirror image of the pandas problem the aiida
+  # overlay's pre-2026.7.16 branch describes, and it lands on the one leg that
+  # builds this file.
+  #
+  # `_check_type` matches on `f"{cls.__module__}.{cls.__qualname__}"` over the
+  # MRO, and pandas 3.0 decorates DataFrame and Series with
+  # `@set_module("pandas")` where pandas 2 does not.  So the qualified name is
+  # "pandas.DataFrame" under 3 and "pandas.core.frame.DataFrame" under 2.
+  # 2026.7.16's rewrite handles both -- `PandasHandler._DF_QUALNAMES` and
+  # `_SERIES_QUALNAMES` are two-spelling tuples -- so the *library* is correct
+  # either way and nothing needs patching there.  Its test module was not
+  # updated to match: `TestCheckType::test_pandas` asserts the pandas 3
+  # spelling alone and fails under pandas 2 with
+  #
+  #     assert _check_type(df, "pandas.DataFrame")
+  #     E  AssertionError: assert False
+  #
+  # This is not an occasional failure.  ../../overlays/default.nix builds this
+  # derivation only where the channel's own monty is older than 2026.7.16,
+  # which today is nixos-26.05 alone, and that is exactly the leg carrying
+  # pandas 2.3.3 -- the two unstable legs take the channel's monty and are
+  # already on pandas 3.0.4.  So the test as shipped can never pass anywhere
+  # this file is used.
+  #
+  # Given the tuples the library defines, the assertions get the same tuples
+  # rather than the other spelling: true under either pandas, and testing what
+  # `PandasHandler` actually calls instead of one spelling of it.  That is the
+  # same reasoning, and the same shape, as the older branch in
+  # ../../overlays/default.nix -- which is worth keeping in step, since it is
+  # the code that replaces this file when 26.05 leaves the matrix.
   postPatch = ''
     substituteInPlace src/monty/json.py \
       --replace-fail \
@@ -93,6 +123,12 @@ buildPythonPackage (finalAttrs: {
         '        if bson is None:
                 raise ImportError("bson is not installed")
             if d["@class"] == "ObjectId":'
+
+    substituteInPlace tests/test_json.py \
+      --replace-fail 'assert _check_type(df, "pandas.DataFrame")' \
+                     'assert _check_type(df, ("pandas.core.frame.DataFrame", "pandas.DataFrame"))' \
+      --replace-fail 'assert _check_type(series, "pandas.Series")' \
+                     'assert _check_type(series, ("pandas.core.series.Series", "pandas.Series"))'
   '';
 
   # pyproject.toml carries a literal `version`, so setuptools-scm does no

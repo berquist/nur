@@ -151,6 +151,37 @@ buildPythonPackage (finalAttrs: {
     uncertainties
   ];
 
+  # Two floors that only the nixos-26.05 leg misses, and both by a hair:
+  #
+  #     Checking runtime dependencies for pymatgen_core-2026.8.13-*.whl
+  #       - lxml>=6.1.0 not satisfied by version 6.0.2
+  #       - tqdm>=4.67.3 not satisfied by version 4.67.1
+  #
+  # pythonRuntimeDepsCheckHook fails the wheel there, before a single test
+  # runs.  The two unstable legs carry lxml 6.1.1 and tqdm 4.68.4 and are
+  # unaffected, so this is the same 26.05-only shape as ../monty -- and unlike
+  # ../monty's `monty>=2026.7.16`, these two really are relaxable.
+  #
+  # What upstream actually uses of either is old, ordinary API.  All of the
+  # lxml is in `io/vasp/outputs.py`, the one module that imports it, and it
+  # reaches for exactly three names -- `etree.iterparse` (with `events=` and
+  # `tag=`), `etree.XMLSyntaxError`, and `etree.Element` as a type annotation.
+  # tqdm is a progress bar in five modules: construction, `disable=`, `desc=`,
+  # `unit=`, `total=`, `.update()` and `.close()`.  Nothing there postdates
+  # lxml 6 or tqdm 4.60, let alone the two patch releases between 4.67.1 and
+  # 4.67.3, so the floors read as "whatever was current when the pin was last
+  # touched" rather than as a feature requirement.
+  #
+  # Relaxed unconditionally rather than guarded on the channel's version: the
+  # rewrite only drops the declared floor from the wheel's metadata, and where
+  # the channel is already new enough the installed version satisfies it
+  # anyway, so a guard would buy nothing but eval complexity.  Drop both once
+  # 26.05 leaves ../../Justfile's `channels`.
+  pythonRelaxDeps = [
+    "lxml"
+    "tqdm"
+  ];
+
   # `vis` is deliberately absent, unlike nixpkgs' pymatgen: `pymatgen.vis` and
   # its vtk requirement went to ../pymatgen with the rest of the front end.
   #
@@ -191,6 +222,20 @@ buildPythonPackage (finalAttrs: {
   ++ finalAttrs.passthru.optional-dependencies.numba
   ++ finalAttrs.passthru.optional-dependencies.symmetry
   ++ finalAttrs.passthru.optional-dependencies.optional;
+
+  # HOME in preBuild rather than preCheck, the same reasoning as ../aiida-core
+  # and ../pymatgen: matplotlib creates $HOME/.config/matplotlib on import, and
+  # the default /homeless-shelter is not writable, so `pythonImportsCheck` -- a
+  # different phase, running before the tests -- prints
+  #
+  #     mkdir -p failed for path /homeless-shelter/.config/matplotlib
+  #
+  # and falls back to a temporary cache.  genericBuild runs every phase in one
+  # shell, so exporting it once, early, covers the import check and the suite
+  # both.
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+  '';
 
   # `pymatgen.util.testing` resolves TEST_FILES_DIR relative to the *installed*
   # package -- `f"{ROOT}/../test-files"` -- which points into $out, where the

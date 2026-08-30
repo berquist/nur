@@ -84,7 +84,32 @@ let
     check name (!result.success);
 
   # Real (unstubbed) package set, for the overlay contract tests below.
-  overlaidPkgs = pkgs.extend (import ../../overlays).aiida;
+  #
+  # Re-imported from `pkgs.path` rather than extending the caller's `pkgs`, for
+  # the same reason `brokenPkgs` below is, and it is load-bearing here: the
+  # caller's set may *already* carry every overlay this repo has.
+  # ../../flake.nix passes `pkgs'`, which is nixpkgs with all of ../../overlays
+  # applied, so `pkgs.extend overlays.aiida` would be a full composition with
+  # the aiida overlay applied a second time — not the aiida overlay on its own.
+  #
+  # The two tests below are contracts for that one overlay, and
+  # aiida-overlay-pymatgen-override-is-local is meaningless against a full
+  # composition: `overlays.materials` replaces pymatgen with the 2026 split
+  # deliberately, so `python313Packages.pymatgen` is buildable there no matter
+  # how local the aiida overlay's repair is.  It reported that as a leak.
+  #
+  # This is why the failure showed up in `just check` and not `just tests`:
+  # ../default.nix passes an un-overlaid `<nixpkgs>`, where nixpkgs' own
+  # pymatgen is still the 2025.10.7 monolith behind its `pythonAtLeast "3.13"`
+  # gate, so the assertion held by accident.  The same trap as
+  # `fullyOverlaidBrokenPkgs` below, from the other direction: that binding
+  # needs the full composition, this one needs none of it.
+  pristinePkgs = import pkgs.path {
+    inherit (pkgs.stdenv.hostPlatform) system;
+    inherit (pkgs) config;
+  };
+
+  overlaidPkgs = pristinePkgs.extend (import ../../overlays).aiida;
 
   # The same, but with broken packages allowed.  aiida-gaussian carries
   # meta.broken on every path this repo offers — its cclib comes from a flake
