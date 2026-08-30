@@ -407,6 +407,14 @@ in
           jobflow = pself.callPackage ../pkgs/jobflow { };
           jobflow-remote = pself.callPackage ../pkgs/jobflow-remote { };
 
+          # emmet-core's, and so far only emmet-core's — but re-exported rather
+          # than left internal like mongomock-ng, because emmet-core is blocked
+          # behind pymatgen-core and being a top-level attribute is the only
+          # thing that gets ci.nix to build this at all in the meantime.  It is
+          # a general-purpose PubChem client, not an implementation detail of
+          # the consumer that happens to want it.
+          pubchempy = pself.callPackage ../pkgs/pubchempy { };
+
           # Dependencies of one package each, so they stop here rather than
           # being re-exported: they stay reachable as python313Packages.*
           # without ci.nix building them in their own right.
@@ -427,6 +435,7 @@ in
       jobflow
       jobflow-remote
       maggma
+      pubchempy
       qtoolkit
       ;
   };

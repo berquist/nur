@@ -76,6 +76,7 @@ let
     "jobflow"
     "jobflow-remote"
     "maggma"
+    "pubchempy"
     "qtoolkit"
   ];
 

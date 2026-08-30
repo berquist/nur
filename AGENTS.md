@@ -400,14 +400,31 @@ targets; `pymatgen-analysis-defects`, `matgl`, `matcalc` and `quacc` follow.
 targets' own `pyproject.toml` against the locked nixpkgs, seven packages are missing, in two
 layers:
 
-| Missing | Wanted by | Upstream |
+| Missing | Wanted by | Status |
 |---|---|---|
-| `maggma` | `jobflow` — its only gap | `materialsproject/maggma` |
-| `qtoolkit` | `jobflow-remote` — its only gap | `Matgenix/qtoolkit`; `dependencies = []`, so it is the cheap one to start with |
-| `emmet-core` | `atomate2`, `quacc` | `materialsproject/emmet`, in `emmet-core/` |
-| `pymatgen-core` | `atomate2`, `quacc`, `pymatgen-analysis-defects` | `materialsproject/pymatgen-core` — see the split below |
-| `mongomock-ng` | `maggma` | *not* the `mongomock` nixpkgs already has |
-| `pubchempy`, `pymatgen-io-validation` | `emmet-core` | |
+| `maggma` | `jobflow` — its only gap | **done** |
+| `qtoolkit` | `jobflow-remote` — its only gap | **done**; `dependencies = []`, which is why it went first |
+| `mongomock-ng` | `maggma` | **done**; *not* the `mongomock` nixpkgs already has |
+| `pubchempy` | `emmet-core` | **done** |
+| `pymatgen-io-validation` | `emmet-core` | blocked on `pymatgen-core` |
+| `emmet-core` | `atomate2`, `quacc` | blocked on the above; `materialsproject/emmet`, in `emmet-core/` |
+| `pymatgen-core` | everything left | the split below, and the real blocker |
+
+`jobflow`, `jobflow-remote` and their four dependencies are packaged. What is left of the
+near-term set is `atomate2`, and it is gated on one thing.
+
+**`pymatgen-core` gates the whole remainder, and there is no way round it.** An earlier note here
+said `emmet-core` could be built against nixpkgs' pre-split pymatgen because it only asks for
+`pymatgen>=2024.6.10`. That is true of `emmet-core` itself and false of the chain:
+`emmet-core` → `pymatgen-io-validation` → `pymatgen-core>=2026.4.16`. Relaxing that pin onto
+nixpkgs' `pymatgen` does not work either — `pymatgen-io-validation` imports
+`MP24RelaxSet` from `pymatgen.io.vasp.sets`, which 2025.10.7 does not have.
+
+Two further things to expect when it is attempted. `pymatgen-core` wants `monty>=2026.7.16`,
+which **nixos-26.05 does not have** — it carries 2025.3.3, so that leg needs a monty override or
+`meta.broken`. And `pymatgen-io-validation` installs *into* the `pymatgen.io.validation`
+namespace, so it shares a package directory with `pymatgen-core` and will meet
+`pythonCatchConflictsPhase`.
 
 Everything else resolves: `pydash`, `flufl-lock`, `schedule`, `networkx`, `supervisor`, `typer`,
 `rich`, `tomlkit`, `aioitertools`, `blake3`, `inflect`, `pyzmq`, `jsonlines`, `pandas` and the
