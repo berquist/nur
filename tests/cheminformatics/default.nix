@@ -106,7 +106,6 @@ let
     "digichem-core"
     "harmonwig"
     "metallogen"
-    "molcat"
     "xyzrender"
   ];
 

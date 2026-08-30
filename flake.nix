@@ -378,18 +378,6 @@
                 metallogen
                 xyzrender
                 ;
-              # molcat is deliberately absent, for the same reason
-              # aiida-gaussian is: `nix flake check` forces every attribute of
-              # `packages`, and molcat has no licence at all — no LICENSE file,
-              # no metadata field — so ../pkgs/molcat marks it
-              # `lib.licenses.unfree` and nixpkgs refuses to evaluate it.
-              # Naming it here would take the whole check down with a
-              # "refusing to evaluate" throw.
-              #
-              # It stays reachable through legacyPackages and through
-              # python313Packages, neither of which flake check forces, so
-              # `nix build .#legacyPackages.x86_64-linux.molcat` still works for
-              # anyone who has set allowUnfree.
             };
 
           # -------------------------------------------------------------------

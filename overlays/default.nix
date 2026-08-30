@@ -279,7 +279,6 @@ in
     dbstep = final.python3.pkgs.callPackage ../pkgs/dbstep { };
     digichem-core = final.python3.pkgs.callPackage ../pkgs/digichem-core { };
     metallogen = final.python3.pkgs.callPackage ../pkgs/metallogen { };
-    molcat = final.python3.pkgs.callPackage ../pkgs/molcat { };
     xyzrender = final.python3.pkgs.callPackage ../pkgs/xyzrender { };
 
     # graphrc breaks the rule this file otherwise keeps, and it has to.
