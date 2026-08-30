@@ -144,6 +144,7 @@ in
 
     custodian
     fireworks
+    jobflow
     maggma
     qtoolkit
     ;

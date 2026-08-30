@@ -404,6 +404,7 @@ in
           # maggma needs the pymatgen interpreter gate lifted for its `vasp`
           # extra, the same lift custodian needs above.
           maggma = pself.callPackage ../pkgs/maggma { inherit pymatgen; };
+          jobflow = pself.callPackage ../pkgs/jobflow { };
 
           # Dependencies of one package each, so they stop here rather than
           # being re-exported: they stay reachable as python313Packages.*
@@ -422,6 +423,7 @@ in
     inherit (final.python313Packages)
       custodian
       fireworks
+      jobflow
       maggma
       qtoolkit
       ;

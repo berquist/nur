@@ -73,6 +73,7 @@ let
     "molara"
     "custodian"
     "fireworks"
+    "jobflow"
     "maggma"
     "qtoolkit"
   ];
