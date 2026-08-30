@@ -74,6 +74,7 @@ let
     "custodian"
     "fireworks"
     "jobflow"
+    "jobflow-remote"
     "maggma"
     "qtoolkit"
   ];
