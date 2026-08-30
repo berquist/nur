@@ -401,10 +401,19 @@ in
           fireworks = pself.callPackage ../pkgs/fireworks { };
           qtoolkit = pself.callPackage ../pkgs/qtoolkit { };
 
-          # A test-only dependency of fireworks, so it stops here rather than
-          # being re-exported: it stays reachable as python313Packages.* without
-          # ci.nix building it in its own right.
+          # maggma needs the pymatgen interpreter gate lifted for its `vasp`
+          # extra, the same lift custodian needs above.
+          maggma = pself.callPackage ../pkgs/maggma { inherit pymatgen; };
+
+          # Dependencies of one package each, so they stop here rather than
+          # being re-exported: they stay reachable as python313Packages.*
+          # without ci.nix building them in their own right.
+          #
+          # mongomock-persistence is fireworks'.  mongomock-ng is maggma's, and
+          # is a third distinct mongomock rather than a version of either — see
+          # the note at the top of ../pkgs/mongomock-ng.
           mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
+          mongomock-ng = pself.callPackage ../pkgs/mongomock-ng { };
         }
       )
     ];
@@ -413,6 +422,7 @@ in
     inherit (final.python313Packages)
       custodian
       fireworks
+      maggma
       qtoolkit
       ;
   };

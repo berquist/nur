@@ -73,6 +73,7 @@ let
     "molara"
     "custodian"
     "fireworks"
+    "maggma"
     "qtoolkit"
   ];
 
@@ -92,6 +93,7 @@ let
   # one today: fireworks needs it to test its database code without a database.
   internalDependencies = [
     "mongomock-persistence"
+    "mongomock-ng"
     "pyrr"
   ];
 

@@ -144,6 +144,7 @@ in
 
     custodian
     fireworks
+    maggma
     qtoolkit
     ;
 }

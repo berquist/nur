@@ -245,6 +245,9 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `sella` delete its own source directory before the check phase? | `pkgs/sella/default.nix` (the note above `preCheck`), `pkgs/wignernj/default.nix` (the same trap, silent) |
 | Why does `sella` set `HOME` when nothing in it writes to one? | `pkgs/sella/default.nix` (the note above `preBuild`) |
 | How do `fireworks`' database tests run with no MongoDB, and why not just deselect them? | `pkgs/fireworks/default.nix` (the `MONGOMOCK_SERVERSTORE_FILE` note above `preCheck`) |
+| Why is `maggma` the one package here where a `::` entry in `disabledTestPaths` silently does nothing? | `pkgs/maggma/default.nix` (the note above `disabledTests`) |
+| Which of `maggma`'s test modules need a live MongoDB, and what coverage does dropping them cost? | `pkgs/maggma/default.nix` (`disabledTestPaths`) |
+| Why does `mongomock-ng` export `NO_LOCAL_MONGO`, and how is it a third mongomock? | `pkgs/mongomock-ng/default.nix` (`preCheck`, and the note above `src`) |
 | Why must `fireworks` never gain `pytest-xdist`, when nothing in the derivation asks for `-n`? | `pkgs/fireworks/default.nix` (the note above `nativeCheckInputs`) |
 | Why are two `WFLockTest` tests deselected when they only ever skip themselves? | `pkgs/fireworks/default.nix` (`disabledTestPaths`) |
 | Why does `fireworks` pass `-rs`, and which six tests still skip? | `pkgs/fireworks/default.nix` (`pytestFlags`) |
