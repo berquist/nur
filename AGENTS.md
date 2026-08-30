@@ -391,11 +391,44 @@ availability claims were probed against the locked nixpkgs with
 `nix-instantiate --eval --store dummy://` over `python313Packages`, `python3.pkgs` and the top
 level.
 
-**The materials-project chain** is gated on six shared dependencies nixpkgs lacks —
-`pymatgen-core`, `emmet-core`, `maggma`, `mp-pyrho`, `qtoolkit`, `mp-api` — plus a `pymatgen`
-bump from 2025.10.7, where consumers ask for `>=2026.x`. In dependency order it unlocks
-`jobflow` → `jobflow-remote`, `pymatgen-analysis-defects`, `matgl`, `matcalc`, `atomate2`,
-`quacc`. `overlays.materials` already exists for it.
+**The materials-project chain.** `jobflow`, `jobflow-remote` and `atomate2` are the near-term
+targets; `pymatgen-analysis-defects`, `matgl`, `matcalc` and `quacc` follow.
+`overlays.materials` already exists for it and `custodian` is already in it. Reading those three
+targets' own `pyproject.toml` against the locked nixpkgs, seven packages are missing, in two
+layers:
+
+| Missing | Wanted by | Upstream |
+|---|---|---|
+| `maggma` | `jobflow` — its only gap | `materialsproject/maggma` |
+| `qtoolkit` | `jobflow-remote` — its only gap | `Matgenix/qtoolkit`; `dependencies = []`, so it is the cheap one to start with |
+| `emmet-core` | `atomate2`, `quacc` | `materialsproject/emmet`, in `emmet-core/` |
+| `pymatgen-core` | `atomate2`, `quacc`, `pymatgen-analysis-defects` | `materialsproject/pymatgen-core` — see the split below |
+| `mongomock-ng` | `maggma` | *not* the `mongomock` nixpkgs already has |
+| `pubchempy`, `pymatgen-io-validation` | `emmet-core` | |
+
+Everything else resolves: `pydash`, `flufl-lock`, `schedule`, `networkx`, `supervisor`, `typer`,
+`rich`, `tomlkit`, `aioitertools`, `blake3`, `inflect`, `pyzmq`, `jsonlines`, `pandas` and the
+rest are all in nixpkgs.
+
+`mp-pyrho` and `mp-api` are **not** on this path, whatever an earlier version of this section
+said: `mp-pyrho` is wanted by `pymatgen-analysis-defects` alone, and `mp-api` only by `matcalc`
+and by atomate2's optional `mp` extra.
+
+**pymatgen has split, and that is the hard part — it is not a version bump.** Upstream `pymatgen`
+is now a metapackage whose sole dependency is `pymatgen-core>=2026.7.16`; the code moved to its
+own repository, which the `pymatgen` repo carries as a git submodule at `pymatgen-core/` (so a
+plain `--depth 1` clone leaves that directory empty — see `.gitmodules` there). nixpkgs is still
+on the pre-split monolith, 2025.10.7, which owns the same `pymatgen/…` import paths. So
+`pymatgen-core` cannot be added *beside* it: the two collide in any environment holding both, and
+atomate2 asks for both names at once. Packaging `pymatgen-core` means replacing nixpkgs'
+`pymatgen` with the two-package layout. The override point already exists — `pymatgenFor` in
+`overlays/default.nix` rebuilds `pymatgen` for an unrelated reason — but note the warning at that
+binding about never letting the result join a package set.
+
+One further version conflict, unrelated to the split: `jobflow-remote` pins
+`pymongo >= 4.4, < 4.11` where nixpkgs has 4.17.0. (`atomate2` wants `<= 4.17.0`, satisfied
+exactly.) Expect `pythonRelaxDeps` plus a real check that its suite passes — pymongo 4.11 dropped
+deprecated APIs, so this one may not be cosmetic.
 
 | Not packaged | Blocker |
 |---|---|

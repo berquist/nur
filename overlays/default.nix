@@ -376,12 +376,15 @@ in
       ;
   };
 
-  # The materials-project workflow family.  Only custodian and fireworks today,
-  # which between them need nothing nixpkgs lacks — but they are the two leaves
-  # of a much larger tree (jobflow, atomate2, quacc, matgl, …) that is gated on
-  # six missing shared dependencies: pymatgen-core, emmet-core, maggma,
-  # mp-pyrho, qtoolkit and mp-api.  This overlay exists now so that work has an
-  # obvious home when those land, rather than being wedged into cheminformatics.
+  # The materials-project workflow family.  custodian, fireworks and qtoolkit
+  # today — leaves of a much larger tree (jobflow, jobflow-remote, atomate2,
+  # quacc, matgl, …) still gated on six packages nixpkgs lacks: maggma,
+  # emmet-core, pymatgen-core, mongomock-ng, pubchempy and
+  # pymatgen-io-validation.  qtoolkit was the seventh and is done; it went
+  # first because its `dependencies` list is empty, so it needed nothing else
+  # to land ahead of it.  See "Deferred packaging" in ../AGENTS.md for the rest,
+  # including why pymatgen-core is a replacement for nixpkgs' pymatgen rather
+  # than an addition beside it.
   materials = final: prev: {
     pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
       (
@@ -396,6 +399,7 @@ in
         {
           custodian = pself.callPackage ../pkgs/custodian { inherit pymatgen; };
           fireworks = pself.callPackage ../pkgs/fireworks { };
+          qtoolkit = pself.callPackage ../pkgs/qtoolkit { };
 
           # A test-only dependency of fireworks, so it stops here rather than
           # being re-exported: it stays reachable as python313Packages.* without
@@ -409,6 +413,7 @@ in
     inherit (final.python313Packages)
       custodian
       fireworks
+      qtoolkit
       ;
   };
 

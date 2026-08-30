@@ -144,5 +144,6 @@ in
 
     custodian
     fireworks
+    qtoolkit
     ;
 }

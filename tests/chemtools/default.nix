@@ -73,6 +73,7 @@ let
     "molara"
     "custodian"
     "fireworks"
+    "qtoolkit"
   ];
 
   # moltui is deliberately not in the list above.  It is a
