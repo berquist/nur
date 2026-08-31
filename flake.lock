@@ -151,17 +151,17 @@
     },
     "nixpkgs-qchem": {
       "locked": {
-        "lastModified": 1787631388,
-        "narHash": "sha256-vMiXptXarfSdJb1Gkc+FYVOAibuBRj7qxGa8z68q1Uw=",
+        "lastModified": 1788216798,
+        "narHash": "sha256-EcUH2Xyhv+Qn2/wOGyLrTh/btZvFxnT8eQQs3eF1yUA=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "ac6b2166e7a9375683b8e98f860f273222337b16",
+        "rev": "5c3ffa7d6d45824843f1ca60cd8fb7e7bf685000",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "ac6b2166e7a9375683b8e98f860f273222337b16",
+        "rev": "5c3ffa7d6d45824843f1ca60cd8fb7e7bf685000",
         "type": "github"
       }
     },
