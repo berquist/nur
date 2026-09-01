@@ -224,6 +224,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does the `matdyn` regression reference gain three `pbc` keys? | `pkgs/aiida-quantumespresso/default.nix` (`postPatch`) |
 | Why is aiida-core's `jq` threaded in from `final` instead of resolved through the Python set? | `overlays/default.nix` (the `aiida-core` callPackage) |
 | Which aiida-core failures are retried rather than deselected, and what makes that sound? | `pkgs/aiida-core/default.nix` (the `--only-rerun` block in `pytestFlags`) |
+| Why does aiida-core raise five of upstream's timeouts, and why is none of them an `--only-rerun` entry? | `pkgs/aiida-core/default.nix` (the wall-clock note at the end of `postPatch`) |
+| Why is pytest-timeout's 240-second cap overridden to 900, and which test forces it? | `pkgs/aiida-core/default.nix` (the note above `--override-ini=timeout=900` in `pytestFlags`) |
 | Why does `cp2k-input-tools` declare no `lsp` extra, and drop one console script? | `pkgs/cp2k-input-tools/default.nix` (`postPatch`) |
 | Why is `monty` patched rather than having its pandas tests skipped? | `overlays/default.nix` (the `monty` binding) |
 | Why are nine `pymatgen` tests deselected by node id rather than by name? | `overlays/default.nix` (the `pymatgen` binding) |
