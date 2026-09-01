@@ -43,6 +43,40 @@ buildPythonPackage rec {
     hash = "sha256-E4sLzdQCM9hK/LV6JRBCPVbDmxw3R7zs9XINbjdsKNU=";
   };
 
+  # Two tests in tests/test_cli.py send a pause or a kill to a process that no
+  # daemon worker has picked up yet, so the message goes nowhere:
+  #
+  #     ERROR aiida.process_control: Failed to kill Process<12>: Recipient not found: 12
+  #
+  # The `wg.wait(tasks={name: ['CREATED', 'RUNNING', 'WAITING']})` above each
+  # of them looks like it guards against exactly that, and does not: it
+  # compares against the WorkGraph *task* state, which has no WAITING member at
+  # all and which the engine sets to RUNNING in the same breath as it calls
+  # `submit()`.  So the wait returns the instant the calculation's node exists.
+  # aiida-core logs the unroutable message rather than raising it, `result.
+  # exit_code == 0` still holds, and the test then polls for twenty seconds for
+  # a pause that was never requested.
+  #
+  # Whether the race is lost depends on machine load alone, which is why this
+  # suite fails at `--numprocesses=32` and passes at 128: the busier the
+  # builder, the further the test's own poll and its CliRunner startup -- both
+  # CPU-bound -- slip behind the daemon's adoption of the process, which is an
+  # idle event loop waking on a socket.  Nothing in the derivation differs
+  # between the two runs.
+  #
+  # test_task_kill's `sqlite3.OperationalError: database is locked` is a
+  # knock-on rather than a second defect.  The pause test above it aborts with
+  # its WorkGraph still live in the daemon, and these fixtures give each xdist
+  # worker one `core.sqlite_dos` profile, so the next test on that worker
+  # shares a single sqlite file with a graph nobody stopped.
+  #
+  # A patch file rather than `postPatch`: the insertion is multi-line Python at
+  # a four-space indent, and Nix computes an indented string's dedent over the
+  # whole literal -- see ../pymatgen/default.nix for what that quietly does to
+  # a replacement that has to keep its indentation.  The header is written to
+  # be sent upstream as-is.
+  patches = [ ./await-daemon-adoption.patch ];
+
   build-system = [ flit-core ];
 
   # aiida-core for the usual pre-release reason, and aiida-shell because the
