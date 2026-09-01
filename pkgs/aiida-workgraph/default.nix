@@ -126,11 +126,38 @@ buildPythonPackage rec {
   #
   # test_reset_message is deselected below rather than patched; see the note
   # above `disabledTestPaths`.
+  #
+  # The last rewrite is a timeout rather than a path.  aiida-core's
+  # `daemon_client` fixture stops the daemon in its session teardown with
+  # `stop_daemon(wait=True)`, and the circus call that makes is bounded by the
+  # `daemon.timeout` config option, whose default is **two seconds**.  The
+  # fixture catches only DaemonNotRunningException, so a slow quit is an error
+  # rather than a warning, and it lands on whichever test happened to be last:
+  #
+  #     ERROR at teardown of test_organize_nested_inputs
+  #     aiida.engine.daemon.client.DaemonTimeoutException: Connection to the daemon timed out.
+  #
+  # Two seconds is not a budget a builder running this suite 32 ways in
+  # parallel can promise, the more so under `core.zeromq`, where the broker is
+  # another circus watcher that `quit --waiting` has to bring down.  The same
+  # option bounds the fixture's follow-up `_await_condition`, so raising it
+  # once covers both halves of the teardown.
+  #
+  # It has to be set on the *profile*, not globally: `DaemonClient` reads it as
+  # `config.get_option('daemon.timeout', scope=profile.name)`, and a scoped
+  # read falls back to the option's own default rather than to the global
+  # value, so a global `set_option` would be accepted and then ignored.
+  # `aiida_config.store()` puts it on disk as well, for the
+  # `verdi daemon start-circus` subprocess.  Thirty seconds rather than a
+  # larger number: fifteen times the default is ample slack for a loaded
+  # machine, while a daemon that is genuinely wedged still gives up inside the
+  # build's patience.  `yield profile` occurs once in the file.
   postPatch = ''
     substituteInPlace tests/conftest.py \
       --replace-fail "filepath_executable='/bin/bash'" "filepath_executable='${bash}/bin/bash'" \
       --replace-fail "filepath_executable='/bin/true'" "filepath_executable='${coreutils}/bin/true'" \
-      --replace-fail "broker_backend='core.rabbitmq'" "broker_backend='core.zeromq'"
+      --replace-fail "broker_backend='core.rabbitmq'" "broker_backend='core.zeromq'" \
+      --replace-fail 'yield profile' "profile.set_option('daemon.timeout', 30); aiida_config.store(); yield profile"
 
     substituteInPlace tests/test_workgraph.py \
       --replace-fail \

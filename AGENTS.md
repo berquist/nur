@@ -110,6 +110,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `sisl` patch `cmake.verbose` at the tag it is pinned to? | `pkgs/sisl/default.nix` (`postPatch`) |
 | Why does one `aiida-workgraph` test gain a daemon fixture and another a longer timeout? | `pkgs/aiida-workgraph/default.nix` (the note above `postPatch`) |
 | Why do two `aiida-workgraph` CLI tests fail at 32 xdist workers and pass at 128? | `pkgs/aiida-workgraph/default.nix` (the note above `patches`), `pkgs/aiida-workgraph/await-daemon-adoption.patch` |
+| Why does `aiida-workgraph` raise `daemon.timeout` to 30, and why on the profile rather than globally? | `pkgs/aiida-workgraph/default.nix` (the last note above `postPatch`) |
 | Why are `aiida-phonopy`'s two workflow tests deselected when the rest of its suite runs? | `pkgs/aiida-phonopy/default.nix` (`disabledTestPaths`) |
 | Why is `aiida-phonopy`'s `phonopy~=4.0` relaxed, and what does 26.05's phonopy 3.5.1 still get wrong? | `pkgs/aiida-phonopy/default.nix` (`pythonRelaxDeps`) |
 | Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
