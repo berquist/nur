@@ -112,6 +112,12 @@
         #   inputs.nur-berquist.nixosModules.aiida
         nixosModules = import ./nixos-modules;
 
+        # home-manager modules
+        #
+        # Import into your home-manager flake as:
+        #   inputs.nur-berquist.homeModules.hydrus-client
+        homeModules = import ./home-modules;
+
         # Overlays
         #
         # Our Python packages (pkgs.python313Packages.qcfractal, etc.):

@@ -106,6 +106,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does the compute unit set `PYTHONPATH`, and why per-program envs? | `nixos-modules/qcfractal-compute.nix` |
 | Why is a QC program built for another Python an eval error rather than one that is quietly skipped? | `nixos-modules/qcfractal-compute.nix` (the first entry in `assertions`) |
 | Why three systemd units on the server, and why is `upgrade-db` manual by default? | `nixos-modules/qcfractal-server.nix` |
+| Why is there a home-manager module that only installs xpra, and why is it Linux-only? | `home-modules/hydrus-client.nix` (the header comment, and `assertions`) |
 | Why no `nix-build-uncached`, and what breaks between CppNix and Lix? | `Justfile` (the note above `ci-build`) |
 | Why is `repeated_keys` disabled? Why does the whitespace hook skip `*.patch`? | `statix.toml`, `flake.nix` |
 | Why does `qcfractalcompute` carry a patch? Why is `parsl` built from the sdist? | the respective `pkgs/*/default.nix` |
