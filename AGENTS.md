@@ -226,6 +226,9 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Which aiida-core failures are retried rather than deselected, and what makes that sound? | `pkgs/aiida-core/default.nix` (the `--only-rerun` block in `pytestFlags`) |
 | Why does aiida-core raise five of upstream's timeouts, and why is none of them an `--only-rerun` entry? | `pkgs/aiida-core/default.nix` (the wall-clock note at the end of `postPatch`) |
 | Why is pytest-timeout's 240-second cap overridden to 900, and which test forces it? | `pkgs/aiida-core/default.nix` (the note above `--override-ini=timeout=900` in `pytestFlags`) |
+| Why does `core.sqlite_dos` get WAL and a 60-second busy timeout, and what did the default cost? | `pkgs/aiida-core/default.nix` (the note above `patches`), `pkgs/aiida-core/sqlite-dos-concurrent-access.patch` |
+| Why does that patch also touch `verdi storage backup`? | `pkgs/aiida-core/sqlite-dos-concurrent-access.patch` (the `_backup_storage` paragraph) |
+| Why is one `database is locked` reported as two unrelated aiida-workgraph failures? | `pkgs/aiida-workgraph/default.nix` (the third note above `patches`), `pkgs/aiida-core/default.nix` (the note above `patches`) |
 | Why does `cp2k-input-tools` declare no `lsp` extra, and drop one console script? | `pkgs/cp2k-input-tools/default.nix` (`postPatch`) |
 | Why is `monty` patched rather than having its pandas tests skipped? | `overlays/default.nix` (the `monty` binding) |
 | Why are nine `pymatgen` tests deselected by node id rather than by name? | `overlays/default.nix` (the `pymatgen` binding) |

@@ -1,0 +1,184 @@
+Open the `core.sqlite_dos` database in WAL mode, with a usable busy timeout.
+
+A profile's database is written by the daemon workers and read and written by
+every `verdi` invocation at the same time.  `create_sqla_engine` passes no
+`connect_args` and sets no journal pragma, so `core.sqlite_dos` runs on the two
+SQLite defaults, and neither one supports that:
+
+* The default journal mode is `DELETE`, a rollback journal.  A reader holding
+  `SHARED` prevents a writer from taking `EXCLUSIVE`, so an open read
+  transaction anywhere blocks every write.
+* The default busy timeout is the DB-API's five seconds.  That is a normal
+  duration for a daemon worker's transaction, so the wait ends in an error
+  rather than in the lock.
+
+The result is a write that fails for no reason the user can act on:
+
+    sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) database is locked
+    [SQL: UPDATE db_dbauthinfo SET auth_params=? WHERE db_dbauthinfo.id = ?]
+
+That statement is `Computer.configure()`, which is about as small a write as
+this storage plugin ever makes.  It failed because a daemon worker happened to
+be running a calculation against the same file.
+
+The damage does not stop at the failing statement.  The storage backend's
+session is shared, and a failed flush leaves it `DEACTIVE`, so everything after
+it on the same connection reports
+
+    sqlalchemy.exc.PendingRollbackError: This Session's transaction has been
+    rolled back due to a previous exception during flush.
+
+and names the original lock rather than itself.  One contended write therefore
+reads as two unrelated defects, in two unrelated places.
+
+None of this needs AiiDA to reproduce.  Two connections to one file, the first
+holding an open read transaction, the second issuing an `UPDATE`: under the
+default journal the write raises `database is locked` as soon as the busy
+timeout expires, and under `journal_mode=WAL` it commits in milliseconds.
+
+WAL is the mode for exactly this access pattern -- concurrent readers and one
+writer -- and a longer busy timeout turns writer-against-writer contention from
+an error back into a wait.  Both are set from the `connect` event, beside the
+`case_sensitive_like` pragma that `create_sqla_engine` already sets there, and
+both call sites in this module go through one constructor.  That last part is
+not tidiness: the two pragmas have different lifetimes.  `journal_mode` is
+recorded in the database header, so whichever engine opens the file first
+decides it for everyone, while `busy_timeout` is per connection and has to be
+set on every one.  A wrapper is what keeps the migrator and the session factory
+from disagreeing about either.
+
+`_backup_storage` needed the accompanying change.  It rsyncs `filepath_database`
+alone, and under WAL a committed transaction can still be in the `-wal` sidecar
+rather than in that file, which would make the backup silently short of the most
+recent commits rather than fail.  Checkpointing with `TRUNCATE` folds the log
+back into the database and empties it, so the one file the rsync takes is again
+complete.  `TRUNCATE` waits for readers and reports rather than raises when it
+gives up, so the case where it cannot finish is logged instead of ignored.
+
+Two things WAL does not break.  A database on a filesystem with no shared
+memory -- a network mount -- keeps the journal mode it had: SQLite reports the
+mode in the returned row and does not raise, so such a profile goes on working
+as before.  And `journal_mode` persisting in the header is what makes an older
+AiiDA opening the same profile behave consistently, rather than a hazard.
+
+diff -ruN a/src/aiida/storage/sqlite_dos/backend.py b/src/aiida/storage/sqlite_dos/backend.py
+--- a/src/aiida/storage/sqlite_dos/backend.py	2026-09-03 23:12:42.913708804 -0400
++++ b/src/aiida/storage/sqlite_dos/backend.py	2026-09-03 23:23:31.683653610 -0400
+@@ -20,7 +20,8 @@
+ from alembic.config import Config
+ from disk_objectstore import Container, backup_utils
+ from pydantic import field_validator
+-from sqlalchemy import insert, inspect, select
++from sqlalchemy import event, insert, inspect, select, text
++from sqlalchemy.future.engine import Engine
+ from sqlalchemy.orm import scoped_session, sessionmaker
+ 
+ from aiida.common import exceptions
+@@ -56,6 +57,60 @@
+ 
+ REPOSITORY_UUID_KEY = 'repository|uuid'
+ 
++BUSY_TIMEOUT_MILLISECONDS = 60000
++"""Number of milliseconds a connection waits for a lock before giving up.
++
++SQLite serialises writers, so a busy timeout is what turns "another process is
++writing" from an error into a wait.  The DB-API default is five seconds, which
++is a normal duration for a daemon worker's transaction and so is routinely
++exceeded on a loaded machine.
++"""
++
++
++def sqlite_concurrent_access(dbapi_connection: Any, _: Any) -> None:
++    """Configure a connection for access by more than one process.
++
++    A profile's database is opened by the daemon workers and by every ``verdi``
++    invocation at the same time, which the two SQLite defaults do not support:
++
++    * The default journal mode is ``DELETE``, a rollback journal, under which a
++      reader holding ``SHARED`` blocks a writer from taking ``EXCLUSIVE``.  In
++      WAL mode readers and a writer proceed concurrently, which is the access
++      pattern a daemon plus a client actually has.
++    * The default busy timeout is five seconds.  See
++      ``BUSY_TIMEOUT_MILLISECONDS``.
++
++    ``journal_mode`` is recorded in the database header and so persists to every
++    later connection, including ones opened by another process or an older
++    AiiDA.  It cannot be set inside a transaction, which is why this runs from
++    the ``connect`` event: the DB-API connection is fresh there, and pysqlite
++    defers ``BEGIN`` until the first DML, so none is open.  On a filesystem that
++    cannot support WAL -- a network mount, which has no shared memory -- SQLite
++    leaves the mode as it was and reports it in the returned row rather than
++    raising, so a profile on such a mount keeps working with the old behaviour.
++    """
++    cursor = dbapi_connection.cursor()
++    try:
++        cursor.execute('PRAGMA journal_mode=WAL;')
++        cursor.execute(f'PRAGMA busy_timeout={BUSY_TIMEOUT_MILLISECONDS};')
++    finally:
++        cursor.close()
++
++
++def create_sqla_engine_concurrent(filepath: str | Path, **kwargs) -> Engine:
++    """Return an engine for a profile database, configured for concurrent access.
++
++    Every engine opened on the profile database goes through here rather than
++    through :func:`~aiida.storage.sqlite_zip.utils.create_sqla_engine` directly,
++    so that the migrator and the session factory cannot disagree.  That matters
++    because the two pragmas have different lifetimes: ``journal_mode`` is
++    persistent, so whichever engine opens the file first decides it, while
++    ``busy_timeout`` is per connection and has to be set on all of them.
++    """
++    engine = create_sqla_engine(filepath, **kwargs)
++    event.listen(engine, 'connect', sqlite_concurrent_access)
++    return engine
++
+ 
+ class SqliteDosMigrator(PsqlDosMigrator):
+     """Class for validating and migrating `sqlite_dos` storage instances.
+@@ -77,7 +132,7 @@
+         filepath_database.touch()
+ 
+         self.profile = profile
+-        self._engine = create_sqla_engine(filepath_database)
++        self._engine = create_sqla_engine_concurrent(filepath_database)
+         self._connection = None
+ 
+     def get_container(self) -> Container:
+@@ -264,7 +319,7 @@
+         Multi-thread support is currently required by the REST API.
+         Although, in the future, we may want to move the multi-thread handling to higher in the AiiDA stack.
+         """
+-        engine = create_sqla_engine(self.filepath_database)
++        engine = create_sqla_engine_concurrent(self.filepath_database)
+         self._session_factory = scoped_session(sessionmaker(bind=engine, future=True, expire_on_commit=True))
+ 
+     def delete(self) -> None:  # type: ignore[override]
+@@ -374,5 +429,28 @@
+         LOGGER.report('Backing up disk-objectstore container')
+         manager.call_rsync(self.filepath_container, path, link_dest=prev_backup, dest_trailing_slash=True)
+ 
++        # Only ``filepath_database`` is copied below, and in WAL mode a committed
++        # transaction may still live in the ``-wal`` sidecar rather than in that
++        # file.  Checkpointing folds the log back into the database, so the single
++        # file the rsync takes is complete.
++        #
++        # ``TRUNCATE`` waits for readers -- for up to ``BUSY_TIMEOUT_MILLISECONDS``
++        # -- and then reports rather than raises, so the case where it gives up
++        # has to be caught here or the backup is silently short of the most recent
++        # commits.  The two counts say how short: a reader pinning an old snapshot
++        # holds the checkpoint at that snapshot's frame, leaving everything after
++        # it in the log alone.  They are reported either way, because a busy
++        # checkpoint that still copied every frame leaves a complete database file
++        # and only an untruncated log, and the operator cannot tell those apart
++        # from the warning alone.
++        LOGGER.report('Checkpointing the write-ahead log')
++        busy, log_pages, checkpointed = self.get_session().execute(text('PRAGMA wal_checkpoint(TRUNCATE);')).one()
++        if busy:
++            LOGGER.warning(
++                'Could not fully checkpoint the write-ahead log because the database is in use '
++                f'({checkpointed} of {log_pages} pages written back). If those differ, the backup is missing the '
++                f'most recent transactions; stop the daemon and any other clients and run the backup again.'
++            )
++
+         LOGGER.report('Backing up sqlite database')
+         manager.call_rsync(self.filepath_database, path, link_dest=prev_backup, dest_trailing_slash=True)

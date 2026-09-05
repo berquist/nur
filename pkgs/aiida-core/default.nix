@@ -98,6 +98,38 @@ buildPythonPackage rec {
     hash = "sha256-8zuLtmE/IkYoZSd3Sqm+ZptpMrUq/Ek1ooHuufz+Vbw=";
   };
 
+  # `core.sqlite_dos` opens its database on SQLite's two defaults: a rollback
+  # journal, under which one open read transaction blocks every write, and the
+  # DB-API's five-second busy timeout.  A daemon worker plus a client on one
+  # profile is the ordinary way to run AiiDA, so an ordinary small write fails
+  # for no reason the caller can act on:
+  #
+  #     sqlite3.OperationalError: database is locked
+  #     [SQL: UPDATE db_dbauthinfo SET auth_params=? WHERE db_dbauthinfo.id = ?]
+  #
+  # That statement is `Computer.configure()`, reached through the
+  # `aiida_localhost` fixture, losing to a graph that a *passing*
+  # ../aiida-workgraph test left running in the daemon.  The knock-on is worse
+  # than the failure: a failed flush leaves the shared session DEACTIVE, so the
+  # next test on that xdist worker fails as a PendingRollbackError naming a lock
+  # it never met, in a module that never started a daemon.  One contended write
+  # is reported as two unrelated defects — see ../aiida-workgraph/default.nix,
+  # whose note used to attribute this to the test above it aborting.
+  #
+  # The patch puts the profile database in WAL mode, raises the busy timeout to
+  # 60s, and checkpoints the log before `verdi storage backup` rsyncs the
+  # database file, since WAL would otherwise let a backup miss the newest
+  # commits without saying so.  ../../nixos-modules/aiida.nix's
+  # `core.sqlite_dos` backend has the same daemon-plus-client shape and gains
+  # the same fix; `core.psql_dos` is unaffected either way.  The header is
+  # written to be sent upstream as-is.
+  #
+  # A patch file rather than `postPatch`, for the reason
+  # ../aiida-workgraph/default.nix gives above its own: the insertion is
+  # multi-line Python, and ../pymatgen/default.nix has what Nix's indented
+  # strings quietly do to one of those.
+  patches = [ ./sqlite-dos-concurrent-access.patch ];
+
   build-system = [ flit-core ];
 
   # click is relaxed here rather than through pythonRelaxDeps below, because

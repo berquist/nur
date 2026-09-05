@@ -65,10 +65,19 @@ buildPythonPackage rec {
   # between the two runs.
   #
   # test_task_kill's `sqlite3.OperationalError: database is locked` is a
-  # knock-on rather than a second defect.  The pause test above it aborts with
-  # its WorkGraph still live in the daemon, and these fixtures give each xdist
-  # worker one `core.sqlite_dos` profile, so the next test on that worker
-  # shares a single sqlite file with a graph nobody stopped.
+  # knock-on rather than a second defect, but not for the reason this note
+  # used to give.  It said the pause test above aborts with its WorkGraph
+  # still live in the daemon; the patch below makes that test pass, and the
+  # lock survived it.  A pause test that *passes* also leaves its graph
+  # running -- it returns the moment the task is unpaused -- and these
+  # fixtures give each xdist worker one `core.sqlite_dos` profile and one
+  # session-scoped daemon, so the next test on that worker writes to a single
+  # sqlite file that a daemon worker is already writing to.
+  #
+  # What made that fatal was aiida-core's, and is fixed there: see the note
+  # above `patches` in ../aiida-core/default.nix for the two SQLite defaults
+  # and for why the failure lands twice, once as this lock and once as a
+  # PendingRollbackError in whichever module the worker reached next.
   #
   # A patch file rather than `postPatch`: the insertion is multi-line Python at
   # a four-space indent, and Nix computes an indented string's dedent over the
