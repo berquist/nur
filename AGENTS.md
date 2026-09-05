@@ -27,7 +27,7 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   QCArchive and nothing else; the two overlays are separate so that a consumer can take one
   without the other's closure.
 - the **cheminformatics family** — `morfeus-ml`, `qmzyme`, `dough`, `dbstep`, `aqme`, `ccreg`,
-  `digichem-core`, `metallogen`, `molcat`, `xyzrender`, plus the dependencies of those that
+  `digichem-core`, `metallogen`, `xyzrender`, plus the dependencies of those that
   nixpkgs lacks (`mdanalysis`, `griddataformats`, `mda-xdrlib`, `mrcfile`, `basis-set-exchange`,
   `colour-science`, `configurables`, `openprattle`, `lwreg`, `xyzgraph`, `graphrc`). Two overlays
   rather than one, split on whether the package needs cclib — see the cclib split below.
@@ -46,28 +46,40 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   dotdrop and harmonwig — see the table below. Two names in here collide with something else:
   `chemfiles` (ours, C++ versus Python) and `trexio` (nixpkgs', C library versus Python), and
   the second is the dangerous one.
-- the **materials family** — `custodian` and `fireworks` today, plus `mongomock-persistence`,
-  which is carried for fireworks' tests alone and is not re-exported. Its own overlay because it is
-  the seed of a much larger tree that is not yet reachable; see "Deferred packaging" below.
+- the **materials family** — `custodian`, `fireworks`, `qtoolkit`, `maggma`, `jobflow`,
+  `jobflow-remote`, `pubchempy`, and both halves of upstream pymatgen's 2026 split,
+  `pymatgen-core` and `pymatgen`. Plus three carried for a dependant alone and not re-exported:
+  `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's) and `monty`, a backport that
+  exists only because `pymatgen-core` needs a version no channel here ships yet.
+  **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
+  upstream split it and the two layouts cannot coexist, and `monty` on the legs that are behind.
+  Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
+  itself and in `pkgs/pymatgen-core/default.nix`. See "Deferred packaging" below for what is
+  still gated.
 
 ### The cclib split
 
 cclib is in neither nixpkgs nor NixOS-QChem and upstream ships its own flake, so that is where it
 comes from. `overlays/` holds plain `final: prev:` functions and is imported **without flakes** by
-`default.nix`, `overlay.nix` and `ci.nix`, so it cannot reach a flake input. Six packages need
-cclib and each takes it as a defaulted `cclib ? null` argument:
+`default.nix`, `overlay.nix` and `ci.nix`, so it cannot reach a flake input. Ten packages need
+cclib and each takes it as a defaulted `cclib ? null` argument. `rg -l 'cclib \? null' pkgs/` is
+the list; keep this table in step with it:
 
 | Package | Where it lives | Buildable through |
 |---|---|---|
 | `harmonwig` | `overlays.harmonwig` | the flake only |
-| `dbstep`, `aqme`, `ccreg`, `digichem-core` | `overlays.cheminformatics-cclib` | the flake only |
+| `dbstep`, `aqme`, `ccreg`, `digichem-core`, `metallogen`, `xyzrender` | `overlays.cheminformatics-cclib` | the flake only |
+| `graphrc` | `overlays.cheminformatics-cclib` | the flake only, and never a NUR attribute — see below |
 | `aiida-gaussian` | `overlays.aiida` | **neither**, today |
 | `qmzyme` | `overlays.cheminformatics` | both — its cclib use is test-only and lazy |
 
-The first five are `meta.broken` on the NUR path and replaced in `flake.nix`'s `packages` by the
-ones from `cclibPkgs`. `aiida-gaussian` is broken everywhere: a plugin must come from the same
-package set as its `aiida-core`, and putting the `aiida` overlay into `cclibPkgs` would rebuild
-that whole closure against NixOS-QChem's nixpkgs rather than ours.
+The first seven are `meta.broken` on the NUR path and replaced in `flake.nix`'s `packages` by the
+ones from `cclibPkgs`. `graphrc` carries the same `broken = cclib == null;` but is not in that
+override, because `default.nix` never re-exports it — it reaches the flake through
+`legacyPackages` and `python313Packages` alone. `qmzyme` is the one dependant with no
+`meta.broken` at all; it skips a test instead. And `aiida-gaussian` is broken everywhere: a plugin
+must come from the same package set as its `aiida-core`, and putting the `aiida` overlay into
+`cclibPkgs` would rebuild that whole closure against NixOS-QChem's nixpkgs rather than ours.
 
 Note that cclib's overlay overrides the **top-level `python3` attribute** and nothing else, so
 `final.python3.pkgs` is the only set that has it. Two traps follow, and both are silent — a
@@ -97,6 +109,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `node-graph` pinned to v0.6.5 exactly, one commit behind its main? | `pkgs/node-graph/default.nix` (the note above `src`) |
 | Why does `sisl` patch `cmake.verbose` at the tag it is pinned to? | `pkgs/sisl/default.nix` (`postPatch`) |
 | Why does one `aiida-workgraph` test gain a daemon fixture and another a longer timeout? | `pkgs/aiida-workgraph/default.nix` (the note above `postPatch`) |
+| Why do two `aiida-workgraph` CLI tests fail at 32 xdist workers and pass at 128? | `pkgs/aiida-workgraph/default.nix` (the note above `patches`), `pkgs/aiida-workgraph/await-daemon-adoption.patch` |
+| Why does `aiida-workgraph` raise `daemon.timeout` to 30, and why on the profile rather than globally? | `pkgs/aiida-workgraph/default.nix` (the last note above `postPatch`) |
 | Why are `aiida-phonopy`'s two workflow tests deselected when the rest of its suite runs? | `pkgs/aiida-phonopy/default.nix` (`disabledTestPaths`) |
 | Why is `aiida-phonopy`'s `phonopy~=4.0` relaxed, and what does 26.05's phonopy 3.5.1 still get wrong? | `pkgs/aiida-phonopy/default.nix` (`pythonRelaxDeps`) |
 | Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
@@ -108,6 +122,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why three systemd units on the server, and why is `upgrade-db` manual by default? | `nixos-modules/qcfractal-server.nix` |
 | Why is there a home-manager module that only installs xpra, and why is it Linux-only? | `home-modules/hydrus-client.nix` (the header comment, and `assertions`) |
 | Why no `nix-build-uncached`, and what breaks between CppNix and Lix? | `Justfile` (the note above `ci-build`) |
+| Why does `ci.nix` filter on `meta.license.free` when nothing here is unfree any more? | `ci.nix` (the note above `isBuildable`) |
 | Why is `repeated_keys` disabled? Why does the whitespace hook skip `*.patch`? | `statix.toml`, `flake.nix` |
 | Why does `qcfractalcompute` carry a patch? Why is `parsl` built from the sdist? | the respective `pkgs/*/default.nix` |
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
@@ -210,6 +225,11 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does the `matdyn` regression reference gain three `pbc` keys? | `pkgs/aiida-quantumespresso/default.nix` (`postPatch`) |
 | Why is aiida-core's `jq` threaded in from `final` instead of resolved through the Python set? | `overlays/default.nix` (the `aiida-core` callPackage) |
 | Which aiida-core failures are retried rather than deselected, and what makes that sound? | `pkgs/aiida-core/default.nix` (the `--only-rerun` block in `pytestFlags`) |
+| Why does aiida-core raise five of upstream's timeouts, and why is none of them an `--only-rerun` entry? | `pkgs/aiida-core/default.nix` (the wall-clock note at the end of `postPatch`) |
+| Why is pytest-timeout's 240-second cap overridden to 900, and which test forces it? | `pkgs/aiida-core/default.nix` (the note above `--override-ini=timeout=900` in `pytestFlags`) |
+| Why does `core.sqlite_dos` get WAL and a 60-second busy timeout, and what did the default cost? | `pkgs/aiida-core/default.nix` (the note above `patches`), `pkgs/aiida-core/sqlite-dos-concurrent-access.patch` |
+| Why does that patch also touch `verdi storage backup`? | `pkgs/aiida-core/sqlite-dos-concurrent-access.patch` (the `_backup_storage` paragraph) |
+| Why is one `database is locked` reported as two unrelated aiida-workgraph failures? | `pkgs/aiida-workgraph/default.nix` (the third note above `patches`), `pkgs/aiida-core/default.nix` (the note above `patches`) |
 | Why does `cp2k-input-tools` declare no `lsp` extra, and drop one console script? | `pkgs/cp2k-input-tools/default.nix` (`postPatch`) |
 | Why is `monty` patched rather than having its pandas tests skipped? | `overlays/default.nix` (the `monty` binding) |
 | Why are nine `pymatgen` tests deselected by node id rather than by name? | `overlays/default.nix` (the `pymatgen` binding) |
@@ -240,12 +260,27 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `sella` delete its own source directory before the check phase? | `pkgs/sella/default.nix` (the note above `preCheck`), `pkgs/wignernj/default.nix` (the same trap, silent) |
 | Why does `sella` set `HOME` when nothing in it writes to one? | `pkgs/sella/default.nix` (the note above `preBuild`) |
 | How do `fireworks`' database tests run with no MongoDB, and why not just deselect them? | `pkgs/fireworks/default.nix` (the `MONGOMOCK_SERVERSTORE_FILE` note above `preCheck`) |
+| Why is `maggma` the one package here where a `::` entry in `disabledTestPaths` silently does nothing? | `pkgs/maggma/default.nix` (the note above `disabledTests`) |
+| Which of `maggma`'s test modules need a live MongoDB, and what coverage does dropping them cost? | `pkgs/maggma/default.nix` (`disabledTestPaths`) |
+| Why does `mongomock-ng` export `NO_LOCAL_MONGO`, and how is it a third mongomock? | `pkgs/mongomock-ng/default.nix` (`preCheck`, and the note above `src`) |
+| Why must `fireworks` never gain `pytest-xdist`, when nothing in the derivation asks for `-n`? | `pkgs/fireworks/default.nix` (the note above `nativeCheckInputs`) |
+| Why are two `WFLockTest` tests deselected when they only ever skip themselves? | `pkgs/fireworks/default.nix` (`disabledTestPaths`) |
+| Why does `fireworks` pass `-rs`, and which six tests still skip? | `pkgs/fireworks/default.nix` (`pytestFlags`) |
 | Why is `mongomock-persistence` carried here, and why is it not a top-level attribute? | `pkgs/mongomock-persistence/default.nix` (the `src` comment), `tests/chemtools/default.nix` (`internalDependencies`) |
 | Why does `fireworks` need `igraph`, `graphviz` and `matplotlib` to test, and why is `mainProgram` `lpad`? | `pkgs/fireworks/default.nix` (`nativeCheckInputs`, `meta.mainProgram`) |
 | Why does `metallogen` set `doCheck = false` when `MetalloGen/test.py` exists? | `pkgs/metallogen/default.nix` (the `doCheck` note) |
-| Why does `molcat` install a top-level `src` module, and why is it marked unfree? | `pkgs/molcat/default.nix` (`pythonImportsCheck`, `meta.license`) |
-| Why is `molcat` absent from the flake's `packages` when the other cclib packages are there? | `flake.nix` (the note in the `cclibPkgs` override block) |
 | Why does the chemtools python-pin test compose *every* overlay when the cheminformatics one does not? | `tests/chemtools/default.nix` (the `fullyOverlaidPkgs` binding) |
+| Why does this repo carry a `monty` at all, and when should it go? | `pkgs/monty/default.nix` (the header), `overlays/default.nix` (the `monty` binding in the materials overlay) |
+| Why does `monty` need a bson fix its own test suite cannot see? | `pkgs/monty/default.nix` (`postPatch`), `overlays/default.nix` (the aiida overlay's `monty` binding) |
+| Why does `pymatgen-core` *replace* nixpkgs' `pymatgen` rather than sit beside it? | `pkgs/pymatgen-core/default.nix` (the header) |
+| How do two distributions share the `pymatgen/` tree without colliding in a `withPackages`? | `pkgs/pymatgen-core/default.nix` (the header) |
+| Why does `pymatgen-core` delete its own `pmg` console script? | `pkgs/pymatgen-core/default.nix` (`postPatch`) |
+| Why is `pymatgen` pinned to a commit when it has a tag, and why is the submodule left empty? | `pkgs/pymatgen/default.nix` (the `src` note) |
+| Why does the pure-Python half of pymatgen still need Cython to build? | `pkgs/pymatgen/default.nix` (`build-system`) |
+| Why does `pymatgen` feed setuptools-scm only the part of `version` before the dash? | `pkgs/pymatgen/default.nix` (the `env` note) |
+| Why do both pymatgen halves export `PMG_TEST_FILES_DIR`, and why a different directory each? | `pkgs/pymatgen-core/default.nix` and `pkgs/pymatgen/default.nix` (`preCheck`) |
+| Why is `pymatgenFor` keyed on a version now, and what aborts without the guard? | `overlays/default.nix` (`pymatgenFor`) |
+| Why does `tests/aiida`'s python-pin test compose every overlay too, when it did not have to before? | `tests/aiida/default.nix` (the `fullyOverlaidBrokenPkgs` binding) |
 
 ### The sdist-has-no-tests trap
 
@@ -385,11 +420,62 @@ availability claims were probed against the locked nixpkgs with
 `nix-instantiate --eval --store dummy://` over `python313Packages`, `python3.pkgs` and the top
 level.
 
-**The materials-project chain** is gated on six shared dependencies nixpkgs lacks —
-`pymatgen-core`, `emmet-core`, `maggma`, `mp-pyrho`, `qtoolkit`, `mp-api` — plus a `pymatgen`
-bump from 2025.10.7, where consumers ask for `>=2026.x`. In dependency order it unlocks
-`jobflow` → `jobflow-remote`, `pymatgen-analysis-defects`, `matgl`, `matcalc`, `atomate2`,
-`quacc`. `overlays.materials` already exists for it.
+**The materials-project chain.** `atomate2` is the near-term target;
+`pymatgen-analysis-defects`, `matgl`, `matcalc` and `quacc` follow. Reading those targets' own
+`pyproject.toml` against the locked nixpkgs, this is where the survey stands:
+
+| Missing | Wanted by | Status |
+|---|---|---|
+| `maggma` | `jobflow` — its only gap | **done** |
+| `qtoolkit` | `jobflow-remote` — its only gap | **done**; `dependencies = []`, which is why it went first |
+| `mongomock-ng` | `maggma` | **done**; *not* the `mongomock` nixpkgs already has |
+| `pubchempy` | `emmet-core` | **done** |
+| `monty` | `pymatgen-core` | **done**; a backport, guarded — see `pkgs/monty/default.nix` |
+| `pymatgen-core` | everything left | **done**; the split below |
+| `pymatgen` | `emmet-core`, `atomate2` | **done**; the other half of the same split |
+| `pymatgen-io-validation` | `emmet-core` | next; needs `pymatgen-core>=2026.4.16`, which is now here |
+| `emmet-core` | `atomate2`, `quacc` | blocked on the above; `materialsproject/emmet`, in `emmet-core/` |
+
+One thing to expect from `pymatgen-io-validation`: it installs *into* the
+`pymatgen.io.validation` namespace, so it shares a package directory with `pymatgen-core` and
+will meet `pythonCatchConflictsPhase`.
+
+Everything else resolves: `pydash`, `flufl-lock`, `schedule`, `networkx`, `supervisor`, `typer`,
+`rich`, `tomlkit`, `aioitertools`, `blake3`, `inflect`, `pyzmq`, `jsonlines`, `pandas` and the
+rest are all in nixpkgs.
+
+`mp-pyrho` and `mp-api` are **not** on this path, whatever an earlier version of this section
+said: `mp-pyrho` is wanted by `pymatgen-analysis-defects` alone, and `mp-api` only by `matcalc`
+and by atomate2's optional `mp` extra.
+
+**pymatgen split in 2026, and that was the hard part — it was not a version bump.** Upstream
+moved the core out into its own repository, which the `pymatgen` repo carries as a git submodule
+at `pymatgen-core/` (so a plain `--depth 1` clone leaves that directory empty — see `.gitmodules`
+there). "Metapackage" overstates what is left: `pymatgen`'s only *dependency* is
+`pymatgen-core>=2026.7.16`, but it still ships `analysis` (bar the three phase-diagram modules),
+`apps`, `cli`, `entries`, `ext` and `vis`. Both are PEP 420 namespace packages, neither ships
+`pymatgen/__init__.py`, and no installed file path appears in both — which is what lets
+`python3.withPackages` merge them.
+
+nixpkgs is still on the pre-split monolith, 2025.10.7, which owns the same `pymatgen/…` import
+paths, so `pymatgen-core` could not be added *beside* it. `overlays.materials` therefore
+**replaces** nixpkgs' `pymatgen` with the pair. That is exactly what `pymatgenFor`'s own note
+says must never happen to a *repair*, and the two are not in tension: `overlays.aiida` keeps its
+repair local so that a consumer who wants only AiiDA is left alone, while `overlays.materials`
+exists to deliver the split. `pymatgenFor` is now guarded on the version for that reason — under
+a full composition its `pself.pymatgen` is already the 2026 pair, and its deselections name test
+files that moved to the other half.
+
+Two consequences worth knowing before touching this. The AiiDA family now builds against
+pymatgen 2026 rather than 2025.10.7 whenever the overlays are composed, which
+`default.nix` always does — `aiida-core`, `aiida-nwchem` and `aiida-gaussian` are the three that
+take it. And `tests/aiida`'s `aiida-overlay-python-pin` had to start comparing against a fully
+composed set, for the same reason `tests/chemtools`' `chemtools-python-pin` already did.
+
+One further version conflict, unrelated to the split: `jobflow-remote` pins
+`pymongo >= 4.4, < 4.11` where nixpkgs has 4.17.0. (`atomate2` wants `<= 4.17.0`, satisfied
+exactly.) Expect `pythonRelaxDeps` plus a real check that its suite passes — pymongo 4.11 dropped
+deprecated APIs, so this one may not be cosmetic.
 
 | Not packaged | Blocker |
 |---|---|

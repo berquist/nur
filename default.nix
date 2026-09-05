@@ -82,7 +82,6 @@ in
     dbstep
     digichem-core
     metallogen
-    molcat
     xyzrender
     ;
   # graphrc is deliberately absent from that list.  It is a top-level attribute
@@ -145,5 +144,12 @@ in
 
     custodian
     fireworks
+    jobflow
+    jobflow-remote
+    maggma
+    pubchempy
+    pymatgen
+    pymatgen-core
+    qtoolkit
     ;
 }

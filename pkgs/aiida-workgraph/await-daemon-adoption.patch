@@ -1,0 +1,112 @@
+Wait for a daemon worker before pausing or killing a task.
+
+tests/test_cli.py::test_task_pause_play and ::test_task_kill both submit a
+graph, wait for the task, and then send the pause or kill through the CLI:
+
+    wg.wait(tasks={name: ['CREATED', 'RUNNING', 'WAITING']}, timeout=20, interval=2)
+    result = cli_runner.invoke(workgraph, ['task', 'pause', str(wg.pk), name])
+
+That wait does not mean what it looks like it means.  It compares against the
+WorkGraph *task* state, not the AiiDA process state, and TaskState has no
+WAITING member at all -- so the accepted set is really {CREATED, RUNNING}.
+CREATED is only ever reached by a task created already paused, which leaves
+RUNNING, and AiiDAProcessTask.execute writes RUNNING in the same breath as it
+calls submit():
+
+    process = engine_process.submit(executor, **kwargs)
+    state = TaskState.RUNNING
+
+So wg.wait returns as soon as the calculation's node exists.  No daemon worker
+has instantiated the process yet, nothing is subscribed to its RPC identifier,
+and the pause or kill message is unroutable:
+
+    REPORT   aiida.process_control: Request to kill Process<12> sent.
+    REPORT   aiida.process_control: Waiting for process(es) 12.
+    ERROR    aiida.process_control: Failed to kill Process<12>: Recipient not found: 12
+
+control.pause_processes and control.kill_processes log that through
+_resolve_futures and return normally, so `result.exit_code == 0` still holds
+and the test goes on to poll for twenty seconds for a state change that was
+never requested.  The calculation runs to completion instead:
+
+    state ProcessState.CREATED None False
+    ProcessState.WAITING Waiting for transport task: upload
+    ProcessState.WAITING Monitoring scheduler: job state RUNNING
+    ProcessState.FINISHED None
+    E  TimeoutError: Task ArithmeticAddCalculation was not paused within 20s
+
+Whether the race is lost depends only on machine load, which is why this
+passes on an idle checkout and fails under a parallel run, or the other way
+round.  The window is between the engine writing the task state and a worker
+adopting the process, and both the poll that observes the write and the
+CliRunner invocation that follows it are on the losing side of it.
+
+The fix waits for the observable that actually says a worker owns the process:
+its AiiDA process state leaving CREATED.  Every state after CREATED is written
+by the running process itself, which cannot happen before the runner has
+instantiated it and registered its RPC subscriber, so this is exactly the
+precondition the two CLI commands need.  It is a wait rather than a sleep, so
+it costs nothing on a machine that was going to win the race anyway.
+
+diff -ruN a/tests/test_cli.py b/tests/test_cli.py
+--- a/tests/test_cli.py	2026-08-31 21:48:30.160577567 -0400
++++ b/tests/test_cli.py	2026-08-31 21:48:30.180634447 -0400
+@@ -1,12 +1,42 @@
++import time
++
+ from click.testing import CliRunner
+ from aiida_workgraph.cli.cmd_workgraph import workgraph
+ import pytest
+ from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
++from aiida.engine import ProcessState
+ from aiida_workgraph import task
+ 
+ AddTask = task(ArithmeticAddCalculation)
+ 
+ 
++def await_daemon_adoption(node, timeout=60, interval=0.2):
++    """Block until a daemon worker has taken ownership of ``node``'s process.
++
++    ``wg.wait(tasks=...)`` compares against the WorkGraph *task* state, and the
++    engine sets that to ``RUNNING`` in the same breath as it calls ``submit()``
++    -- see ``AiiDAProcessTask.execute``.  So the wait returns while the process
++    node exists but no daemon worker has instantiated the process yet, and an
++    RPC addressed to it has no recipient::
++
++        ERROR aiida.process_control: Failed to kill Process<12>: Recipient not found: 12
++
++    ``control.pause_processes`` and ``control.kill_processes`` log that and
++    return rather than raising, so the CLI still exits 0 and the test goes on
++    to wait twenty seconds for a pause or a kill that was never delivered.
++
++    The AiiDA process state leaving ``CREATED`` is the observable that says a
++    worker has instantiated the process, and that is also when its RPC
++    subscriber is registered -- every later state is written by the running
++    process itself.
++    """
++    deadline = time.time() + timeout
++    while node.process_state in (None, ProcessState.CREATED):
++        if time.time() > deadline:
++            raise TimeoutError(f'Process<{node.pk}> was not adopted by a daemon worker within {timeout}s')
++        time.sleep(interval)
++
++
+ @task.graph
+ def add_graph(x, y, code):
+     return AddTask(code=code, x=x, y=y, metadata={'options': {'sleep': 15}}).sum
+@@ -45,6 +75,7 @@
+     name = wg.tasks[-1].name
+     print(f'Waiting for task {name} to be CREATED/WAITING')
+     wg.wait(tasks={name: ['CREATED', 'RUNNING', 'WAITING']}, timeout=20, interval=2)
++    await_daemon_adoption(wg.tasks[name].node)
+     result = cli_runner.invoke(workgraph, ['task', 'pause', str(wg.pk), name])
+     assert result.exit_code == 0, result.exception
+     tstart = time.time()
+@@ -77,6 +108,7 @@
+     name = wg.tasks[-1].name
+     print(f'Waiting for task {name} to be CREATED/WAITING')
+     wg.wait(tasks={name: ['CREATED', 'RUNNING', 'WAITING']}, timeout=20, interval=2)
++    await_daemon_adoption(wg.tasks[name].node)
+     result = cli_runner.invoke(workgraph, ['task', 'kill', str(wg.pk), name])
+     assert result.exit_code == 0, result.exception
+     tstart = time.time()
