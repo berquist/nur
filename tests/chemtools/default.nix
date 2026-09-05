@@ -86,6 +86,7 @@ let
     "pubchempy"
     "pymatgen"
     "pymatgen-core"
+    "pymatgen-io-validation"
     "qtoolkit"
   ];
 

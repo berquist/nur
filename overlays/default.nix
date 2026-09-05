@@ -469,6 +469,14 @@ in
         # of the consumer that happens to want it.
         pubchempy = pself.callPackage ../pkgs/pubchempy { };
 
+        # emmet-core's other missing dependency, and the last one — re-exported
+        # for the same reason as pubchempy above: emmet-core is not packaged
+        # yet, so a top-level attribute is what gets ci.nix to build this in the
+        # meantime, and a VASP I/O validator is a tool in its own right rather
+        # than an emmet-core internal.  A third distribution in the `pymatgen/`
+        # namespace beside pymatgen-core and pymatgen — see its header.
+        pymatgen-io-validation = pself.callPackage ../pkgs/pymatgen-io-validation { };
+
         # Dependencies of one package each, so they stop here rather than
         # being re-exported: they stay reachable as python313Packages.*
         # without ci.nix building them in their own right.
@@ -497,6 +505,7 @@ in
       pubchempy
       pymatgen
       pymatgen-core
+      pymatgen-io-validation
       qtoolkit
       ;
   };

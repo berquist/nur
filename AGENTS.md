@@ -47,8 +47,9 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   `chemfiles` (ours, C++ versus Python) and `trexio` (nixpkgs', C library versus Python), and
   the second is the dangerous one.
 - the **materials family** — `custodian`, `fireworks`, `qtoolkit`, `maggma`, `jobflow`,
-  `jobflow-remote`, `pubchempy`, and both halves of upstream pymatgen's 2026 split,
-  `pymatgen-core` and `pymatgen`. Plus three carried for a dependant alone and not re-exported:
+  `jobflow-remote`, `pubchempy`, `pymatgen-io-validation`, and both halves of upstream pymatgen's
+  2026 split, `pymatgen-core` and `pymatgen`. Plus three carried for a dependant alone and not
+  re-exported:
   `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's) and `monty`, a backport that
   exists only because `pymatgen-core` needs a version no channel here ships yet.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
@@ -432,12 +433,14 @@ level.
 | `monty` | `pymatgen-core` | **done**; a backport, guarded — see `pkgs/monty/default.nix` |
 | `pymatgen-core` | everything left | **done**; the split below |
 | `pymatgen` | `emmet-core`, `atomate2` | **done**; the other half of the same split |
-| `pymatgen-io-validation` | `emmet-core` | next; needs `pymatgen-core>=2026.4.16`, which is now here |
-| `emmet-core` | `atomate2`, `quacc` | blocked on the above; `materialsproject/emmet`, in `emmet-core/` |
+| `pymatgen-io-validation` | `emmet-core` | **done**; `pkgs/pymatgen-io-validation`, re-exported like `pubchempy` for the same reason |
+| `emmet-core` | `atomate2`, `quacc` | next; both blockers cleared. `materialsproject/emmet`, cloned in `wc/emmet` |
 
-One thing to expect from `pymatgen-io-validation`: it installs *into* the
-`pymatgen.io.validation` namespace, so it shares a package directory with `pymatgen-core` and
-will meet `pythonCatchConflictsPhase`.
+`pythonCatchConflictsPhase` did not, in the end, have anything to catch: `pymatgen-io-validation`
+installs only `pymatgen/io/validation/`, and neither `pymatgen-core` nor `pymatgen` ships a
+`pymatgen/io/__init__.py` — or any other file under that tree — for it to collide with. All
+three are PEP 420 namespace packages and their installed file sets are disjoint, which is what
+lets `python3.withPackages` merge them.
 
 Everything else resolves: `pydash`, `flufl-lock`, `schedule`, `networkx`, `supervisor`, `typer`,
 `rich`, `tomlkit`, `aioitertools`, `blake3`, `inflect`, `pyzmq`, `jsonlines`, `pandas` and the
