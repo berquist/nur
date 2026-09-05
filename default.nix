@@ -143,12 +143,19 @@ in
     molara
 
     custodian
+    emmet-core
     fireworks
     jobflow
     jobflow-remote
+    lobsterpy
     maggma
+    matgl
+    optimade
     pubchempy
     pymatgen
+    pymatgen-analysis-alloys
+    pymatgen-analysis-defects
+    pymatgen-analysis-diffusion
     pymatgen-core
     pymatgen-io-validation
     qtoolkit

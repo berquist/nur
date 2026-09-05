@@ -461,21 +461,29 @@ in
         jobflow = pself.callPackage ../pkgs/jobflow { };
         jobflow-remote = pself.callPackage ../pkgs/jobflow-remote { };
 
-        # emmet-core's, and so far only emmet-core's — but re-exported rather
-        # than left internal like mongomock-ng, because emmet-core is blocked
-        # behind pymatgen-io-validation and being a top-level attribute is the
-        # only thing that gets ci.nix to build this at all in the meantime.
-        # It is a general-purpose PubChem client, not an implementation detail
-        # of the consumer that happens to want it.
-        pubchempy = pself.callPackage ../pkgs/pubchempy { };
+        # The Materials Project schema layer.  atomate2 and quacc both depend
+        # on it, and it was the last gap in that chain.  Its suite runs against
+        # what is installed, including the add-ons below — see the
+        # `nativeCheckInputs` note in ../pkgs/emmet-core.
+        emmet-core = pself.callPackage ../pkgs/emmet-core { };
 
-        # emmet-core's other missing dependency, and the last one — re-exported
-        # for the same reason as pubchempy above: emmet-core is not packaged
-        # yet, so a top-level attribute is what gets ci.nix to build this in the
-        # meantime, and a VASP I/O validator is a tool in its own right rather
-        # than an emmet-core internal.  A third distribution in the `pymatgen/`
-        # namespace beside pymatgen-core and pymatgen — see its header.
+        # emmet-core dependencies, re-exported rather than left internal like
+        # mongomock-ng: each is a general-purpose tool in its own right — a
+        # PubChem client, a VASP I/O validator, pymatgen add-ons, an OPTIMADE
+        # model library, a LOBSTER analyser, an ML-potential library — not
+        # implementation details of emmet-core, and being top-level is what makes
+        # ci.nix build each on its own.  The add-ons and pymatgen-io-validation
+        # are further distributions in the `pymatgen/` namespace beside
+        # pymatgen-core and pymatgen — see their headers.  Most are also
+        # atomate2's own follow-on targets.
+        pubchempy = pself.callPackage ../pkgs/pubchempy { };
         pymatgen-io-validation = pself.callPackage ../pkgs/pymatgen-io-validation { };
+        pymatgen-analysis-alloys = pself.callPackage ../pkgs/pymatgen-analysis-alloys { };
+        pymatgen-analysis-defects = pself.callPackage ../pkgs/pymatgen-analysis-defects { };
+        pymatgen-analysis-diffusion = pself.callPackage ../pkgs/pymatgen-analysis-diffusion { };
+        optimade = pself.callPackage ../pkgs/optimade { };
+        lobsterpy = pself.callPackage ../pkgs/lobsterpy { };
+        matgl = pself.callPackage ../pkgs/matgl { };
 
         # Dependencies of one package each, so they stop here rather than
         # being re-exported: they stay reachable as python313Packages.*
@@ -483,9 +491,12 @@ in
         #
         # mongomock-persistence is fireworks'.  mongomock-ng is maggma's, and
         # is a third distinct mongomock rather than a version of either — see
-        # the note at the top of ../pkgs/mongomock-ng.
+        # the note at the top of ../pkgs/mongomock-ng.  mp-pyrho is
+        # pymatgen-analysis-defects'.  mendeleev is lobsterpy[featurizer]'s.
         mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
         mongomock-ng = pself.callPackage ../pkgs/mongomock-ng { };
+        mp-pyrho = pself.callPackage ../pkgs/mp-pyrho { };
+        mendeleev = pself.callPackage ../pkgs/mendeleev { };
       })
     ];
 
@@ -498,12 +509,19 @@ in
     # for the opposite reason — they are the deliverable.
     inherit (final.python313Packages)
       custodian
+      emmet-core
       fireworks
       jobflow
       jobflow-remote
+      lobsterpy
       maggma
+      matgl
+      optimade
       pubchempy
       pymatgen
+      pymatgen-analysis-alloys
+      pymatgen-analysis-defects
+      pymatgen-analysis-diffusion
       pymatgen-core
       pymatgen-io-validation
       qtoolkit

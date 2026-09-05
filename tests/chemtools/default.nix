@@ -79,12 +79,19 @@ let
     "sella"
     "molara"
     "custodian"
+    "emmet-core"
     "fireworks"
     "jobflow"
     "jobflow-remote"
+    "lobsterpy"
     "maggma"
+    "matgl"
+    "optimade"
     "pubchempy"
     "pymatgen"
+    "pymatgen-analysis-alloys"
+    "pymatgen-analysis-defects"
+    "pymatgen-analysis-diffusion"
     "pymatgen-core"
     "pymatgen-io-validation"
     "qtoolkit"
@@ -112,9 +119,11 @@ let
   # nixpkgs has no top-level `monty` either, so lifting one would invent an
   # attribute rather than shadow one.
   internalDependencies = [
+    "mendeleev"
     "mongomock-persistence"
     "mongomock-ng"
     "monty"
+    "mp-pyrho"
     "pyrr"
   ];
 

@@ -47,11 +47,13 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   `chemfiles` (ours, C++ versus Python) and `trexio` (nixpkgs', C library versus Python), and
   the second is the dangerous one.
 - the **materials family** — `custodian`, `fireworks`, `qtoolkit`, `maggma`, `jobflow`,
-  `jobflow-remote`, `pubchempy`, `pymatgen-io-validation`, and both halves of upstream pymatgen's
-  2026 split, `pymatgen-core` and `pymatgen`. Plus three carried for a dependant alone and not
-  re-exported:
-  `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's) and `monty`, a backport that
-  exists only because `pymatgen-core` needs a version no channel here ships yet.
+  `jobflow-remote`, `pubchempy`, `pymatgen-io-validation`, `emmet-core`, the three
+  `pymatgen-analysis-{alloys,defects,diffusion}` add-ons, `optimade`, `lobsterpy`, `matgl`, and
+  both halves of upstream pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus five
+  carried for a dependant alone and not re-exported:
+  `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's), `mp-pyrho`
+  (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s) and `monty`, a backport
+  that exists only because `pymatgen-core` needs a version no channel here ships yet.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
   upstream split it and the two layouts cannot coexist, and `monty` on the legs that are behind.
   Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
@@ -420,9 +422,9 @@ availability claims were probed against the locked nixpkgs with
 `nix-instantiate --eval --store dummy://` over `python313Packages`, `python3.pkgs` and the top
 level.
 
-**The materials-project chain.** `atomate2` is the near-term target;
-`pymatgen-analysis-defects`, `matgl`, `matcalc` and `quacc` follow. Reading those targets' own
-`pyproject.toml` against the locked nixpkgs, this is where the survey stands:
+**The materials-project chain.** `atomate2` is the near-term target; `matcalc` and `quacc`
+follow. Reading those targets' own `pyproject.toml` against the locked nixpkgs, this is where the
+survey stands. Every gap between here and `atomate2` is now closed:
 
 | Missing | Wanted by | Status |
 |---|---|---|
@@ -434,7 +436,15 @@ level.
 | `pymatgen-core` | everything left | **done**; the split below |
 | `pymatgen` | `emmet-core`, `atomate2` | **done**; the other half of the same split |
 | `pymatgen-io-validation` | `emmet-core` | **done**; `pkgs/pymatgen-io-validation`, re-exported like `pubchempy` for the same reason |
-| `emmet-core` | `atomate2`, `quacc` | next; both blockers cleared. `materialsproject/emmet`, cloned in `wc/emmet` |
+| `mp-pyrho` | `pymatgen-analysis-defects` | **done**; `pkgs/mp-pyrho`, internal (dist `mp-pyrho`, import `pyrho`) |
+| `pymatgen-analysis-alloys` | `emmet-core` tests, atomate2 `alloys` | **done**; `pkgs/pymatgen-analysis-alloys` |
+| `pymatgen-analysis-defects` | `emmet-core` tests, atomate2 `defects` | **done**; `pkgs/pymatgen-analysis-defects` |
+| `pymatgen-analysis-diffusion` | `emmet-core` tests, atomate2 `approxneb` | **done**; `pkgs/pymatgen-analysis-diffusion` — patches a `StructureGraph` rename upstream master has not caught |
+| `optimade` | `emmet-core` tests | **done**; `pkgs/optimade` — the models half only, no FastAPI server |
+| `lobsterpy` | `emmet-core` tests, atomate2 `lobster` | **done**; `pkgs/lobsterpy` |
+| `mendeleev` | `lobsterpy[featurizer]` | **done**; `pkgs/mendeleev`, internal — element data from a bundled SQLite db |
+| `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
+| `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
 
 `pythonCatchConflictsPhase` did not, in the end, have anything to catch: `pymatgen-io-validation`
 installs only `pymatgen/io/validation/`, and neither `pymatgen-core` nor `pymatgen` ships a
@@ -442,13 +452,53 @@ installs only `pymatgen/io/validation/`, and neither `pymatgen-core` nor `pymatg
 three are PEP 420 namespace packages and their installed file sets are disjoint, which is what
 lets `python3.withPackages` merge them.
 
+`emmet-core`'s suite **is** run, and it drove everything from `mp-pyrho` down. The first build
+was 518 passed / 13 failed / 4 errors; the last, 792 passed / 4 failed. Every failure along the
+way was a missing optional dependency, a network call, or a read-only path — not an emmet bug:
+
+- `tests/io/test_pymatgen.py::test_imports` walks the whole add-on class map unconditionally, and
+  `test_defects.py` / `test_migrationgraph.py` import `pymatgen.analysis.{defects,diffusion}` at
+  module scope. Packaging `pymatgen-analysis-{alloys,defects,diffusion}` (and `mp-pyrho` under
+  defects) covers all of them.
+- `pyarrow` — emmet gates on `ARROW_COMPATIBLE`, and without it `test_thermo.py` referenced an
+  unimported name and `test_trajectory.py::test_parquet` raised. It is in nixpkgs, so a check
+  input.
+- three tests reach the network (`test_from_url` → raw.githubusercontent.com; two robocrys
+  molecule-name tests → PubChem). Deselected in `pkgs/emmet-core`.
+
+`optimade` and `lobsterpy` are now packaged too, so `test_optimade` and `test_lobster` run.
+`test_lobster`'s `add_coxxcar_to_task_document=True` cases write a parsed file back into
+`test_files/lobster/`, which `sourceRoot` leaves read-only — `preCheck` widens it. `matgl` is
+packaged but stays **out** of `emmet-core`'s check inputs: `test_similarity`'s
+`M3GNetSimilarity` loads a pretrained model over the network, so it is better left as a clean
+`skipif matgl is None`.
+
+The add-ons and the two libraries then had their own suites to answer for, over a second and
+third round:
+
+- `pymatgen-analysis-diffusion`: a `StructureGraph.with_local_env_strategy` → `from_local_env_strategy`
+  rename (module-scope, broke collection), then a stale INCAR reference string (`NELECT = 576`
+  vs `576.0` — newer pymatgen writes it as a float). Both patched. 66 pass after.
+- `pymatgen-analysis-defects`: 38/8/11 → all missing optional deps. `dscribe` and `ase` (in
+  nixpkgs, now check inputs) fixed most; `pydefect`/`vise` (a large DFT-workflow tree) covers
+  two `test_kumagai*` tests, deselected — the `kumagai` module guards on `__has_pydefect__`
+  anyway. One more, `test_plotter`, is a deprecated pymatgen plotting function calling
+  `axis.legend(handles=[], labels=[])` which matplotlib 3.11 rejects; deselected, the
+  replacement `plotting` module is covered. 53 pass after.
+- `matgl`: `matgl/config.py` makes `~/.cache/matgl` at import, so even `pythonImportsCheck`
+  needed a writable `HOME` in `preBuild`.
+- `optimade`: `ServerConfig` validates the license by fetching its SPDX URL; the shared test
+  config's `license` is nulled in `postPatch`. 134 pass after.
+- `lobsterpy`: `tests/featurize/` needs `mendeleev`, now packaged (`pkgs/mendeleev`, internal).
+  `FeaturizeCharges` raises rather than skipping without it, so it is a check input rather than
+  a soft dependency.
+
 Everything else resolves: `pydash`, `flufl-lock`, `schedule`, `networkx`, `supervisor`, `typer`,
 `rich`, `tomlkit`, `aioitertools`, `blake3`, `inflect`, `pyzmq`, `jsonlines`, `pandas` and the
 rest are all in nixpkgs.
 
-`mp-pyrho` and `mp-api` are **not** on this path, whatever an earlier version of this section
-said: `mp-pyrho` is wanted by `pymatgen-analysis-defects` alone, and `mp-api` only by `matcalc`
-and by atomate2's optional `mp` extra.
+`mp-api` is **not** on the build path: it is wanted only by `matcalc` and by atomate2's optional
+`mp` extra.
 
 **pymatgen split in 2026, and that was the hard part — it was not a version bump.** Upstream
 moved the core out into its own repository, which the `pymatgen` repo carries as a git submodule
