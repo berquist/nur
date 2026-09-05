@@ -25,24 +25,25 @@
 # Also atomate2's `lobster` extra.
 buildPythonPackage (finalAttrs: {
   pname = "lobsterpy";
-  version = "0.6.1-unstable-2026-08-05";
+  version = "0.6.1";
   pyproject = true;
   __structuredAttrs = true;
 
-  # A commit rather than the v0.6.1 tag, which is 29 behind it: the interim
-  # commits drop the deprecated `cohp` module and adapt the code and tests to
-  # newer pymatgen, which is the pairing this repo has.
+  # The v0.6.1 tag, not a later commit: `fa502f0` on master deletes the
+  # `lobsterpy.cohp` module, and ../atomate2's `atomate2.lobster.schemas` still
+  # imports `lobsterpy.cohp.analyze`.  v0.6.1 is the transitional release that
+  # ships both `cohp` (for atomate2) and `coxx` (which ../emmet-core's
+  # `emmet.core.lobster` uses) — the one version that satisfies both.
   src = fetchFromGitHub {
     owner = "JaGeo";
     repo = "LobsterPy";
-    rev = "cb39f3a129ac1016beb6947c5b316de87a88d644";
-    hash = "sha256-AcGQg45B3wKrmiZUdbflC5BqqXbu8vu7pm1JGSuPTmU=";
+    tag = "v${finalAttrs.version}";
+    hash = "sha256-hA/Gvv0xWwb6FKDjFKfn7KJ3fw7g0wKiuxwSrDceGz0=";
   };
 
   # setuptools_scm against a fetchFromGitHub tarball with no repository, the same
-  # hole ../maggma falls into.  The `-unstable-` suffix is not PEP 440, so only
-  # the part before the first dash goes in.
-  env.SETUPTOOLS_SCM_PRETEND_VERSION = lib.head (lib.splitString "-" finalAttrs.version);
+  # hole ../maggma falls into.
+  env.SETUPTOOLS_SCM_PRETEND_VERSION = finalAttrs.version;
 
   build-system = [
     setuptools
@@ -70,7 +71,8 @@ buildPythonPackage (finalAttrs: {
 
   pythonImportsCheck = [
     "lobsterpy"
-    "lobsterpy.coxx.analyze"
+    "lobsterpy.cohp.analyze" # atomate2 imports this
+    "lobsterpy.coxx.analyze" # emmet-core imports this
     "lobsterpy.quality.analyze"
   ];
 

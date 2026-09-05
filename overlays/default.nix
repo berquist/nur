@@ -485,6 +485,11 @@ in
         lobsterpy = pself.callPackage ../pkgs/lobsterpy { };
         matgl = pself.callPackage ../pkgs/matgl { };
 
+        # The materials chain's near-term target — its full `dependencies` set
+        # is now satisfied.  Optional extras that need unpackaged code (chgnet,
+        # abipy, openff, torch-sim, mp-api) are left out; see ../pkgs/atomate2.
+        atomate2 = pself.callPackage ../pkgs/atomate2 { };
+
         # Dependencies of one package each, so they stop here rather than
         # being re-exported: they stay reachable as python313Packages.*
         # without ci.nix building them in their own right.
@@ -508,6 +513,7 @@ in
     # ci.nix another thing to build.  `pymatgen` and `pymatgen-core` are here
     # for the opposite reason — they are the deliverable.
     inherit (final.python313Packages)
+      atomate2
       custodian
       emmet-core
       fireworks

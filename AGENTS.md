@@ -49,8 +49,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 - the **materials family** — `custodian`, `fireworks`, `qtoolkit`, `maggma`, `jobflow`,
   `jobflow-remote`, `pubchempy`, `pymatgen-io-validation`, `emmet-core`, the three
   `pymatgen-analysis-{alloys,defects,diffusion}` add-ons, `optimade`, `lobsterpy`, `matgl`, and
-  both halves of upstream pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus five
-  carried for a dependant alone and not re-exported:
+  `atomate2`, and both halves of upstream pymatgen's 2026 split, `pymatgen-core` and `pymatgen`.
+  Plus five carried for a dependant alone and not re-exported:
   `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's), `mp-pyrho`
   (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s) and `monty`, a backport
   that exists only because `pymatgen-core` needs a version no channel here ships yet.
@@ -422,9 +422,8 @@ availability claims were probed against the locked nixpkgs with
 `nix-instantiate --eval --store dummy://` over `python313Packages`, `python3.pkgs` and the top
 level.
 
-**The materials-project chain.** `atomate2` is the near-term target; `matcalc` and `quacc`
-follow. Reading those targets' own `pyproject.toml` against the locked nixpkgs, this is where the
-survey stands. Every gap between here and `atomate2` is now closed:
+**The materials-project chain.** `atomate2` is packaged; `matcalc` and `quacc` follow. Reading
+those targets' own `pyproject.toml` against the locked nixpkgs, this is where the survey stands:
 
 | Missing | Wanted by | Status |
 |---|---|---|
@@ -441,10 +440,11 @@ survey stands. Every gap between here and `atomate2` is now closed:
 | `pymatgen-analysis-defects` | `emmet-core` tests, atomate2 `defects` | **done**; `pkgs/pymatgen-analysis-defects` |
 | `pymatgen-analysis-diffusion` | `emmet-core` tests, atomate2 `approxneb` | **done**; `pkgs/pymatgen-analysis-diffusion` — patches a `StructureGraph` rename upstream master has not caught |
 | `optimade` | `emmet-core` tests | **done**; `pkgs/optimade` — the models half only, no FastAPI server |
-| `lobsterpy` | `emmet-core` tests, atomate2 `lobster` | **done**; `pkgs/lobsterpy` |
+| `lobsterpy` | `emmet-core` tests, atomate2 `lobster` | **done**; `pkgs/lobsterpy` at the v0.6.1 tag — the transitional release with both `lobsterpy.cohp` (atomate2) and `lobsterpy.coxx` (emmet-core); master deletes `cohp` |
 | `mendeleev` | `lobsterpy[featurizer]` | **done**; `pkgs/mendeleev`, internal — element data from a bundled SQLite db |
 | `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
+| `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied; extras needing unpackaged code (`forcefields`, `openff`, `torchsim`, `abinit`, `mp`) omitted. `tests/{vasp,ase,lobster}` run — `test_magnetic_orderings` deselected (needs enumlib's Fortran executables) |
 
 `pythonCatchConflictsPhase` did not, in the end, have anything to catch: `pymatgen-io-validation`
 installs only `pymatgen/io/validation/`, and neither `pymatgen-core` nor `pymatgen` ships a
@@ -538,6 +538,7 @@ deprecated APIs, so this one may not be cosmetic.
 | `fairchem` | 13-distribution monorepo, torch plus pretrained model weights |
 | `PsiDataViz` | uv workspace, never released, includes a React/TS frontend; only `packages/psidata` is plausible |
 | `crest` | Fortran/meson with vendored subprojects; not in nixpkgs. Feasible, just different work — `tblite` and `xtb` are already there to build against |
+| `enumlib` | `msg-byu/enumlib`, a small Fortran project (`enum.x`, `makestr.x`); not in nixpkgs. pymatgen's `EnumlibAdaptor` shells out to it, so `atomate2`'s `test_magnetic_orderings` needs it (deselected for now), as would any `MagneticStructureEnumerator` use. Feasible — Makefile build, a `symlib` submodule its own repo carries |
 
 ## Template leftovers
 

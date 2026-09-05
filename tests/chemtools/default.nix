@@ -78,6 +78,7 @@ let
     "strainjedi"
     "sella"
     "molara"
+    "atomate2"
     "custodian"
     "emmet-core"
     "fireworks"
