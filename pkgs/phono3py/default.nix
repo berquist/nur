@@ -98,5 +98,8 @@ buildPythonPackage (finalAttrs: {
     license = lib.licenses.bsd3;
     mainProgram = "phono3py";
     maintainers = with lib.maintainers; [ berquist ];
+    # phono3py 4.4 links against phonopy 4.x's C library and pins
+    # `phonopy >= 4.4, < 4.5`; nixos-26.05 is still on phonopy 3.5.1.
+    broken = lib.versionOlder phonopy.version "4.4";
   };
 })

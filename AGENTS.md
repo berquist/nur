@@ -49,12 +49,12 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 - the **materials family** — `custodian`, `fireworks`, `qtoolkit`, `maggma`, `jobflow`,
   `jobflow-remote`, `pubchempy`, `pymatgen-io-validation`, `emmet-core`, the three
   `pymatgen-analysis-{alloys,defects,diffusion}` add-ons, `optimade`, `lobsterpy`, `matgl`, and
-  `atomate2`, `matcalc`, `quacc`, `matminer`, `redun`, `phono3py`, and both halves of upstream
+  `atomate2`, `matcalc`, `quacc`, `matminer`, `redun`, `phono3py`, `mp-api`, and both halves of upstream
   pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus six carried for a dependant alone
   and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
   `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
-  (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s) and `monty`, a backport that exists only
-  because `pymatgen-core` needs a version no channel here ships yet.
+  (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s), `maml` (`matcalc[maml]`'s) and `monty`, a
+  backport that exists only because `pymatgen-core` needs a version no channel here ships yet.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
   upstream split it and the two layouts cannot coexist, and `monty` on the legs that are behind.
   Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
@@ -446,8 +446,10 @@ where the survey stands:
 | `mendeleev` | `lobsterpy[featurizer]` | **done**; `pkgs/mendeleev`, internal — element data from a bundled SQLite db |
 | `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
-| `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied; extras needing unpackaged code (`forcefields`, `openff`, `torchsim`, `abinit`, `mp`) omitted. `tests/{vasp,ase,lobster}` run — `test_magnetic_orderings` deselected (needs enumlib's Fortran executables) |
-| `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3`, `benchmark`, `matgl`, `mace`, `sevennet`. Missing: `grace` (tensorflow), `deepmd` (deepmd-kit), `maml` (mp-api), `fairchem`; `orb`/`mattersim`/`petmad` are NVIDIA-blocked (see below) |
+| `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `aims`, `amset`. `tests/{vasp,ase,lobster}` run — `test_magnetic_orderings` deselected (needs enumlib's Fortran executables) |
+| `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3` (phonopy-4 channels only), `benchmark`, `maml`, `matgl`, `mace` (unstable only), `sevennet`. Missing: `grace` (tensorflow), `deepmd` (deepmd-kit), `fairchem`; `orb`/`mattersim`/`petmad` are NVIDIA-blocked (see below) |
+| `mp-api` | `maml`, atomate2 `mp` | **done**; `pkgs/mp-api` — `doCheck = false` (every test drives a live MPRester). Dist `mp-api`, import `mp_api` |
+| `maml` | `matcalc[maml]` | **done**; `pkgs/maml`, internal — `doCheck = false` (TensorFlow / matgl-model tests, `apps/pes` needs external fitting binaries) |
 | `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `jobflow`, `mp`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `fairchem`, `torchsim`, `mlip` (needs `fairchem-core` atop `rootstock`), `defects` (needs `shakenbreak`). Test round: ASE-native recipes + `wflow` |
 | `matminer` | `matcalc[benchmark]` | **done**; `pkgs/matminer` — `tests/{featurizers,utils}` only, the data-retrieval suites hit external APIs |
 | `redun` | `quacc[redun]` | **done**; `pkgs/redun` — `doCheck = false` (AWS-executor tests), `fancycompleter` removed |

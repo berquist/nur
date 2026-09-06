@@ -16,6 +16,7 @@
 
   # optional-dependencies
   mace-torch ? null, # not in nixos-26.05
+  maml,
   matgl,
   matminer,
   phono3py,
@@ -58,11 +59,13 @@ buildPythonPackage (finalAttrs: {
 
   build-system = [ setuptools ];
 
-  # phono3py (the `phonon3` extra) is not in nixpkgs, and `matminer` (the
-  # `benchmark` extra) is not either; `matcalc._phonon3` guards its phono3py
-  # import, so the package still imports.  The ML-potential backends — matgl,
-  # mace, sevenn, orb, mattersim, fairchem, deepmd — are all optional extras,
-  # and only matgl is packaged here.
+  # `phonopy >= 4.2` is a hard requirement in the wheel metadata, and
+  # nixos-26.05 carries phonopy 3.5.1 — `pythonRuntimeDepsCheckHook` fails there
+  # before anything runs.  matcalc's phonopy use is version-agnostic (`import
+  # phonopy`, `phonopy.file_IO.write_FORCE_CONSTANTS`, `pymatgen.io.phonopy`),
+  # the same stable surface ../aiida-phonopy relaxes for the same reason.
+  pythonRelaxDeps = [ "phonopy" ];
+
   dependencies = [
     ase
     huggingface-hub
@@ -73,20 +76,23 @@ buildPythonPackage (finalAttrs: {
   ];
 
   # Upstream's extras whose dependencies are packaged.  `mace` only where
-  # `mace-torch` is (unstable, not 26.05).  Still missing: `grace`
-  # (tensorpotential), `mattersim` and `orb` (both need NVIDIA's
-  # `nvalchemi-toolkit-ops`, like torch-sim), `fairchem` (fairchem-core),
-  # `petmad` (pet-mad → nvalchemi + warp-lang), `deepmd` (deepmd-kit), `maml`
-  # (mp-api).
+  # `mace-torch` is (unstable, not 26.05); `phonon3` only where phonopy is 4.x,
+  # since ../phono3py needs `phonopy >= 4.4` and 26.05 has 3.5.1.  Still
+  # missing: `grace` (tensorpotential), `deepmd` (deepmd-kit), `fairchem`
+  # (fairchem-core), and `mattersim` / `orb` / `petmad`, which need NVIDIA's
+  # `nvalchemi-toolkit-ops` the way torch-sim does.
   optional-dependencies = {
     phonon = [ seekpath ];
-    phonon3 = [ phono3py ];
     benchmark = [ matminer ];
+    maml = [ maml ];
     matgl = [ matgl ];
     sevennet = [ sevenn ];
   }
   // lib.optionalAttrs (mace-torch != null) {
     mace = [ mace-torch ];
+  }
+  // lib.optionalAttrs (lib.versionAtLeast phonopy.version "4") {
+    phonon3 = [ phono3py ];
   };
 
   # The suite is not run.  `tests/conftest.py` imports `matgl` at module scope

@@ -26,6 +26,7 @@
   dscribe,
   ijson,
   lobsterpy,
+  mp-api,
   phonopy,
   pymatgen-analysis-defects,
   pymatgen-analysis-diffusion,
@@ -100,11 +101,12 @@ buildPythonPackage (finalAttrs: {
 
   # The extras whose dependencies are all packaged here.  The rest —
   # `forcefields` (chgnet, mace, sevenn…), `openmm`/`openff`, `torchsim`,
-  # `abinit` (abipy), `aims`, `amset`, `mp` (mp-api) — are not, and are omitted
-  # rather than partially filled.
+  # `abinit` (abipy), `aims`, `amset` — are not, and are omitted rather than
+  # partially filled.
   optional-dependencies = {
     ase = [ ase ];
     ase-ext = [ tblite ];
+    mp = [ mp-api ];
     lobster = [
       ijson
       lobsterpy

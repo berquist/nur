@@ -504,6 +504,7 @@ in
         matminer = pself.callPackage ../pkgs/matminer { };
         redun = pself.callPackage ../pkgs/redun { };
         phono3py = pself.callPackage ../pkgs/phono3py { };
+        mp-api = pself.callPackage ../pkgs/mp-api { };
 
         # Dependencies of one package each, so they stop here rather than
         # being re-exported: they stay reachable as python313Packages.*
@@ -516,9 +517,11 @@ in
         mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
         mongomock-ng = pself.callPackage ../pkgs/mongomock-ng { };
         mp-pyrho = pself.callPackage ../pkgs/mp-pyrho { };
-        # rootstock is quacc[mlip]'s alone; sevenn is matcalc[sevennet]'s.
+        # rootstock is quacc[mlip]'s alone; sevenn is matcalc[sevennet]'s;
+        # maml is matcalc[maml]'s.
         rootstock = pself.callPackage ../pkgs/rootstock { };
         sevenn = pself.callPackage ../pkgs/sevenn { };
+        maml = pself.callPackage ../pkgs/maml { };
         mendeleev = pself.callPackage ../pkgs/mendeleev { };
       })
     ];
@@ -542,6 +545,7 @@ in
       matcalc
       matgl
       matminer
+      mp-api
       optimade
       phono3py
       pubchempy

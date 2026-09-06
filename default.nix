@@ -153,6 +153,7 @@ in
     matcalc
     matgl
     matminer
+    mp-api
     optimade
     phono3py
     pubchempy
