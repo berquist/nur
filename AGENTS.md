@@ -53,8 +53,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus six carried for a dependant alone
   and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
   `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
-  (`quacc[mlip]`'s) and `monty`, a backport that exists only because `pymatgen-core` needs a
-  version no channel here ships yet.
+  (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s) and `monty`, a backport that exists only
+  because `pymatgen-core` needs a version no channel here ships yet.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
   upstream split it and the two layouts cannot coexist, and `monty` on the legs that are behind.
   Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
@@ -447,7 +447,7 @@ where the survey stands:
 | `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
 | `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied; extras needing unpackaged code (`forcefields`, `openff`, `torchsim`, `abinit`, `mp`) omitted. `tests/{vasp,ase,lobster}` run — `test_magnetic_orderings` deselected (needs enumlib's Fortran executables) |
-| `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3`, `benchmark`, `matgl`, `mace`. Missing: `sevennet`/`grace`/`orb`/`mattersim`/`fairchem`/`petmad`/`deepmd`/`maml` |
+| `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3`, `benchmark`, `matgl`, `mace`, `sevennet`. Missing: `grace` (tensorflow), `deepmd` (deepmd-kit), `maml` (mp-api), `fairchem`; `orb`/`mattersim`/`petmad` are NVIDIA-blocked (see below) |
 | `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `jobflow`, `mp`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `fairchem`, `torchsim`, `mlip` (needs `fairchem-core` atop `rootstock`), `defects` (needs `shakenbreak`). Test round: ASE-native recipes + `wflow` |
 | `matminer` | `matcalc[benchmark]` | **done**; `pkgs/matminer` — `tests/{featurizers,utils}` only, the data-retrieval suites hit external APIs |
 | `redun` | `quacc[redun]` | **done**; `pkgs/redun` — `doCheck = false` (AWS-executor tests), `fancycompleter` removed |
@@ -540,7 +540,8 @@ deprecated APIs, so this one may not be cosmetic.
 | Not packaged | Blocker |
 |---|---|
 | `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs |
-| `ShakeNBreak` | needs `doped` (missing, large) and `hiphive` (missing), on top of the chain above |
+| `orb-models`, `mattersim`, `pet-mad` | same NVIDIA wall as `torch-sim` — `orb-models` lists `nvalchemi-toolkit-ops` as a core dep, `mattersim` lists `torch-sim-atomistic` (→ nvalchemi), `pet-mad` lists `nvalchemi-toolkit-ops` + `warp-lang`. These are the matcalc `orb` / `mattersim` / `petmad` extras |
+| `ShakeNBreak` (the `quacc[defects]` extra) | a circular cluster: `shakenbreak` → `doped` + `hiphive`; `doped` → `pydefect` + `vise` (both huge, ~800 commits past their tags) + `shakenbreak` (the cycle) + `cmcrameri` + `matplotlib-label-lines`. Break the cycle by building `doped` without `shakenbreak` first. All cloned in `wc/` |
 | `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
 | `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
 | `fairchem` | 13-distribution monorepo, torch plus pretrained model weights |

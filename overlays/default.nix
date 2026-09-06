@@ -516,8 +516,9 @@ in
         mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
         mongomock-ng = pself.callPackage ../pkgs/mongomock-ng { };
         mp-pyrho = pself.callPackage ../pkgs/mp-pyrho { };
-        # rootstock is quacc[mlip]'s alone.
+        # rootstock is quacc[mlip]'s alone; sevenn is matcalc[sevennet]'s.
         rootstock = pself.callPackage ../pkgs/rootstock { };
+        sevenn = pself.callPackage ../pkgs/sevenn { };
         mendeleev = pself.callPackage ../pkgs/mendeleev { };
       })
     ];

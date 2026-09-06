@@ -136,6 +136,7 @@ let
     "mp-pyrho"
     "pyrr"
     "rootstock"
+    "sevenn"
   ];
 
   # `trexio` is deliberately not in that list, because it cannot satisfy it:

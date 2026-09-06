@@ -20,6 +20,7 @@
   matminer,
   phono3py,
   seekpath,
+  sevenn,
 
   # tests
   pytestCheckHook,
@@ -72,15 +73,17 @@ buildPythonPackage (finalAttrs: {
   ];
 
   # Upstream's extras whose dependencies are packaged.  `mace` only where
-  # `mace-torch` is (unstable, not 26.05).  Still missing: `sevennet` (sevenn),
-  # `grace` (tensorpotential), `orb` (orb-models, pynanoflann), `mattersim`,
-  # `fairchem` (fairchem-core), `petmad` (pet-mad), `deepmd` (deepmd-kit),
-  # `maml`.
+  # `mace-torch` is (unstable, not 26.05).  Still missing: `grace`
+  # (tensorpotential), `mattersim` and `orb` (both need NVIDIA's
+  # `nvalchemi-toolkit-ops`, like torch-sim), `fairchem` (fairchem-core),
+  # `petmad` (pet-mad → nvalchemi + warp-lang), `deepmd` (deepmd-kit), `maml`
+  # (mp-api).
   optional-dependencies = {
     phonon = [ seekpath ];
     phonon3 = [ phono3py ];
     benchmark = [ matminer ];
     matgl = [ matgl ];
+    sevennet = [ sevenn ];
   }
   // lib.optionalAttrs (mace-torch != null) {
     mace = [ mace-torch ];
