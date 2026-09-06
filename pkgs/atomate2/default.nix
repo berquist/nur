@@ -39,6 +39,7 @@
   pytest-cov,
   pytest-mock,
   pytest-xdist,
+  enumlib,
   fireworks,
 }:
 
@@ -140,20 +141,21 @@ buildPythonPackage (finalAttrs: {
   # pytest-cov because `[tool.pytest.ini_options] addopts` carries
   # `--cov-config=pyproject.toml`, which pytest rejects as an unknown argument
   # without the plugin.
+  #
+  # enumlib for `test_magnetic_orderings`, whose flow runs pymatgen's
+  # `MagneticStructureEnumerator`.  It has to be on PATH rather than merely
+  # installed: pymatgen's `enumlib_caller` resolves `enum.x` and `makestr.x`
+  # into module-level constants at import time and refuses to construct an
+  # `EnumlibAdaptor` if either is missing.  Not in nixpkgs; see ../enumlib.
   nativeCheckInputs = [
     pytestCheckHook
     pytest-cov
     pytest-mock
     pytest-xdist
+    enumlib
     fireworks
   ]
   ++ lib.concatLists (builtins.attrValues finalAttrs.passthru.optional-dependencies);
-
-  disabledTests = [
-    # `MagneticStructureEnumerator` shells out to enumlib's `enum.x` / `makestr.x`
-    # Fortran executables, which are not in nixpkgs.
-    "test_magnetic_orderings"
-  ];
 
   pythonImportsCheck = [
     "atomate2"

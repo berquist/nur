@@ -58,8 +58,10 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
   upstream split it and the two layouts cannot coexist, and `monty` on the legs that are behind.
   Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
-  itself and in `pkgs/pymatgen-core/default.nix`. See "Deferred packaging" below for what is
-  still gated.
+  itself and in `pkgs/pymatgen-core/default.nix`. One member is not a Python package at all:
+  `enumlib`, the Fortran `enum.x` / `makestr.x` that pymatgen's `EnumlibAdaptor` shells out to,
+  which is a top-level `callPackage` like the chemtools overlay's `chemfiles`. See "Deferred
+  packaging" below for what is still gated.
 
 ### The cclib split
 
@@ -284,6 +286,11 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why do both pymatgen halves export `PMG_TEST_FILES_DIR`, and why a different directory each? | `pkgs/pymatgen-core/default.nix` and `pkgs/pymatgen/default.nix` (`preCheck`) |
 | Why is `pymatgenFor` keyed on a version now, and what aborts without the guard? | `overlays/default.nix` (`pymatgenFor`) |
 | Why does `tests/aiida`'s python-pin test compose every overlay too, when it did not have to before? | `tests/aiida/default.nix` (the `fullyOverlaidBrokenPkgs` binding) |
+| Why does `enumlib` fetch `symlib` a second time rather than as a submodule? | `pkgs/enumlib/default.nix` (the `symlib` binding) |
+| Why does `enumlib` bake a `git describe` string into a Makefile, and what reads it? | `pkgs/enumlib/default.nix` (`postPatch`) |
+| Why is `enumlib` built serially, and why is `2Dplot.x` left out? | `pkgs/enumlib/default.nix` (`buildPhase`) |
+| Where does `enumlib`'s check get an expected answer, when upstream runs no tests? | `pkgs/enumlib/default.nix` (`checkPhase`) |
+| Why must `enumlib` be on atomate2's *PATH* rather than merely installed? | `pkgs/atomate2/default.nix` (`nativeCheckInputs`) |
 
 ### The sdist-has-no-tests trap
 
@@ -446,7 +453,7 @@ where the survey stands:
 | `mendeleev` | `lobsterpy[featurizer]` | **done**; `pkgs/mendeleev`, internal — element data from a bundled SQLite db |
 | `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
-| `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `aims`, `amset`. `tests/{vasp,ase,lobster}` run — `test_magnetic_orderings` deselected (needs enumlib's Fortran executables) |
+| `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `aims`, `amset`. `tests/{vasp,ase,lobster}` run in full, `test_magnetic_orderings` included since `enumlib` landed |
 | `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3` (phonopy-4 channels only), `benchmark`, `maml`, `matgl`, `mace` (unstable only), `sevennet`. Missing: `grace` (tensorflow), `deepmd` (deepmd-kit), `fairchem`; `orb`/`mattersim`/`petmad` are NVIDIA-blocked (see below) |
 | `mp-api` | `maml`, atomate2 `mp` | **done**; `pkgs/mp-api` — `doCheck = false` (every test drives a live MPRester). Dist `mp-api`, import `mp_api` |
 | `maml` | `matcalc[maml]` | **done**; `pkgs/maml`, internal — `doCheck = false` (TensorFlow / matgl-model tests, `apps/pes` needs external fitting binaries) |
@@ -455,6 +462,7 @@ where the survey stands:
 | `redun` | `quacc[redun]` | **done**; `pkgs/redun` — `doCheck = false` (AWS-executor tests), `fancycompleter` removed |
 | `phono3py` | `matcalc[phonon3]` | **done**; `pkgs/phono3py` — the phonopy sibling, scikit-build-core + nanobind + CMake |
 | `rootstock` | `quacc[mlip]` | **done**; `pkgs/rootstock`, internal — `doCheck = false` (builds environments via `uv`) |
+| `enumlib` | atomate2 `test_magnetic_orderings`, any `MagneticStructureEnumerator` | **done**; `pkgs/enumlib` — Fortran, not a Python package, top-level like `chemfiles`. Its `symlib` submodule is a second `fetchFromGitHub` because a submodule hash cannot be computed offline |
 
 `pythonCatchConflictsPhase` did not, in the end, have anything to catch: `pymatgen-io-validation`
 installs only `pymatgen/io/validation/`, and neither `pymatgen-core` nor `pymatgen` ships a
@@ -549,7 +557,6 @@ deprecated APIs, so this one may not be cosmetic.
 | `fairchem` | 13-distribution monorepo, torch plus pretrained model weights |
 | `PsiDataViz` | uv workspace, never released, includes a React/TS frontend; only `packages/psidata` is plausible |
 | `crest` | Fortran/meson with vendored subprojects; not in nixpkgs. Feasible, just different work — `tblite` and `xtb` are already there to build against |
-| `enumlib` | `msg-byu/enumlib`, a small Fortran project (`enum.x`, `makestr.x`); not in nixpkgs. pymatgen's `EnumlibAdaptor` shells out to it, so `atomate2`'s `test_magnetic_orderings` needs it (deselected for now), as would any `MagneticStructureEnumerator` use. Feasible — Makefile build, a `symlib` submodule its own repo carries |
 
 ## Template leftovers
 

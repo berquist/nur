@@ -526,6 +526,13 @@ in
       })
     ];
 
+    # Not a Python package, so a plain top-level callPackage rather than a
+    # member of the extension above — the same arrangement as the chemtools
+    # overlay's `chemfiles`.  It is a pair of Fortran executables that pymatgen
+    # shells out to, and atomate2 takes it as a check input for that reason;
+    # see ../pkgs/enumlib.
+    enumlib = final.callPackage ../pkgs/enumlib { };
+
     # Keep in sync with the `inherit (py)` list in ../default.nix.
     #
     # `monty` is deliberately absent.  It is a replacement for a package

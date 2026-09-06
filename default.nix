@@ -102,6 +102,13 @@ in
   # overlays/default.nix for how the two are kept from resolving to each other.
   inherit (pkgs') chemfiles;
 
+  # enumlib, likewise not a Python package: the Fortran `enum.x` / `makestr.x`
+  # that pymatgen's EnumlibAdaptor shells out to.  Top-level for the same reason
+  # chemfiles is — it is an executable, not a module — and re-exported so that
+  # ci.nix builds it and a consumer can put it on PATH beside a pymatgen that
+  # needs it.  See pkgs/enumlib.
+  inherit (pkgs') enumlib;
+
   # Python packages, reached through the extended python313Packages so that
   # these derivations are identical to what python313.withPackages returns.
   inherit (py)
