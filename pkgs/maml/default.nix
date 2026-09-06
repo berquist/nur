@@ -50,6 +50,17 @@ buildPythonPackage {
     scipy
   ];
 
+  # Inherited from matgl, and it reaches this package through
+  # `pythonImportsCheck` alone: `maml.describers` imports `maml.describers._matgl`,
+  # which imports matgl, whose `config.py` runs
+  # `MATGL_CACHE.mkdir(parents=True, exist_ok=True)` at module scope.
+  # `MATGL_CACHE` is `~/.cache/matgl`, and the default `/homeless-shelter` is
+  # not writable, so the import check fails with a `PermissionError` even though
+  # `doCheck` is off.  Same one-line fix as ../matgl.
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+  '';
+
   # The suite is not run.  The `apps/pes` tests wrap external fitting binaries
   # (`lmp`, `n2p2`, `mlp`), the DNN model tests need TensorFlow, and the
   # descriptor tests load matgl models over the network.  `pythonImportsCheck`
