@@ -490,6 +490,21 @@ in
         # abipy, openff, torch-sim, mp-api) are left out; see ../pkgs/atomate2.
         atomate2 = pself.callPackage ../pkgs/atomate2 { };
 
+        # atomate2's two follow-on targets.  matcalc runs materials-property
+        # calculations on an ML potential; quacc is a workflow engine beside
+        # atomate2.  Both `doCheck`-limited — see their headers.
+        matcalc = pself.callPackage ../pkgs/matcalc { };
+        quacc = pself.callPackage ../pkgs/quacc { };
+
+        # Optional-dependency packages for matcalc and quacc that are tools in
+        # their own right: matminer (data mining / featurization, matcalc's
+        # `benchmark` extra), redun (a workflow engine, quacc's `redun`
+        # adapter), phono3py (lattice thermal conductivity, the phonopy sibling,
+        # matcalc's `phonon3` extra).
+        matminer = pself.callPackage ../pkgs/matminer { };
+        redun = pself.callPackage ../pkgs/redun { };
+        phono3py = pself.callPackage ../pkgs/phono3py { };
+
         # Dependencies of one package each, so they stop here rather than
         # being re-exported: they stay reachable as python313Packages.*
         # without ci.nix building them in their own right.
@@ -501,6 +516,8 @@ in
         mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
         mongomock-ng = pself.callPackage ../pkgs/mongomock-ng { };
         mp-pyrho = pself.callPackage ../pkgs/mp-pyrho { };
+        # rootstock is quacc[mlip]'s alone.
+        rootstock = pself.callPackage ../pkgs/rootstock { };
         mendeleev = pself.callPackage ../pkgs/mendeleev { };
       })
     ];
@@ -521,8 +538,11 @@ in
       jobflow-remote
       lobsterpy
       maggma
+      matcalc
       matgl
+      matminer
       optimade
+      phono3py
       pubchempy
       pymatgen
       pymatgen-analysis-alloys
@@ -531,6 +551,8 @@ in
       pymatgen-core
       pymatgen-io-validation
       qtoolkit
+      quacc
+      redun
       ;
   };
 

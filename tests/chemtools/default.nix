@@ -37,10 +37,14 @@ let
     };
   };
 
+  # qcfractal alongside chemtools and materials because `quacc` (materials)
+  # takes `parsl`, which the qcfractal overlay is what supplies — a
+  # materials-only composition throws on `quacc`'s callPackage.
   overlaidPkgs = basePkgs.extend (
     lib.composeManyExtensions [
       ours.chemtools
       ours.materials
+      ours.qcfractal
     ]
   );
 
@@ -86,8 +90,11 @@ let
     "jobflow-remote"
     "lobsterpy"
     "maggma"
+    "matcalc"
     "matgl"
+    "matminer"
     "optimade"
+    "phono3py"
     "pubchempy"
     "pymatgen"
     "pymatgen-analysis-alloys"
@@ -96,6 +103,8 @@ let
     "pymatgen-core"
     "pymatgen-io-validation"
     "qtoolkit"
+    "quacc"
+    "redun"
   ];
 
   # moltui is deliberately not in the list above.  It is a
@@ -126,6 +135,7 @@ let
     "monty"
     "mp-pyrho"
     "pyrr"
+    "rootstock"
   ];
 
   # `trexio` is deliberately not in that list, because it cannot satisfy it:

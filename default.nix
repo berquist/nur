@@ -150,8 +150,11 @@ in
     jobflow-remote
     lobsterpy
     maggma
+    matcalc
     matgl
+    matminer
     optimade
+    phono3py
     pubchempy
     pymatgen
     pymatgen-analysis-alloys
@@ -160,5 +163,7 @@ in
     pymatgen-core
     pymatgen-io-validation
     qtoolkit
+    quacc
+    redun
     ;
 }

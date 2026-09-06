@@ -49,11 +49,12 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 - the **materials family** — `custodian`, `fireworks`, `qtoolkit`, `maggma`, `jobflow`,
   `jobflow-remote`, `pubchempy`, `pymatgen-io-validation`, `emmet-core`, the three
   `pymatgen-analysis-{alloys,defects,diffusion}` add-ons, `optimade`, `lobsterpy`, `matgl`, and
-  `atomate2`, and both halves of upstream pymatgen's 2026 split, `pymatgen-core` and `pymatgen`.
-  Plus five carried for a dependant alone and not re-exported:
-  `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's), `mp-pyrho`
-  (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s) and `monty`, a backport
-  that exists only because `pymatgen-core` needs a version no channel here ships yet.
+  `atomate2`, `matcalc`, `quacc`, `matminer`, `redun`, `phono3py`, and both halves of upstream
+  pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus six carried for a dependant alone
+  and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
+  `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
+  (`quacc[mlip]`'s) and `monty`, a backport that exists only because `pymatgen-core` needs a
+  version no channel here ships yet.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
   upstream split it and the two layouts cannot coexist, and `monty` on the legs that are behind.
   Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
@@ -422,8 +423,9 @@ availability claims were probed against the locked nixpkgs with
 `nix-instantiate --eval --store dummy://` over `python313Packages`, `python3.pkgs` and the top
 level.
 
-**The materials-project chain.** `atomate2` is packaged; `matcalc` and `quacc` follow. Reading
-those targets' own `pyproject.toml` against the locked nixpkgs, this is where the survey stands:
+**The materials-project chain.** `atomate2`, `matcalc` and `quacc` are all packaged — the chain
+is complete. Reading those targets' own `pyproject.toml` against the locked nixpkgs, this is
+where the survey stands:
 
 | Missing | Wanted by | Status |
 |---|---|---|
@@ -445,6 +447,12 @@ those targets' own `pyproject.toml` against the locked nixpkgs, this is where th
 | `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
 | `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied; extras needing unpackaged code (`forcefields`, `openff`, `torchsim`, `abinit`, `mp`) omitted. `tests/{vasp,ase,lobster}` run — `test_magnetic_orderings` deselected (needs enumlib's Fortran executables) |
+| `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3`, `benchmark`, `matgl`, `mace`. Missing: `sevennet`/`grace`/`orb`/`mattersim`/`fairchem`/`petmad`/`deepmd`/`maml` |
+| `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `jobflow`, `mp`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `fairchem`, `torchsim`, `mlip` (needs `fairchem-core` atop `rootstock`), `defects` (needs `shakenbreak`). Test round: ASE-native recipes + `wflow` |
+| `matminer` | `matcalc[benchmark]` | **done**; `pkgs/matminer` — `tests/{featurizers,utils}` only, the data-retrieval suites hit external APIs |
+| `redun` | `quacc[redun]` | **done**; `pkgs/redun` — `doCheck = false` (AWS-executor tests), `fancycompleter` removed |
+| `phono3py` | `matcalc[phonon3]` | **done**; `pkgs/phono3py` — the phonopy sibling, scikit-build-core + nanobind + CMake |
+| `rootstock` | `quacc[mlip]` | **done**; `pkgs/rootstock`, internal — `doCheck = false` (builds environments via `uv`) |
 
 `pythonCatchConflictsPhase` did not, in the end, have anything to catch: `pymatgen-io-validation`
 installs only `pymatgen/io/validation/`, and neither `pymatgen-core` nor `pymatgen` ships a
