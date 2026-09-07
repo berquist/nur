@@ -530,6 +530,7 @@ in
         # matplotlib-label-lines is pydefect's too.  ../vise, the one member of
         # this cluster that is a tool in its own right, is re-exported below.
         cmcrameri = pself.callPackage ../pkgs/cmcrameri { };
+        doped = pself.callPackage ../pkgs/doped { };
         hiphive = pself.callPackage ../pkgs/hiphive { };
         matplotlib-label-lines = pself.callPackage ../pkgs/matplotlib-label-lines { };
         pydefect = pself.callPackage ../pkgs/pydefect { };

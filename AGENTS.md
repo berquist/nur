@@ -54,7 +54,7 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   alone and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
   `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
   (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s), `maml` (`matcalc[maml]`'s), the
-  `quacc[defects]` cluster's lower layers — `pydefect` and `hiphive` (doped's and shakenbreak's),
+  `quacc[defects]` cluster's lower layers — `doped` and `pydefect` and `hiphive`,
   `trainstation` (hiPhive's one gap), `cmcrameri` and `matplotlib-label-lines` (doped's plotting,
   the latter pydefect's too) — `tensorpotential` (`matcalc[grace]`'s, and **the one unfree package here**;
   see "Deferred packaging"), and `monty`, a
@@ -308,6 +308,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why must `labellines/test.py` be named in `enabledTestPaths` rather than found? | `pkgs/matplotlib-label-lines/default.nix` (`enabledTestPaths`), `pkgs/pgtest/default.nix` |
 | Why does `hiphive` run only `tests/unittests` when `tests/integration` looks like tests too? | `pkgs/hiphive/default.nix` (`enabledTestPaths`) |
 | Why does `cmcrameri` need `SETUPTOOLS_SCM_PRETEND_VERSION` when nothing errors without it? | `pkgs/cmcrameri/default.nix` (the `env` note) |
+| How is the `doped` ↔ `shakenbreak` cycle cut, and why is that permanent rather than a bootstrap? | `pkgs/doped/default.nix` (the note above `pythonRemoveDeps`) |
+| Why can `doped`'s suite run with no VASP when `vise`'s cannot? | `pkgs/doped/default.nix` (`enabledTestPaths`), `pkgs/vise/default.nix` (`disabledTestPaths`) |
 
 ### The sdist-has-no-tests trap
 
@@ -487,6 +489,7 @@ where the survey stands:
 | `cmcrameri` | `doped` | **done**; `pkgs/cmcrameri`, internal — sixty colour-map `.txt` files, and the suite checks they are found |
 | `matplotlib-label-lines` | `doped`, `pydefect` | **done**; `pkgs/matplotlib-label-lines`, internal. Dist `matplotlib-label-lines`, import `labellines`; its one test module is `labellines/test.py`, which pytest's default `python_files` matches neither way — the `pgtest` trap again |
 | `pydefect` | `doped` | **done**; `pkgs/pydefect`, internal — built on `vise`, same group and same tagging habit (HEAD is 764 commits past v0.2.6, and `__init__.py` carries the real 0.10.1). Seven undeclared imports added, `emmet-core` the load-bearing one |
+| `doped` | `shakenbreak` | **done**; `pkgs/doped`, internal. The `shakenbreak` requirement is dropped permanently rather than for bootstrapping — nix cannot express the cycle, every `import shakenbreak` in `doped/` is function-local, and shakenbreak is the half that declares the other. 873 MB of source, 414 MB of it recorded VASP output under `tests/`, none installed |
 
 `pythonCatchConflictsPhase` did not, in the end, have anything to catch: `pymatgen-io-validation`
 installs only `pymatgen/io/validation/`, and neither `pymatgen-core` nor `pymatgen` ships a
@@ -575,7 +578,7 @@ deprecated APIs, so this one may not be cosmetic.
 |---|---|
 | `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs |
 | `orb-models`, `mattersim`, `pet-mad` | same NVIDIA wall as `torch-sim` — `orb-models` lists `nvalchemi-toolkit-ops` as a core dep, `mattersim` lists `torch-sim-atomistic` (→ nvalchemi), `pet-mad` lists `nvalchemi-toolkit-ops` + `warp-lang`. These are the matcalc `orb` / `mattersim` / `petmad` extras |
-| `ShakeNBreak` (the `quacc[defects]` extra) | down to two: `doped` and `shakenbreak` itself. Everything under them is packaged — `vise`, `pydefect`, `hiphive`, `trainstation`, `cmcrameri`, `matplotlib-label-lines`, with `pymatgen-analysis-defects` and `dscribe` already here. `doped`'s only remaining gap is the `shakenbreak` cycle: build it once with that requirement dropped, then `shakenbreak`, then add it back. Both are cloned |
+| `ShakeNBreak` (the `quacc[defects]` extra) | down to `shakenbreak` itself, everything under it packaged: `doped`, `pydefect`, `vise`, `hiphive`, `trainstation`, `cmcrameri`, `matplotlib-label-lines`, with `pymatgen-analysis-defects` and `dscribe` already here. The `doped` ↔ `shakenbreak` cycle is already cut, in `pkgs/doped` and permanently — shakenbreak is the half that declares the other, so it is the one left to write. Cloned |
 | `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
 | `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
 | `fairchem` | 13-distribution monorepo, torch plus pretrained model weights |
