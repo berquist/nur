@@ -49,7 +49,7 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 - the **materials family** — `custodian`, `fireworks`, `qtoolkit`, `maggma`, `jobflow`,
   `jobflow-remote`, `pubchempy`, `pymatgen-io-validation`, `emmet-core`, the three
   `pymatgen-analysis-{alloys,defects,diffusion}` add-ons, `optimade`, `lobsterpy`, `matgl`, and
-  `atomate2`, `matcalc`, `quacc`, `matminer`, `redun`, `phono3py`, `mp-api`, and both halves of upstream
+  `atomate2`, `matcalc`, `quacc`, `matminer`, `redun`, `phono3py`, `mp-api`, `vise`, and both halves of upstream
   pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus six carried for a dependant alone
   and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
   `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
@@ -291,6 +291,9 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `enumlib` built serially, and why is `2Dplot.x` left out? | `pkgs/enumlib/default.nix` (`buildPhase`) |
 | Where does `enumlib`'s check get an expected answer, when upstream runs no tests? | `pkgs/enumlib/default.nix` (`checkPhase`) |
 | Why must `enumlib` be on atomate2's *PATH* rather than merely installed? | `pkgs/atomate2/default.nix` (`nativeCheckInputs`) |
+| Why does `vise` delete two `distutils` imports rather than add setuptools at runtime? | `pkgs/vise/default.nix` (`postPatch`) |
+| Why does `vise` declare nine dependencies its own requirements.txt does not? | `pkgs/vise/default.nix` (`dependencies`) |
+| Why is `vise` pinned 827 commits past its tag, and are its POTCARs a licensing problem? | `pkgs/vise/default.nix` (the `src` note, `enabledTestPaths`) |
 
 ### The sdist-has-no-tests trap
 
@@ -463,6 +466,7 @@ where the survey stands:
 | `phono3py` | `matcalc[phonon3]` | **done**; `pkgs/phono3py` — the phonopy sibling, scikit-build-core + nanobind + CMake |
 | `rootstock` | `quacc[mlip]` | **done**; `pkgs/rootstock`, internal — `doCheck = false` (builds environments via `uv`) |
 | `enumlib` | atomate2 `test_magnetic_orderings`, any `MagneticStructureEnumerator` | **done**; `pkgs/enumlib` — Fortran, not a Python package, top-level like `chemfiles`. Its `symlib` submodule is a second `fetchFromGitHub` because a submodule hash cannot be computed offline |
+| `vise` | `pydefect`, `doped` — the `quacc[defects]` cluster | **done**; `pkgs/vise` at HEAD, 827 commits past its 2020 tag, because that is where the pymatgen-core refactoring landed. Nine undeclared imports added to `dependencies`, two dead `distutils` imports deleted |
 
 `pythonCatchConflictsPhase` did not, in the end, have anything to catch: `pymatgen-io-validation`
 installs only `pymatgen/io/validation/`, and neither `pymatgen-core` nor `pymatgen` ships a
@@ -551,7 +555,7 @@ deprecated APIs, so this one may not be cosmetic.
 |---|---|
 | `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs |
 | `orb-models`, `mattersim`, `pet-mad` | same NVIDIA wall as `torch-sim` — `orb-models` lists `nvalchemi-toolkit-ops` as a core dep, `mattersim` lists `torch-sim-atomistic` (→ nvalchemi), `pet-mad` lists `nvalchemi-toolkit-ops` + `warp-lang`. These are the matcalc `orb` / `mattersim` / `petmad` extras |
-| `ShakeNBreak` (the `quacc[defects]` extra) | a circular cluster: `shakenbreak` → `doped` + `hiphive`; `doped` → `pydefect` + `vise` (both huge, ~800 commits past their tags) + `shakenbreak` (the cycle) + `cmcrameri` + `matplotlib-label-lines`. Break the cycle by building `doped` without `shakenbreak` first. All cloned in `wc/` |
+| `ShakeNBreak` (the `quacc[defects]` extra) | a circular cluster, now one package smaller: `shakenbreak` → `doped` + `hiphive`; `doped` → `pydefect` + ~~`vise`~~ (**done**, see the table above) + `shakenbreak` (the cycle) + `cmcrameri` + `matplotlib-label-lines`. Break the cycle by building `doped` without `shakenbreak` first. What is left needs four clones `wc/` does not have — `trainstation` (hiPhive's one gap), `cmcrameri` and `matplotlib-label-lines` (doped's), and nothing else: `pydefect`'s other requirements are `adjusttext` and `scikit-image`, both in nixpkgs. `pydefect` and the rest are cloned |
 | `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
 | `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
 | `fairchem` | 13-distribution monorepo, torch plus pretrained model weights |

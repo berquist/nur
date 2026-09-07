@@ -173,5 +173,6 @@ in
     qtoolkit
     quacc
     redun
+    vise
     ;
 }

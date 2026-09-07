@@ -501,6 +501,13 @@ in
         # `benchmark` extra), redun (a workflow engine, quacc's `redun`
         # adapter), phono3py (lattice thermal conductivity, the phonopy sibling,
         # matcalc's `phonon3` extra).
+        # The first step of the `quacc[defects]` cluster, and the only member of
+        # it whose dependencies are all already here.  A VASP input-set
+        # generator with its own CLI, so a tool rather than an implementation
+        # detail — `doped` wants it for eigenvalue analysis and `pydefect` is
+        # built on it outright.  See "Deferred packaging" in ../AGENTS.md.
+        vise = pself.callPackage ../pkgs/vise { };
+
         matminer = pself.callPackage ../pkgs/matminer { };
         redun = pself.callPackage ../pkgs/redun { };
         phono3py = pself.callPackage ../pkgs/phono3py { };
@@ -565,6 +572,7 @@ in
       qtoolkit
       quacc
       redun
+      vise
       ;
   };
 
