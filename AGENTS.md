@@ -50,10 +50,14 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   `jobflow-remote`, `pubchempy`, `pymatgen-io-validation`, `emmet-core`, the three
   `pymatgen-analysis-{alloys,defects,diffusion}` add-ons, `optimade`, `lobsterpy`, `matgl`, and
   `atomate2`, `matcalc`, `quacc`, `matminer`, `redun`, `phono3py`, `mp-api`, `vise`, and both halves of upstream
-  pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus six carried for a dependant alone
-  and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
+  pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus a dozen carried for a dependant
+  alone and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
   `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
-  (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s), `maml` (`matcalc[maml]`'s) and `monty`, a
+  (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s), `maml` (`matcalc[maml]`'s), the
+  `quacc[defects]` cluster's lower layers — `hiphive` (shakenbreak's), `trainstation`
+  (hiPhive's one gap), `cmcrameri` and `matplotlib-label-lines` (doped's plotting, the latter
+  pydefect's too) — `tensorpotential` (`matcalc[grace]`'s, and **the one unfree package here**;
+  see "Deferred packaging"), and `monty`, a
   backport that exists only because `pymatgen-core` needs a version no channel here ships yet.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
   upstream split it and the two layouts cannot coexist, and `monty` on the legs that are behind.
@@ -300,6 +304,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `tensorpotential` spell `redistributable` out instead of letting it default? | `pkgs/tensorpotential/default.nix` (`meta.license`) |
 | Why does dropping `tensorflow[and-cuda]` not cost GPU support? | `pkgs/tensorpotential/default.nix` (`postPatch`) |
 | Why can `matcalc` take an unfree extra and stay free and cacheable? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |
+| Why does `matplotlib-label-lines` need `pytest-mpl` when the image comparison is switched off? | `pkgs/matplotlib-label-lines/default.nix` (`nativeCheckInputs`) |
+| Why must `labellines/test.py` be named in `enabledTestPaths` rather than found? | `pkgs/matplotlib-label-lines/default.nix` (`enabledTestPaths`), `pkgs/pgtest/default.nix` |
+| Why does `hiphive` run only `tests/unittests` when `tests/integration` looks like tests too? | `pkgs/hiphive/default.nix` (`enabledTestPaths`) |
+| Why does `cmcrameri` need `SETUPTOOLS_SCM_PRETEND_VERSION` when nothing errors without it? | `pkgs/cmcrameri/default.nix` (the `env` note) |
 
 ### The sdist-has-no-tests trap
 
@@ -473,7 +481,11 @@ where the survey stands:
 | `phono3py` | `matcalc[phonon3]` | **done**; `pkgs/phono3py` — the phonopy sibling, scikit-build-core + nanobind + CMake |
 | `rootstock` | `quacc[mlip]` | **done**; `pkgs/rootstock`, internal — `doCheck = false` (builds environments via `uv`) |
 | `enumlib` | atomate2 `test_magnetic_orderings`, any `MagneticStructureEnumerator` | **done**; `pkgs/enumlib` — Fortran, not a Python package, top-level like `chemfiles`. Its `symlib` submodule is a second `fetchFromGitHub` because a submodule hash cannot be computed offline |
-| `vise` | `pydefect`, `doped` — the `quacc[defects]` cluster | **done**; `pkgs/vise` at HEAD, 827 commits past its 2020 tag, because that is where the pymatgen-core refactoring landed. Nine undeclared imports added to `dependencies`, two dead `distutils` imports deleted |
+| `vise` | `pydefect`, `doped` — the `quacc[defects]` cluster | **done**; `pkgs/vise` at HEAD, 827 commits past its 2020 tag, because that is where the pymatgen-core refactoring landed. Ten undeclared imports added to `dependencies`, two dead `distutils` imports deleted. 25 tests dropped, 23 of them needing VASP's licensed POTCAR files |
+| `trainstation` | `hiphive` — its only gap | **done**; `pkgs/trainstation`, internal. GitLab, like hiPhive |
+| `hiphive` | `shakenbreak` | **done**; `pkgs/hiphive`, internal — `tests/unittests` only; `tests/integration` fits real force-constant models and takes minutes per file |
+| `cmcrameri` | `doped` | **done**; `pkgs/cmcrameri`, internal — sixty colour-map `.txt` files, and the suite checks they are found |
+| `matplotlib-label-lines` | `doped`, `pydefect` | **done**; `pkgs/matplotlib-label-lines`, internal. Dist `matplotlib-label-lines`, import `labellines`; its one test module is `labellines/test.py`, which pytest's default `python_files` matches neither way — the `pgtest` trap again |
 
 `pythonCatchConflictsPhase` did not, in the end, have anything to catch: `pymatgen-io-validation`
 installs only `pymatgen/io/validation/`, and neither `pymatgen-core` nor `pymatgen` ships a
@@ -562,7 +574,7 @@ deprecated APIs, so this one may not be cosmetic.
 |---|---|
 | `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs |
 | `orb-models`, `mattersim`, `pet-mad` | same NVIDIA wall as `torch-sim` — `orb-models` lists `nvalchemi-toolkit-ops` as a core dep, `mattersim` lists `torch-sim-atomistic` (→ nvalchemi), `pet-mad` lists `nvalchemi-toolkit-ops` + `warp-lang`. These are the matcalc `orb` / `mattersim` / `petmad` extras |
-| `ShakeNBreak` (the `quacc[defects]` extra) | a circular cluster, now one package smaller: `shakenbreak` → `doped` + `hiphive`; `doped` → `pydefect` + ~~`vise`~~ (**done**, see the table above) + `shakenbreak` (the cycle) + `cmcrameri` + `matplotlib-label-lines`. Break the cycle by building `doped` without `shakenbreak` first. What is left needs four clones `wc/` does not have — `trainstation` (hiPhive's one gap), `cmcrameri` and `matplotlib-label-lines` (doped's), and nothing else: `pydefect`'s other requirements are `adjusttext` and `scikit-image`, both in nixpkgs. `pydefect` and the rest are cloned |
+| `ShakeNBreak` (the `quacc[defects]` extra) | down to three: `pydefect`, `doped` and `shakenbreak` itself. Everything under them is packaged — `vise`, `hiphive`, `trainstation`, `cmcrameri`, `matplotlib-label-lines`, and `pymatgen-analysis-defects` and `dscribe` were already here. `pydefect`'s remaining requirements, `adjusttext` and `scikit-image`, are both in nixpkgs, so it is unblocked. Then `doped`, whose only gap is the `shakenbreak` cycle — build it once with that requirement dropped, then `shakenbreak`, then add it back. All three are cloned |
 | `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
 | `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
 | `fairchem` | 13-distribution monorepo, torch plus pretrained model weights |

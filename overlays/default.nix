@@ -524,6 +524,16 @@ in
         mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
         mongomock-ng = pself.callPackage ../pkgs/mongomock-ng { };
         mp-pyrho = pself.callPackage ../pkgs/mp-pyrho { };
+        # The `quacc[defects]` cluster's lower layers, all internal.  hiphive is
+        # shakenbreak's, trainstation is hiphive's one gap, and cmcrameri and
+        # matplotlib-label-lines are doped's plotting dependencies —
+        # matplotlib-label-lines is pydefect's too.  ../vise, the one member of
+        # this cluster that is a tool in its own right, is re-exported below.
+        cmcrameri = pself.callPackage ../pkgs/cmcrameri { };
+        hiphive = pself.callPackage ../pkgs/hiphive { };
+        matplotlib-label-lines = pself.callPackage ../pkgs/matplotlib-label-lines { };
+        trainstation = pself.callPackage ../pkgs/trainstation { };
+
         # rootstock is quacc[mlip]'s alone; sevenn is matcalc[sevennet]'s;
         # maml is matcalc[maml]'s.
         rootstock = pself.callPackage ../pkgs/rootstock { };
