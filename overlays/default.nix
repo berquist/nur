@@ -532,6 +532,7 @@ in
         cmcrameri = pself.callPackage ../pkgs/cmcrameri { };
         hiphive = pself.callPackage ../pkgs/hiphive { };
         matplotlib-label-lines = pself.callPackage ../pkgs/matplotlib-label-lines { };
+        pydefect = pself.callPackage ../pkgs/pydefect { };
         trainstation = pself.callPackage ../pkgs/trainstation { };
 
         # rootstock is quacc[mlip]'s alone; sevenn is matcalc[sevennet]'s;
