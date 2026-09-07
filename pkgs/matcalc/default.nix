@@ -22,6 +22,7 @@
   phono3py,
   seekpath,
   sevenn,
+  tensorpotential,
 
   # tests
   pytestCheckHook,
@@ -78,12 +79,19 @@ buildPythonPackage (finalAttrs: {
   # Upstream's extras whose dependencies are packaged.  `mace` only where
   # `mace-torch` is (unstable, not 26.05); `phonon3` only where phonopy is 4.x,
   # since ../phono3py needs `phonopy >= 4.4` and 26.05 has 3.5.1.  Still
-  # missing: `grace` (tensorpotential), `deepmd` (deepmd-kit), `fairchem`
-  # (fairchem-core), and `mattersim` / `orb` / `petmad`, which need NVIDIA's
-  # `nvalchemi-toolkit-ops` the way torch-sim does.
+  # missing: `deepmd` (deepmd-kit), `fairchem` (fairchem-core), and
+  # `mattersim` / `orb` / `petmad`, which need NVIDIA's `nvalchemi-toolkit-ops`
+  # the way torch-sim does.
+  #
+  # `grace` is here but is the one extra a consumer cannot take for free:
+  # ../tensorpotential is unfree, so asking for it needs `allowUnfree`.  It
+  # reaches matcalc through this list alone — `nativeCheckInputs` below takes
+  # only the `matgl` entry, so nothing about matcalc's own build touches it, and
+  # matcalc stays buildable and cacheable as it was.
   optional-dependencies = {
     phonon = [ seekpath ];
     benchmark = [ matminer ];
+    grace = [ tensorpotential ];
     maml = [ maml ];
     matgl = [ matgl ];
     sevennet = [ sevenn ];

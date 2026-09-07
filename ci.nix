@@ -46,11 +46,20 @@ let
   # build, unattempted.  flake.nix's `packages` block declines to name such an
   # attribute for exactly the same reason.
   #
-  # Since molcat was removed this half matches nothing: every top-level
+  # Since molcat was removed this half still matches nothing: every top-level
   # attribute of ./default.nix is free.  It stays as a guard rather than going
   # as dead code because the input recurs — molcat was an unremarkable academic
   # log parser published with no LICENSE file at all, and `lib.licenses.unfree`
   # is the accurate spelling of that.
+  #
+  # The repository does now carry one unfree package, and the way it is arranged
+  # is worth reading beside this.  ../pkgs/tensorpotential is under a
+  # non-commercial licence, and it is reachable only as
+  # `python313Packages.tensorpotential` — not re-exported by ./default.nix at
+  # all.  That is not this filter's doing: `just ci-eval` never comes through
+  # here, and `nix-env -qa --drv-path` over an unfree top-level attribute would
+  # fail before ci-build ever ran.  Keeping it out of the top level is what
+  # settles both, and leaves this half of the predicate still unexercised.
   #
   # Its reach is narrow, though, and worth knowing before relying on it: this
   # reads the licence of top-level attributes of ./default.nix and nothing else.

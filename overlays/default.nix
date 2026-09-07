@@ -528,6 +528,16 @@ in
         # maml is matcalc[maml]'s.
         rootstock = pself.callPackage ../pkgs/rootstock { };
         sevenn = pself.callPackage ../pkgs/sevenn { };
+
+        # GRACE, matcalc's `grace` backend — and the one unfree package in this
+        # repository.  Deliberately **not** re-exported to the top level, unlike
+        # every other member of this overlay that is a tool in its own right:
+        # ../default.nix's attributes are what `just ci-eval` walks with
+        # `nix-env -qa --drv-path`, and forcing an unfree derivation's drvPath
+        # there is an evaluation error rather than a skip.  Reachable as
+        # `python313Packages.tensorpotential`, which is the same arrangement the
+        # twenty-odd internal dependencies here already use.
+        tensorpotential = pself.callPackage ../pkgs/tensorpotential { };
         maml = pself.callPackage ../pkgs/maml { };
         mendeleev = pself.callPackage ../pkgs/mendeleev { };
       })

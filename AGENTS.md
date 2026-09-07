@@ -294,6 +294,12 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `vise` delete two `distutils` imports rather than add setuptools at runtime? | `pkgs/vise/default.nix` (`postPatch`) |
 | Why does `vise` declare nine dependencies its own requirements.txt does not? | `pkgs/vise/default.nix` (`dependencies`) |
 | Why is `vise` pinned 827 commits past its tag, and are its POTCARs a licensing problem? | `pkgs/vise/default.nix` (the `src` note, `enabledTestPaths`) |
+| Why is `boltztrap2` a `vise` dependency rather than a check input? | `pkgs/vise/default.nix` (the note above `dependencies`) |
+| Where does `vise` get a POTCAR directory from, with no VASP licence? | `pkgs/vise/default.nix` (`preCheck`) |
+| Why is `tensorpotential` not a top-level attribute when every other tool here is? | `overlays/default.nix` (the `tensorpotential` binding), `ci.nix` (the note above `isBuildable`) |
+| Why does `tensorpotential` spell `redistributable` out instead of letting it default? | `pkgs/tensorpotential/default.nix` (`meta.license`) |
+| Why does dropping `tensorflow[and-cuda]` not cost GPU support? | `pkgs/tensorpotential/default.nix` (`postPatch`) |
+| Why can `matcalc` take an unfree extra and stay free and cacheable? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |
 
 ### The sdist-has-no-tests trap
 
@@ -457,7 +463,8 @@ where the survey stands:
 | `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
 | `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `aims`, `amset`. `tests/{vasp,ase,lobster}` run in full, `test_magnetic_orderings` included since `enumlib` landed |
-| `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3` (phonopy-4 channels only), `benchmark`, `maml`, `matgl`, `mace` (unstable only), `sevennet`. Missing: `grace` (tensorflow), `deepmd` (deepmd-kit), `fairchem`; `orb`/`mattersim`/`petmad` are NVIDIA-blocked (see below) |
+| `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3` (phonopy-4 channels only), `benchmark`, `grace` (unfree — see `tensorpotential` below), `maml`, `matgl`, `mace` (unstable only), `sevennet`. Missing: `deepmd` (deepmd-kit), `fairchem`; `orb`/`mattersim`/`petmad` are NVIDIA-blocked (see below) |
+| `tensorpotential` | `matcalc[grace]` | **done**; `pkgs/tensorpotential` (repo `ICAMS/grace-tensorpotential`) — **the one unfree package here.** Academic Software Licence: GPLv2 with a non-commercial clause, "not an open-source licence" by its own preamble. Reachable as `python313Packages.tensorpotential` only, deliberately not a top-level attribute — see `ci.nix` and the overlay binding |
 | `mp-api` | `maml`, atomate2 `mp` | **done**; `pkgs/mp-api` — `doCheck = false` (every test drives a live MPRester). Dist `mp-api`, import `mp_api` |
 | `maml` | `matcalc[maml]` | **done**; `pkgs/maml`, internal — `doCheck = false` (TensorFlow / matgl-model tests, `apps/pes` needs external fitting binaries) |
 | `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `jobflow`, `mp`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `fairchem`, `torchsim`, `mlip` (needs `fairchem-core` atop `rootstock`), `defects` (needs `shakenbreak`). Test round: ASE-native recipes + `wflow` |
