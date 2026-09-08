@@ -118,8 +118,16 @@ buildPythonPackage (finalAttrs: {
     export HOME="$(mktemp -d)"
   '';
 
-  # `ray[serve]` upstream; the extra pulls a FastAPI serving stack that only the
-  # cluster launchers use, and nixpkgs' `ray` is the base distribution.
+  # `ray[serve]`, and the extra is **not** optional the way it looks.  Importing
+  # `fairchem.core` at all reaches it: `__init__.py` imports
+  # `calculate.pretrained_mlip`, which pulls `calculate/_batch.py`, which pulls
+  # `components/batch_server.py`, which opens `from ray import serve` at module
+  # scope.  Without it the very first import dies on
+  # `ModuleNotFoundError: No module named 'starlette'`.
+  #
+  # nixpkgs' ray carries the extra as `optional-dependencies.serve`, so this is
+  # the literal translation of the requirement rather than a hand-picked list of
+  # what starlette happens to need today.
   dependencies = [
     ase
     ase-db-backends
@@ -143,7 +151,8 @@ buildPythonPackage (finalAttrs: {
     tqdm
     wandb
     websockets
-  ];
+  ]
+  ++ ray.optional-dependencies.serve;
 
   # Not run, for two independent reasons.  The suite lives in `tests/` at the
   # *repository* root, which is outside the `sourceRoot` above — the wheel is
