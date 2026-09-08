@@ -324,6 +324,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `deepmd-kit` turn *both* its backends off, and what does that give up? | `pkgs/deepmd-kit/default.nix` (the note above `env`) |
 | Why do `torch` and `ase` become `deepmd-kit` dependencies when upstream declares neither? | `pkgs/deepmd-kit/default.nix` (the note above `dependencies`) |
 | Why is `deepmd-kit` the one package here whose `doCheck = false` is about the backends being off? | `pkgs/deepmd-kit/default.nix` (the note above `doCheck`) |
+| How does `fairchem-core` run a suite that lives outside the `sourceRoot` its wheel is built from? | `pkgs/fairchem-core/default.nix` (`preCheck`) |
+| Why do upstream's pytest `addopts` not apply to `fairchem-core`, and why is that welcome? | `pkgs/fairchem-core/default.nix` (the note above `preCheck`) |
 | Why is `dargs`' licence `lgpl3Only` when its one dependant says `or-later`? | `pkgs/dargs/default.nix` (`meta.license`) |
 | Why does `dargs` pin a setuptools-scm version it would probably get right anyway? | `pkgs/dargs/default.nix` (the note above `env`) |
 | Why is `dargs.sphinx` left out of the import check? | `pkgs/dargs/default.nix` (`pythonImportsCheck`), `pkgs/dbstep/default.nix` (the same shape) |
@@ -527,7 +529,7 @@ where the survey stands:
 | `maml` | `matcalc[maml]` | **done**; `pkgs/maml`, internal — `doCheck = false` (TensorFlow / matgl-model tests, `apps/pes` needs external fitting binaries) |
 | `deepmd-kit` | `matcalc[deepmd]` | **done**; `pkgs/deepmd-kit`, internal — and it was on the *blocked* list for no better reason than never having been surveyed. Core dependencies are ordinary; `dargs` was the only gap. Built with `DP_ENABLE_TENSORFLOW=0` and `DP_ENABLE_PYTORCH=0`, which skips the CMake-against-libtorch op library — optional, see the derivation. `doCheck = false` |
 | `dargs` | `deepmd-kit` — its only gap | **done**; `pkgs/dargs`, internal. A real tagged release, unlike the rest of this cluster |
-| `fairchem-core` | `matcalc[fairchem]`, `quacc[mlip]` | **done**; `pkgs/fairchem-core`, internal — one distribution out of a thirteen-package monorepo, built from `packages/fairchem-core/` whose `src` is a symlink to `../../src`. Also recorded as blocked without its dependencies having been read: only two were missing. `doCheck = false` |
+| `fairchem-core` | `matcalc[fairchem]`, `quacc[mlip]` | **done**; `pkgs/fairchem-core`, internal — one distribution out of a thirteen-package monorepo, built from `packages/fairchem-core/` whose `src` is a symlink to `../../src`. Also recorded as blocked without its dependencies having been read: only two were missing. `tests/core` runs, less nine modules needing Hugging Face checkpoints or the NVIDIA stack |
 | `clusterscope` | `fairchem-core` | **done**; `pkgs/clusterscope`, internal — pinned to v0.0.18, the exact version fairchem-core's `==` names, rather than to its own latest |
 | `ase-db-backends` | `fairchem-core` | **done**; `pkgs/ase-db-backends`, internal. GitLab, like `hiphive` and `trainstation`; no tags at all, so `-unstable-`. Dist and import are `ase_db_backends`. Carries a real upstream bugfix — `close()` reopened the LMDB environment in order to close it |
 | `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `defects`, `jobflow`, `mp`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`, `mlip`. Missing: `torchsim` (NVIDIA-blocked) and `fairchem`, which wants `fairchem-data-{omat,oc,omol}` out of the same monorepo. Test round: ASE-native recipes + `wflow` |
@@ -628,13 +630,19 @@ One further version conflict, unrelated to the split: `jobflow-remote` pins
 exactly.) Expect `pythonRelaxDeps` plus a real check that its suite passes — pymongo 4.11 dropped
 deprecated APIs, so this one may not be cosmetic.
 
+**Treat every row below as unverified until you re-derive it.** Three entries in this table —
+`deepmd-kit`, `fairchem-core`, and the `fairchem-data-*` set — were recorded as blocked on the
+strength of a package's reputation rather than its `pyproject.toml`, and all three turned out to
+need one or two ordinary packages. The cost of checking is one `nix-instantiate --eval` over
+`python313Packages`; the cost of not checking was months of a chain sitting closed.
+
 | Not packaged | Blocker |
 |---|---|
-| `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs |
+| `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs — and never surveyed, so "blocked" here means "unread". Queued in `docs/TODO.md` |
 | `orb-models`, `mattersim`, `pet-mad` | same NVIDIA wall as `torch-sim` — `orb-models` lists `nvalchemi-toolkit-ops` as a core dep, `mattersim` lists `torch-sim-atomistic` (→ nvalchemi), `pet-mad` lists `nvalchemi-toolkit-ops` + `warp-lang`. These are the matcalc `orb` / `mattersim` / `petmad` extras |
 | `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
 | `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
-| `fairchem-data-{omat,oc,omol}` | three more distributions of the `fairchem` monorepo, wanted by `quacc[fairchem]` alone. `fairchem-core` itself **is** packaged — see above; the monorepo was never the obstacle, since each distribution builds from its own `packages/` subdirectory |
+| `fairchem-data-{omat,oc,omol}` | **not blocked — queued.** Wanted by `quacc[fairchem]`. Their whole core dependency lists are `pymatgen`; `ase`; and numpy/scipy/matplotlib/ase/pymatgen/tqdm. `fairchem-core` itself is packaged and the monorepo was never the obstacle, since each distribution builds from its own `packages/` subdirectory. See `docs/TODO.md` |
 | `PsiDataViz` | uv workspace, never released, includes a React/TS frontend; only `packages/psidata` is plausible |
 | `crest` | Fortran/meson with vendored subprojects; not in nixpkgs. Feasible, just different work — `tblite` and `xtb` are already there to build against |
 

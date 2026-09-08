@@ -3,6 +3,115 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
+## Pin py-lmdb to 1.7.3, and undo what py-lmdb 2.0 broke
+
+**Want:** a `pkgs/lmdb` carrying py-lmdb 1.7.3, replacing nixpkgs' 2.3.0 in the materials
+overlay, plus `"lmdb"` removed from `pkgs/fairchem-core`'s `pythonRelaxDeps` and the two LMDB
+deselections dropped from `pkgs/ase-db-backends`.  The `pkgs/monty` pattern exactly: carry a
+version nixpkgs does not have, for one consumer group, with a note saying when it can go.
+
+**The diagnosis is finished.** py-lmdb 2.0.0 added a process-wide registry of open environment
+paths and made a second `open()` of a registered path an error — commit `2b26c9f`, "Prevent
+opening the same LMDB environment twice (#230) (#412)", 2026-03-12.  `git grep _open_env_paths`
+returns nothing at tags `py-lmdb_1.7.3` and `py-lmdb_1.8.1`, and four hits at `py-lmdb_2.0.0`.
+That is the whole of it.
+
+**What it currently costs, all of it self-inflicted by relaxing a cap that meant something:**
+
+- `pkgs/fairchem-core`: about 43 of the 51 failures and 24 errors in a full `tests/core` run.
+  The 38 `hydra.errors.InstantiationException` failures are not a separate group — every one
+  wraps `create_concat_dataset`, and underneath each is
+  `lmdb.Error: The environment '.../oc20_train.aselmdb' is already open in this process.`
+- `pkgs/ase-db-backends`: `test_db2` and `test_aselmdb_concurrency` are deselected for this and
+  nothing else.  Both should come back.
+
+fairchem caps at `lmdb >= 1.6.2, <= 1.7.3`, which is exactly one release below the change, so
+1.7.3 satisfies it without any relaxation.  1.8.1 is also pre-registry and is the newest release
+without the behaviour, but it would need the cap relaxed again, so 1.7.3 is the one to take.
+
+**Do this before reaching for `pytest-xdist` on fairchem.** The suite takes 1221 s serially and
+xdist is tempting, but the registry is per-*process* and these collisions are inside a single
+call, so parallel workers would not fix them — and each worker imports torch, which is a real
+memory cost for no gain.  Fix the pin, re-measure, then decide.
+
+**When it can go:** when nixpkgs' consumers of lmdb have caught up with 2.x, or when
+ase-db-backends and fairchem stop opening one path twice.  `pkgs/ase-db-backends`'
+`close-must-not-reopen.patch` is unaffected either way — that bug is real at any lmdb version.
+
+## Package the remaining fairchem distributions
+
+**Want:** `quacc[fairchem]` wired, which needs three more distributions out of the same monorepo
+`pkgs/fairchem-core` already builds from; the rest are optional follow-ons.
+
+Every one of these was written off in `AGENTS.md` as "13-distribution monorepo, torch plus
+pretrained model weights", which counted the distributions instead of reading their dependency
+lists.  Reading them:
+
+| Distribution | Core dependencies | Gap |
+|---|---|---|
+| `fairchem-data-omol` | `ase` | none |
+| `fairchem-data-omat` | `pymatgen` | none |
+| `fairchem-data-oc` | numpy, scipy, matplotlib, ase, pymatgen, tqdm | none |
+| `fairchem-data-odac` | `ase`, `pymatgen` | none |
+| `fairchem-data-omc` | + `atomate2` | none — atomate2 is packaged |
+| `fairchem-demo-ocpapi` | dataclasses-json, inquirer, responses, tenacity, tqdm | none |
+| `fairchem-applications-cattsunami` | `fairchem-core`, `fairchem-data-oc` | after the above |
+| `fairchem-applications-fastcsp` | + `p_tqdm`, `rdkit` | `p-tqdm` |
+| `fairchem-applications-ocx` | + matminer, plotly, statsmodels, seaborn, `yellowbrick` | `yellowbrick` |
+| `fairchem-applications-AdsorbML` | declares none | read `setup.py` first |
+| `fairchem-lammps` | `fairchem.core` + LAMMPS | not surveyed |
+| `fairchem-core-numpy126` | a numpy-1.26 variant of core | skip — pointless here |
+
+The first three are what `quacc[fairchem]` asks for and are close to free.  Each builds from its
+own `packages/<name>/` with the same `src -> ../../src` symlink, so they are `sourceRoot` copies
+of `pkgs/fairchem-core` with a different tag; note the tags are per-distribution
+(`fairchem_data_omol-0.1.2` and so on), not one repository-wide version.
+
+Also unblocks `pkgs/fairchem-core`'s `tests/core/components/test_omol_recipes.py`, deselected
+today only because `fairchem-data-omol` is absent.
+
+## Decide whether to allow cudaSupport
+
+**Want:** a decision, and if it is yes, `nixpkgs.config.cudaSupport` allowed for consumers who
+opt in, while `just ci-matrix` keeps building and caching the CPU closure only.
+
+Nothing here is CPU-only by choice.  `config.cudaSupport` is `false` — nixpkgs' default — so
+`python313Packages.torch.cudaSupport` is false and every torch dependant in this repo follows.
+`pkgs/deepmd-kit` is the one place a CPU decision is written down (`DP_VARIANT = "cpu"`), and
+that is downstream of the same fact: building CUDA kernels against a CPU-only torch is wasted
+work.  If this goes ahead, that line is the one to revisit.
+
+The concern that kept it out was that CUDA makes much of the closure unfree and enormous, which
+`ci.nix` filters on (`meta.license.free`) and cachix would have to carry.  **That concern is
+answered by not doing either**: allow the option, do not add it to the matrix, do not push CUDA
+artifacts to cachix.  The work is then:
+
+- confirm `ci.nix`'s `isBuildable` still excludes the CUDA variants — it filters on
+  `meta.license.free`, and the CUDA closure is unfree, so this may already hold for free
+- confirm `just ci-matrix` and `just push` are unaffected, since they go through `ci.nix`
+- decide where the opt-in lives: a consumer setting `nixpkgs.config.cudaSupport` themselves and
+  taking `overlays.materials`, versus anything this repo exports
+- check that `just ci-eval` does not throw on an unfree *top-level* attribute the way
+  `tensorpotential` would — see the note at that overlay binding
+
+`nvalchemi-toolkit-ops` is a separate question and does not depend on this one; see below.
+
+## Package nvalchemi-toolkit-ops (tabled)
+
+**Want:** a survey, then a decision.  This is the single package blocking `torch-sim`,
+`orb-models`, `mattersim` and `pet-mad`, and 9 of the failures in a full `pkgs/fairchem-core`
+test run (`RuntimeError: Requires ``nvalchemiops`` to be installed`).  It is a core dependency of
+those four, not an extra.
+
+**Not started, and nothing has been read.** It has been recorded as a wall for weeks on the
+strength of its name and its appearance in dependency lists — which is exactly the reasoning that
+turned out to be wrong for `deepmd-kit`, for `fairchem-core`, and for the fairchem data packages
+above.  It needs a clone and a read of its `pyproject.toml` before anyone says again that it
+cannot be done.
+
+Ask for the clone; it is not in `wc/`.
+
+
 ## Send `ase-db-backends`' `close()` fix upstream
 
 **Want:** `pkgs/ase-db-backends/close-must-not-reopen.patch` offered to
