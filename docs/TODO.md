@@ -3,6 +3,68 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
+## Send `ase-db-backends`' `close()` fix upstream
+
+**Want:** `pkgs/ase-db-backends/close-must-not-reopen.patch` offered to
+[gitlab.com/ase/ase-db-backends](https://gitlab.com/ase/ase-db-backends), so we can drop it.
+Unlike the enumlib item below, this one needs no further diagnosis and no verification work —
+the patch is written, applies to HEAD, and the build that motivated it is the test.
+
+**The bug.** `LMDBDatabase.close()` reaches the environment through the `env` property:
+
+```python
+@property
+def env(self):
+    if self._env is None or self._env_pid != os.getpid():
+        self._open_lmdb_env()
+    return self._env
+
+def close(self) -> None:
+    self.env.close()
+
+def __del__(self) -> None:
+    self.close()
+```
+
+Reopening after a fork is right for every reader of that property except this one.  On the close
+path it inverts the meaning: closing an already-closed database *opens* it, and closing one in a
+forked child opens a second handle to the parent's file, because `_env_pid != os.getpid()` is
+precisely what a fork guarantees.  `__del__` calls `close()`, so it runs at garbage collection.
+
+py-lmdb keeps a process-wide registry of open environment paths and refuses a second `open()` of
+one, so this does not leak quietly — it raises `lmdb.Error: The environment '...' is already open
+in this process.` from inside `__del__`, and the path stays registered, so every later
+`connect()` in that process fails too.
+
+**What it costs downstream.** It is not confined to tests: any program that opens an `aselmdb`
+database twice in one process hits it, which includes `pkgs/fairchem-core`, where a dataset and
+its splits are separate handles.  Applying the patch removes the `__del__` failures from the
+build log entirely.
+
+**Two further defects in the same area**, which the patch does *not* address and which are why
+`pkgs/ase-db-backends` deselects two modules.  Both open one LMDB path twice in a single process,
+which py-lmdb refuses; in both the first handle is still legitimately open, so no change to
+`close()` could help.
+
+- `test_aselmdb_concurrency` shares a single `LMDBDatabase` across eight forked workers, relying
+  on the `env` property to reopen in each child.  py-lmdb's registry of open paths is inherited
+  across the fork, so that reopen collides every time.  Fixing it means the child clearing the
+  inherited registry, or not sharing the handle at all.
+- `test_db2` opens the same path nested inside its own context manager — `with connect(name) as
+  c:` and then `c = connect(name)` — which cannot work against any py-lmdb that has the registry.
+
+**And one that is not upstream's fault at all**, worth knowing before reading a failure here:
+`test_db` populates its database by shelling out to a nine-stage `ase -T build … | ase -T run
+emt …` pipeline under `subprocess.run(..., shell=True)` and never checks the return code.  With
+`ase`'s console script absent from PATH the pipeline fails silently and the test dies much later
+with `KeyError: 'no match'`.  `pkgs/ase-db-backends` puts `ase` in `nativeCheckInputs` for it.
+Upstream might reasonably be asked to check that return code.
+
+**Worth asking upstream about at the same time:** whether their `lmdb` requirement wants an upper
+bound. `pkgs/fairchem-core` relaxes fairchem's own `lmdb <= 1.7.3` cap to take nixpkgs' 2.3.0,
+and it is not clear from either side whether that cap exists for this or for something else.
+
+
 ## Repair `compare_enum_files.x`, and send the patch upstream
 
 **Want:** `aux_src/compare_two_enum_files.f90` compiling again, so that

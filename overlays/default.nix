@@ -565,6 +565,13 @@ in
         # and ../sevenn are: matcalc is its only dependant.
         dargs = pself.callPackage ../pkgs/dargs { };
         deepmd-kit = pself.callPackage ../pkgs/deepmd-kit { };
+
+        # ../fairchem-core's two gaps, both internal to it.  clusterscope is
+        # pinned to the exact version fairchem-core's `==` asks for rather than
+        # to its own latest — see the note at its `src`.
+        ase-db-backends = pself.callPackage ../pkgs/ase-db-backends { };
+        clusterscope = pself.callPackage ../pkgs/clusterscope { };
+        fairchem-core = pself.callPackage ../pkgs/fairchem-core { };
       })
     ];
 

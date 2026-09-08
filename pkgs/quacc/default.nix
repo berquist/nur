@@ -25,13 +25,16 @@
   dask,
   dask-jobqueue,
   distributed,
+  fairchem-core,
   jobflow,
   jobflow-remote,
+  matcalc,
   parsl,
   phonopy,
   prefect,
   ray,
   redun,
+  rootstock,
   seekpath,
   sella,
   shakenbreak,
@@ -67,8 +70,12 @@ buildPythonPackage (finalAttrs: {
   build-system = [ setuptools ];
 
   # Every upstream extra whose dependencies are all packaged.  Left out:
-  # `fairchem`/`torchsim` (unpackaged ML stacks) and `mlip` (needs
-  # `fairchem-core` on top of the packaged `rootstock` and `matcalc[matgl]`).
+  # `torchsim` (torch-sim is NVIDIA-blocked) and `fairchem`, which wants
+  # `fairchem-data-{omat,oc,omol}` out of the same monorepo as ../fairchem-core
+  # and those are not packaged.
+  #
+  # `mlip` *is* here now: it asks for `fairchem-core` alone beside
+  # `matcalc[matgl]` and `rootstock`, and all three are packaged.
   #
   # `defects` is the newest, and the reason seven packages beneath it exist —
   # ../shakenbreak, and under that doped, pydefect, vise, hiphive, trainstation,
@@ -86,6 +93,12 @@ buildPythonPackage (finalAttrs: {
       jobflow
       jobflow-remote
     ];
+    mlip = [
+      fairchem-core
+      rootstock
+      matcalc
+    ]
+    ++ matcalc.optional-dependencies.matgl;
     mp = [ atomate2 ];
     parsl = [ parsl ];
     phonons = [
@@ -123,8 +136,9 @@ buildPythonPackage (finalAttrs: {
   # decorators are no-ops without one) and the recipe families that run on
   # ASE-native calculators (EMT, Lennard-Jones) or tblite.  The rest of
   # `tests/core/recipes/` — vasp, espresso, gaussian, orca, psi4, qchem, aims,
-  # dftb, gulp, mrcc, onetep — needs external codes; `mlip_recipes` needs
-  # `rootstock` (not packaged) and `torchsim_recipes` needs torch-sim.  The
+  # dftb, gulp, mrcc, onetep — needs external codes; `mlip_recipes` downloads a
+  # checkpoint through the `mlip` extra above and `torchsim_recipes` needs
+  # torch-sim.  The
   # engine-adapter suites are `tests/dask`, `tests/parsl` etc., outside
   # `tests/core`, so they are not in `testpaths` at all.
   enabledTestPaths = [
