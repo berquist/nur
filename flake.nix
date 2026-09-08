@@ -328,6 +328,8 @@
 
           aiidaVmTests = import ./tests/aiida/vm.nix { pkgs = pkgs'; };
 
+          materialsVmTests = import ./tests/materials/vm.nix { pkgs = pkgs'; };
+
           # Given cclibPkgs rather than pkgs', because that is the only package
           # set in which harmonwig has a cclib; see ./tests/harmonwig and the
           # cclibPkgs binding above.
@@ -475,6 +477,10 @@
           # phase — see the comment on the test:
           #   nix build .#checks.x86_64-linux.vm-aiida-transports-ssh
           #
+          # The materials VM test exists because ase-db-backends' PostgreSQL and
+          # MySQL suites can only skip in a check phase:
+          #   nix build .#checks.x86_64-linux.vm-materials-ase-db-backends
+          #
           # VM integration tests (require KVM and real packages):
           #   nix build .#checks.x86_64-linux.vm-server-local-db
           #   nix build .#checks.x86_64-linux.vm-server-open-firewall
@@ -531,6 +537,8 @@
             vm-aiida-daemon-sqlite = aiidaVmTests.daemon-sqlite;
             vm-aiida-transports-ssh = aiidaVmTests.transports-ssh;
             vm-aiida-plugin-shell = aiidaVmTests.plugin-shell;
+
+            vm-materials-ase-db-backends = materialsVmTests.ase-db-backends;
           }
           // lib.optionalAttrs (nwchem != null) {
             vm-compute-nwchem-singlepoint = vmTests.compute-nwchem-singlepoint;

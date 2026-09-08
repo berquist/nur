@@ -331,6 +331,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `fairchem.core...recipes.omol` kept out of the import check? | `pkgs/fairchem-core/default.nix` (`pythonImportsCheck`) |
 | Why is `clusterscope` pinned to v0.0.18 rather than its own latest release? | `pkgs/clusterscope/default.nix` (the note above `src`) |
 | Why does `ase-db-backends` drop `psycopg2-binary` for `psycopg2`? | `pkgs/ase-db-backends/default.nix` (`pythonRemoveDeps`) |
+| Where do `ase-db-backends`' PostgreSQL and MySQL tests actually run, if not in its build? | `tests/materials/vm.nix` |
+| Why does `ase-db-backends` list `ase` as both a dependency and a check input? | `pkgs/ase-db-backends/default.nix` (`nativeCheckInputs`) |
 | Which `ase-db-backends` tests skip themselves, and which actually run? | `pkgs/ase-db-backends/default.nix` (`enabledTestPaths`) |
 | Why does `ase-db-backends` patch `close()`, and what did reopening-to-close break? | `pkgs/ase-db-backends/close-must-not-reopen.patch`, `docs/TODO.md` |
 
@@ -354,6 +356,25 @@ recovered this way then failed on something the missing tests had been hiding, a
 failures hid the one behind it: `mrcfile` building unblocked `mdanalysis`, which unblocked
 `qmzyme`, which then failed on its own `versioningit~=2.0` build pin. Budget for several rounds,
 and run the build with `--keep-going` so one round reports every leaf rather than the first.
+
+
+### Tests that need a live server belong in a VM test
+
+A check phase cannot run PostgreSQL, MySQL or MongoDB, so a suite that wants one can only
+**skip** — and a skipped test is indistinguishable from a passing one in a build log. Do not
+leave it there. Put the package's check phase on what it can genuinely verify, and move the
+server-backed tests to a `tests/<suite>/vm.nix` entry that boots the real service.
+
+`pkgs/ase-db-backends` is the worked example: 27 of its 28 tests skip during the build for want
+of a PostgreSQL and a MySQL, which made a green build nearly meaningless.
+`tests/materials/vm.nix` runs those against real servers, and asserts that nothing *skipped* —
+because a skip there would mean the connection URL never reached the suite, which is the exact
+failure the build could not distinguish.
+
+The same reasoning already governs `pkgs/fireworks` and `pkgs/maggma`, which reach for MongoDB;
+those are handled differently (mongomock, and dropping the modules) and are the standing
+counter-examples to weigh a new case against.
+
 
 ## Architecture
 

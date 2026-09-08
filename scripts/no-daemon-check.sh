@@ -12,8 +12,8 @@
 #   1. every eval test in tests/qcarchive/, tests/aiida/ and
 #      tests/cheminformatics/ and tests/chemtools/, reported PASS/FAIL without
 #      building — see eval_suites below
-#   2. instantiation of every VM test in tests/qcarchive/vm.nix and
-#      tests/aiida/vm.nix
+#   2. instantiation of every VM test in tests/qcarchive/vm.nix,
+#      tests/aiida/vm.nix and tests/materials/vm.nix
 #   3. instantiation of every test in tests/dotdrop/
 #   4. nix-instantiate --parse over every tracked .nix file
 #
@@ -152,10 +152,11 @@ echo "=== VM tests instantiate ==="
 # Instantiation forces the node module system and builds the Python test
 # script, so a broken module or a syntax error in a testScript shows up here.
 #
-# The two suites differ in one argument: tests/qcarchive/vm.nix needs a Psi4,
-# which is out of reach here and gets the stub above, while tests/aiida/vm.nix
-# takes nothing but pkgs.  Everything else about them is the same, so the extra
-# arguments are passed through rather than the block being duplicated.
+# The suites differ in one argument: tests/qcarchive/vm.nix needs a Psi4, which
+# is out of reach here and gets the stub above, while tests/aiida/vm.nix and
+# tests/materials/vm.nix take nothing but pkgs.  Everything else about them is
+# the same, so the extra arguments are passed through rather than the block
+# being duplicated once per suite.
 instantiate_vm_suite() {
     local suite=$1
     shift
@@ -182,6 +183,7 @@ instantiate_vm_suite() {
 
 instantiate_vm_suite qcarchive --arg psi4 "$psi4_stub"
 instantiate_vm_suite aiida
+instantiate_vm_suite materials
 
 # ---------------------------------------------------------------------------
 echo

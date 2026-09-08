@@ -108,6 +108,16 @@ buildPythonPackage (finalAttrs: {
     "torch"
   ];
 
+  # `fairchem/core/_config.py` runs `os.makedirs(CACHE_DIR, exist_ok=True)` at
+  # module scope, with CACHE_DIR defaulting under `~/.cache`, so merely
+  # *importing* fairchem.core fails on stdenv's unwritable `/homeless-shelter`.
+  # In `preBuild` rather than `preCheck` because `pythonImportsCheck` is what
+  # trips it and that runs outside the check phase.  Third package here with
+  # this exact shape, after ../matgl and ../maml.
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+  '';
+
   # `ray[serve]` upstream; the extra pulls a FastAPI serving stack that only the
   # cluster launchers use, and nixpkgs' `ray` is the base distribution.
   dependencies = [
