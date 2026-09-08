@@ -54,7 +54,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus a dozen carried for a dependant
   alone and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
   `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
-  (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s), `maml` (`matcalc[maml]`'s), the
+  (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s), `maml` (`matcalc[maml]`'s), `deepmd-kit`
+  (`matcalc[deepmd]`'s) and `dargs` (deepmd-kit's one gap), the
   `quacc[defects]` cluster's lower layers — `doped` and `pydefect` and `hiphive`,
   `trainstation` (hiPhive's one gap), `cmcrameri` and `matplotlib-label-lines` (doped's plotting,
   the latter pydefect's too) — `tensorpotential` (`matcalc[grace]`'s, and **the one unfree package here**;
@@ -316,6 +317,12 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why must neither `doped` nor `shakenbreak` ever gain `pytest-xdist`? | `pkgs/doped/default.nix` and `pkgs/shakenbreak/default.nix` (`nativeCheckInputs`), `pkgs/fireworks/default.nix` |
 | Why is one `doped` test deselected by node id when the other 39 go by name? | `pkgs/doped/default.nix` (`pytestFlags`) |
 | Why does `shakenbreak` declare `hiphive` when nothing imports it at module scope? | `pkgs/shakenbreak/default.nix` (the note above `dependencies`) |
+| Why does `deepmd-kit` turn *both* its backends off, and what does that give up? | `pkgs/deepmd-kit/default.nix` (the note above `env`) |
+| Why do `torch` and `ase` become `deepmd-kit` dependencies when upstream declares neither? | `pkgs/deepmd-kit/default.nix` (the note above `dependencies`) |
+| Why is `deepmd-kit` the one package here whose `doCheck = false` is about the backends being off? | `pkgs/deepmd-kit/default.nix` (the note above `doCheck`) |
+| Why is `dargs`' licence `lgpl3Only` when its one dependant says `or-later`? | `pkgs/dargs/default.nix` (`meta.license`) |
+| Why does `dargs` pin a setuptools-scm version it would probably get right anyway? | `pkgs/dargs/default.nix` (the note above `env`) |
+| Why is `dargs.sphinx` left out of the import check? | `pkgs/dargs/default.nix` (`pythonImportsCheck`), `pkgs/dbstep/default.nix` (the same shape) |
 
 ### The sdist-has-no-tests trap
 
@@ -481,10 +488,12 @@ where the survey stands:
 | `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
 | `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `aims`, `amset`. `tests/{vasp,ase,lobster}` run in full, `test_magnetic_orderings` included since `enumlib` landed |
-| `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3` (phonopy-4 channels only), `benchmark`, `grace` (unfree — see `tensorpotential` below), `maml`, `matgl`, `mace` (unstable only), `sevennet`. Missing: `deepmd` (deepmd-kit), `fairchem`; `orb`/`mattersim`/`petmad` are NVIDIA-blocked (see below) |
+| `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3` (phonopy-4 channels only), `benchmark`, `grace` (unfree — see `tensorpotential` below), `maml`, `matgl`, `mace` (unstable only), `sevennet`, `deepmd`. Missing: `fairchem`; `orb`/`mattersim`/`petmad` are NVIDIA-blocked (see below) |
 | `tensorpotential` | `matcalc[grace]` | **done**; `pkgs/tensorpotential` (repo `ICAMS/grace-tensorpotential`) — **the one unfree package here.** Academic Software Licence: GPLv2 with a non-commercial clause, "not an open-source licence" by its own preamble. Reachable as `python313Packages.tensorpotential` only, deliberately not a top-level attribute — see `ci.nix` and the overlay binding |
 | `mp-api` | `maml`, atomate2 `mp` | **done**; `pkgs/mp-api` — `doCheck = false` (every test drives a live MPRester). Dist `mp-api`, import `mp_api` |
 | `maml` | `matcalc[maml]` | **done**; `pkgs/maml`, internal — `doCheck = false` (TensorFlow / matgl-model tests, `apps/pes` needs external fitting binaries) |
+| `deepmd-kit` | `matcalc[deepmd]` | **done**; `pkgs/deepmd-kit`, internal — and it was on the *blocked* list for no better reason than never having been surveyed. Core dependencies are ordinary; `dargs` was the only gap. Built with `DP_ENABLE_TENSORFLOW=0` and `DP_ENABLE_PYTORCH=0`, which skips the CMake-against-libtorch op library — optional, see the derivation. `doCheck = false` |
+| `dargs` | `deepmd-kit` — its only gap | **done**; `pkgs/dargs`, internal. A real tagged release, unlike the rest of this cluster |
 | `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `defects`, `jobflow`, `mp`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `fairchem`, `torchsim`, `mlip` (needs `fairchem-core` atop `rootstock`). Test round: ASE-native recipes + `wflow` |
 | `shakenbreak` | `quacc[defects]` — the chain's last target | **done**; `pkgs/shakenbreak`, and with it the whole `defects` cluster: `doped`, `pydefect`, `vise`, `hiphive`, `trainstation`, `cmcrameri`, `matplotlib-label-lines`. It is the half of the `doped` cycle that declares the other; see `pkgs/doped` for why the cut goes that way |
 | `matminer` | `matcalc[benchmark]` | **done**; `pkgs/matminer` — `tests/{featurizers,utils}` only, the data-retrieval suites hit external APIs |

@@ -15,6 +15,7 @@
   scikit-learn,
 
   # optional-dependencies
+  deepmd-kit,
   mace-torch ? null, # not in nixos-26.05
   maml,
   matgl,
@@ -79,9 +80,13 @@ buildPythonPackage (finalAttrs: {
   # Upstream's extras whose dependencies are packaged.  `mace` only where
   # `mace-torch` is (unstable, not 26.05); `phonon3` only where phonopy is 4.x,
   # since ../phono3py needs `phonopy >= 4.4` and 26.05 has 3.5.1.  Still
-  # missing: `deepmd` (deepmd-kit), `fairchem` (fairchem-core), and
-  # `mattersim` / `orb` / `petmad`, which need NVIDIA's `nvalchemi-toolkit-ops`
-  # the way torch-sim does.
+  # missing: `fairchem` (fairchem-core), and `mattersim` / `orb` / `petmad`,
+  # which need NVIDIA's `nvalchemi-toolkit-ops` the way torch-sim does.
+  #
+  # `deepmd` was in that list until ../deepmd-kit landed, and it turned out to
+  # be the one entry there for no better reason than never having been
+  # surveyed: its core dependencies are ordinary, `dargs` was the only gap, and
+  # the CUDA in it is opt-in rather than structural.
   #
   # `grace` is here but is the one extra a consumer cannot take for free:
   # ../tensorpotential is unfree, so asking for it needs `allowUnfree`.  It
@@ -91,6 +96,7 @@ buildPythonPackage (finalAttrs: {
   optional-dependencies = {
     phonon = [ seekpath ];
     benchmark = [ matminer ];
+    deepmd = [ deepmd-kit ];
     grace = [ tensorpotential ];
     maml = [ maml ];
     matgl = [ matgl ];

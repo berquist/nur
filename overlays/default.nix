@@ -557,6 +557,14 @@ in
         tensorpotential = pself.callPackage ../pkgs/tensorpotential { };
         maml = pself.callPackage ../pkgs/maml { };
         mendeleev = pself.callPackage ../pkgs/mendeleev { };
+
+        # dargs is ../deepmd-kit's, and the only core dependency of it that
+        # nixpkgs lacks — everything else it needs is either there already or
+        # is `mendeleev` just above, packaged for lobsterpy.  deepmd-kit is
+        # matcalc's `deepmd` extra, and internal for the same reason ../maml
+        # and ../sevenn are: matcalc is its only dependant.
+        dargs = pself.callPackage ../pkgs/dargs { };
+        deepmd-kit = pself.callPackage ../pkgs/deepmd-kit { };
       })
     ];
 
