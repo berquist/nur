@@ -46,51 +46,15 @@ store="$TMPDIR/no-daemon-check-store"
 export XDG_CACHE_HOME="$TMPDIR/no-daemon-check-cache"
 export NIXPKGS_CONFIG=
 
-# NIX_PATH normally points at flake:nixpkgs, which needs the network.  There
-# are two ways to resolve it offline, and they are not interchangeable:
-#
-#   1. this flake's *own* locked nixpkgs — what `nix flake check` evaluates
-#      against, and what CI sees;
-#   2. the flake registry's pre-resolved nixpkgs — whatever the sandbox image
-#      happens to carry.
-#
-# Prefer 1.  The registry copy trails the lock, and the gap is not cosmetic:
-# with the registry at python3 = 3.13 and the lock at 3.14, everything that
-# hinges on the default interpreter — the python313 pin, the meta.broken
-# markings on the qcportal dependants, any `pkgs.python3.withPackages` in a
-# test — passes here and fails in `nix flake check`.  That is exactly how
-# tests/qcarchive/vm.nix's compute-singlepoint slipped through.
-#
-# A flake input is added to the store as a fixed-output path (recursive
-# sha256, name "source"), so its location is a pure function of the narHash
-# already recorded in flake.lock: no network, no daemon, no `nix flake`
-# command — which matters, since libgit2 in the sandbox refuses to open this
-# repo at all ("unsupported extension name extensions.refstorage").
-locked_nixpkgs() {
-    local narhash base16 path
-    narhash=$(jq -r '.nodes.nixpkgs.locked.narHash // empty' flake.lock 2>/dev/null)
-    [[ $narhash == sha256-* ]] || return 1
-    base16=$(nix-hash --to-base16 --type sha256 "${narhash#sha256-}" 2>/dev/null) || return 1
-    path=$(nix-store --print-fixed-path --recursive sha256 "$base16" source 2>/dev/null) || return 1
-    # Only usable if the input has actually been fetched at some point.
-    [[ -d $path ]] || return 1
-    printf '%s\n' "$path"
-}
-
-nixpkgs_origin=inherited
-if [[ -z "${NIX_PATH:-}" || "$NIX_PATH" == *flake:* ]]; then
-    if resolved=$(locked_nixpkgs); then
-        nixpkgs_origin=flake.lock
-    else
-        registry=/etc/nix/registry.json
-        if [[ -r $registry ]]; then
-            resolved=$(jq -r '.flakes[] | select(.from.id == "nixpkgs") | .to.path // empty' "$registry" 2>/dev/null | head -1)
-            nixpkgs_origin="flake registry — NOT the locked nixpkgs, so default-interpreter breakage will be missed"
-        fi
-    fi
-    [[ -n ${resolved:-} ]] && export NIX_PATH="nixpkgs=$resolved"
+# Which nixpkgs this evaluates against decides whether a green run here means
+# anything, so the choice — and the reason the flake registry is the wrong
+# answer — lives in one place: scripts/locked-nixpkgs.sh, shared with
+# scripts/sandbox-eval.sh.  It reports what it picked on stderr.
+if resolved=$(./scripts/locked-nixpkgs.sh); then
+    export NIX_PATH="$resolved"
+else
+    echo "  WARNING: no nixpkgs resolved; <nixpkgs> is whatever the caller's is"
 fi
-echo "NIX_PATH=${NIX_PATH:-<unset>} [$nixpkgs_origin]"
 
 nix_eval() { nix-instantiate --store "$store" "$@"; }
 

@@ -115,6 +115,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Question | Read |
 |---|---|
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
+| How do I evaluate one expression from inside the sandbox, without running the whole suite? | `scripts/sandbox-eval.sh` (the header comment), `just eval` |
+| Why does a green check here mean nothing if `<nixpkgs>` came from the flake registry? | `scripts/locked-nixpkgs.sh` (the header comment) |
 | Where does a `fetchFromGitHub` hash come from with no network and no daemon? | `scripts/offline-src-hash.sh` (the header comment), `just hash-src` |
 | Why is `sisl` pinned to a tag rather than main, and what did the extra commits break? | `pkgs/sisl/default.nix` (the note above `src`) |
 | Why is `node-graph` pinned to v0.6.5 exactly, one commit behind its main? | `pkgs/node-graph/default.nix` (the note above `src`) |
@@ -434,6 +436,8 @@ just harmonwig-tests      # the one suite that needs the flake, because cclib is
 just vm-test server-local-db          # one VM test; needs KVM
 just vm-test aiida-daemon-local-db    # the AiiDA VM tests are prefixed "aiida-"
 just fmt / just lint / just hooks     # nixfmt, statix+deadnix, prek
+just check-no-daemon                  # the eval-only subset; no nix-daemon needed
+just eval vise.version                # one expression, likewise; see the skill
 ```
 
 Tooling comes from the devShell (`nix develop`, or direnv). Entering it also generates

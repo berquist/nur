@@ -21,7 +21,21 @@ incantation.** It sets up the chroot store and reports, in one pass:
 - instantiation of every test in `tests/dotdrop/`
 - `nix-instantiate --parse` over every tracked `.nix` file
 
-The mechanics it encapsulates, if you ever need them directly:
+**For a single question, use `just eval` (i.e. `scripts/sandbox-eval.sh`)** — the one-off
+counterpart, and the thing to reach for while writing a derivation:
+
+```sh
+just eval vise.version                             # (import ./. { }).vise.version
+just eval shakenbreak.makeWrapperArgs              # --strict, so lists print
+just eval '(import <nixpkgs> { }).python3.version' # anything with a space is verbatim
+```
+
+A bare attribute path is resolved against `default.nix`; anything else goes to nix as written.
+The value lands on stdout and the chosen `NIX_PATH` on stderr, so `--json` output pipes into
+`jq` cleanly. Both scripts get their nixpkgs from `scripts/locked-nixpkgs.sh`, which is the
+only place that logic exists.
+
+The mechanics they encapsulate, if you ever need them directly:
 
 ```sh
 export XDG_CACHE_HOME="$TMPDIR/nix-cache"   # ~/.cache is a read-only tmpfs
