@@ -572,6 +572,39 @@ in
         ase-db-backends = pself.callPackage ../pkgs/ase-db-backends { };
         clusterscope = pself.callPackage ../pkgs/clusterscope { };
         fairchem-core = pself.callPackage ../pkgs/fairchem-core { };
+
+        # A fourth nixpkgs package repaired here rather than merely wrapped, and
+        # this one is broken for *every* consumer, not just ours: torchtnt
+        # 0.2.4's `utils/version.py` opens `import pkg_resources`, and the
+        # setuptools in the same package set is 83.0.0, which no longer ships
+        # it.  So `import torchtnt.framework` — which is the first thing
+        # ../pkgs/fairchem-core reaches — dies with `ModuleNotFoundError: No
+        # module named 'pkg_resources'`.
+        #
+        # This is the concrete form of the risk noted at fairchem-core's
+        # `pythonRelaxDeps`: upstream caps `setuptools < 81.0.0`, and that cap
+        # is not about fairchem's own code at all — it is holding pkg_resources
+        # in place for torchtnt.  Relaxing it is still right; the cap papers
+        # over a torchtnt bug rather than fixing one.
+        #
+        # The import has exactly one use, in the `else` arm of
+        # `if hasattr(torch, "__version__")` in `get_torch_version`.  Every
+        # torch in living memory has `__version__`, so the arm is unreachable in
+        # practice, but it is rewritten rather than deleted: `importlib.metadata`
+        # is the stdlib successor to `pkg_resources.get_distribution` and
+        # returns the same string, so the fallback keeps working if it is ever
+        # reached.
+        torchtnt = psuper.torchtnt.overridePythonAttrs (old: {
+          postPatch = (old.postPatch or "") + ''
+            substituteInPlace torchtnt/utils/version.py \
+              --replace-fail \
+                'import pkg_resources' \
+                'import importlib.metadata' \
+              --replace-fail \
+                'pkg_resources.get_distribution("torch").version' \
+                'importlib.metadata.version("torch")'
+          '';
+        });
       })
     ];
 

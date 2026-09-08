@@ -64,7 +64,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   see "Deferred packaging"), and `monty`, a
   backport that exists only because `pymatgen-core` needs a version no channel here ships yet.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
-  upstream split it and the two layouts cannot coexist, and `monty` on the legs that are behind.
+  upstream split it and the two layouts cannot coexist, `monty` on the legs that are behind, and
+  `torchtnt`, which is simply broken against setuptools 83 and is repaired rather than replaced.
   Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
   itself and in `pkgs/pymatgen-core/default.nix`. One member is not a Python package at all:
   `enumlib`, the Fortran `enum.x` / `makestr.x` that pymatgen's `EnumlibAdaptor` shells out to,
@@ -328,6 +329,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `dargs.sphinx` left out of the import check? | `pkgs/dargs/default.nix` (`pythonImportsCheck`), `pkgs/dbstep/default.nix` (the same shape) |
 | How does one distribution get built out of the thirteen-package `fairchem` monorepo? | `pkgs/fairchem-core/default.nix` (`sourceRoot`), `pkgs/emmet-core/default.nix` (the same arrangement) |
 | Which of `fairchem-core`'s four relaxed pins is the one worth worrying about? | `pkgs/fairchem-core/default.nix` (the note above `pythonRelaxDeps`) |
+| Why does `torchtnt` get patched here, and what does setuptools 83 have to do with it? | `overlays/default.nix` (the `torchtnt` binding in the materials overlay) |
 | Why is `fairchem.core...recipes.omol` kept out of the import check? | `pkgs/fairchem-core/default.nix` (`pythonImportsCheck`) |
 | Why is `clusterscope` pinned to v0.0.18 rather than its own latest release? | `pkgs/clusterscope/default.nix` (the note above `src`) |
 | Why does `ase-db-backends` drop `psycopg2-binary` for `psycopg2`? | `pkgs/ase-db-backends/default.nix` (`pythonRemoveDeps`) |
