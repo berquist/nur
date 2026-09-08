@@ -34,6 +34,7 @@
   redun,
   seekpath,
   sella,
+  shakenbreak,
   tblite,
 
   # tests
@@ -66,10 +67,16 @@ buildPythonPackage (finalAttrs: {
   build-system = [ setuptools ];
 
   # Every upstream extra whose dependencies are all packaged.  Left out:
-  # `fairchem`/`torchsim` (unpackaged ML stacks), `mlip` (needs `fairchem-core`
-  # on top of the packaged `rootstock` and `matcalc[matgl]`), and the `defects`
-  # extra's `shakenbreak` (needs doped + hiphive).
+  # `fairchem`/`torchsim` (unpackaged ML stacks) and `mlip` (needs
+  # `fairchem-core` on top of the packaged `rootstock` and `matcalc[matgl]`).
+  #
+  # `defects` is the newest, and the reason seven packages beneath it exist —
+  # ../shakenbreak, and under that doped, pydefect, vise, hiphive, trainstation,
+  # cmcrameri and matplotlib-label-lines.  Like every other entry here it costs
+  # quacc's own build nothing: `nativeCheckInputs` below takes only the `tblite`
+  # extra.
   optional-dependencies = {
+    defects = [ shakenbreak ];
     dask = [
       dask
       dask-jobqueue

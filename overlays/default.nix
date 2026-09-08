@@ -536,6 +536,11 @@ in
         pydefect = pself.callPackage ../pkgs/pydefect { };
         trainstation = pself.callPackage ../pkgs/trainstation { };
 
+        # The cluster's target, and the one member of it besides ../vise that is
+        # a tool in its own right — ten console scripts under two prefixes — so
+        # it is re-exported below rather than stopping here.
+        shakenbreak = pself.callPackage ../pkgs/shakenbreak { };
+
         # rootstock is quacc[mlip]'s alone; sevenn is matcalc[sevennet]'s;
         # maml is matcalc[maml]'s.
         rootstock = pself.callPackage ../pkgs/rootstock { };
@@ -594,6 +599,7 @@ in
       qtoolkit
       quacc
       redun
+      shakenbreak
       vise
       ;
   };

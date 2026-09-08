@@ -49,7 +49,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 - the **materials family** — `custodian`, `fireworks`, `qtoolkit`, `maggma`, `jobflow`,
   `jobflow-remote`, `pubchempy`, `pymatgen-io-validation`, `emmet-core`, the three
   `pymatgen-analysis-{alloys,defects,diffusion}` add-ons, `optimade`, `lobsterpy`, `matgl`, and
-  `atomate2`, `matcalc`, `quacc`, `matminer`, `redun`, `phono3py`, `mp-api`, `vise`, and both halves of upstream
+  `atomate2`, `matcalc`, `quacc`, `matminer`, `redun`, `phono3py`, `mp-api`, `vise`, `shakenbreak`,
+  and both halves of upstream
   pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus a dozen carried for a dependant
   alone and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
   `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
@@ -310,6 +311,9 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `cmcrameri` need `SETUPTOOLS_SCM_PRETEND_VERSION` when nothing errors without it? | `pkgs/cmcrameri/default.nix` (the `env` note) |
 | How is the `doped` ↔ `shakenbreak` cycle cut, and why is that permanent rather than a bootstrap? | `pkgs/doped/default.nix` (the note above `pythonRemoveDeps`) |
 | Why can `doped`'s suite run with no VASP when `vise`'s cannot? | `pkgs/doped/default.nix` (`enabledTestPaths`), `pkgs/vise/default.nix` (`disabledTestPaths`) |
+| Why must neither `doped` nor `shakenbreak` ever gain `pytest-xdist`? | `pkgs/doped/default.nix` and `pkgs/shakenbreak/default.nix` (`nativeCheckInputs`), `pkgs/fireworks/default.nix` |
+| Why is one `doped` test deselected by node id when the other 39 go by name? | `pkgs/doped/default.nix` (`pytestFlags`) |
+| Why does `shakenbreak` declare `hiphive` when nothing imports it at module scope? | `pkgs/shakenbreak/default.nix` (the note above `dependencies`) |
 
 ### The sdist-has-no-tests trap
 
@@ -477,7 +481,8 @@ where the survey stands:
 | `tensorpotential` | `matcalc[grace]` | **done**; `pkgs/tensorpotential` (repo `ICAMS/grace-tensorpotential`) — **the one unfree package here.** Academic Software Licence: GPLv2 with a non-commercial clause, "not an open-source licence" by its own preamble. Reachable as `python313Packages.tensorpotential` only, deliberately not a top-level attribute — see `ci.nix` and the overlay binding |
 | `mp-api` | `maml`, atomate2 `mp` | **done**; `pkgs/mp-api` — `doCheck = false` (every test drives a live MPRester). Dist `mp-api`, import `mp_api` |
 | `maml` | `matcalc[maml]` | **done**; `pkgs/maml`, internal — `doCheck = false` (TensorFlow / matgl-model tests, `apps/pes` needs external fitting binaries) |
-| `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `jobflow`, `mp`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `fairchem`, `torchsim`, `mlip` (needs `fairchem-core` atop `rootstock`), `defects` (needs `shakenbreak`). Test round: ASE-native recipes + `wflow` |
+| `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `defects`, `jobflow`, `mp`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `fairchem`, `torchsim`, `mlip` (needs `fairchem-core` atop `rootstock`). Test round: ASE-native recipes + `wflow` |
+| `shakenbreak` | `quacc[defects]` — the chain's last target | **done**; `pkgs/shakenbreak`, and with it the whole `defects` cluster: `doped`, `pydefect`, `vise`, `hiphive`, `trainstation`, `cmcrameri`, `matplotlib-label-lines`. It is the half of the `doped` cycle that declares the other; see `pkgs/doped` for why the cut goes that way |
 | `matminer` | `matcalc[benchmark]` | **done**; `pkgs/matminer` — `tests/{featurizers,utils}` only, the data-retrieval suites hit external APIs |
 | `redun` | `quacc[redun]` | **done**; `pkgs/redun` — `doCheck = false` (AWS-executor tests), `fancycompleter` removed |
 | `phono3py` | `matcalc[phonon3]` | **done**; `pkgs/phono3py` — the phonopy sibling, scikit-build-core + nanobind + CMake |
@@ -578,7 +583,6 @@ deprecated APIs, so this one may not be cosmetic.
 |---|---|
 | `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs |
 | `orb-models`, `mattersim`, `pet-mad` | same NVIDIA wall as `torch-sim` — `orb-models` lists `nvalchemi-toolkit-ops` as a core dep, `mattersim` lists `torch-sim-atomistic` (→ nvalchemi), `pet-mad` lists `nvalchemi-toolkit-ops` + `warp-lang`. These are the matcalc `orb` / `mattersim` / `petmad` extras |
-| `ShakeNBreak` (the `quacc[defects]` extra) | down to `shakenbreak` itself, everything under it packaged: `doped`, `pydefect`, `vise`, `hiphive`, `trainstation`, `cmcrameri`, `matplotlib-label-lines`, with `pymatgen-analysis-defects` and `dscribe` already here. The `doped` ↔ `shakenbreak` cycle is already cut, in `pkgs/doped` and permanently — shakenbreak is the half that declares the other, so it is the one left to write. Cloned |
 | `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
 | `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
 | `fairchem` | 13-distribution monorepo, torch plus pretrained model weights |

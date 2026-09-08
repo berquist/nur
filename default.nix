@@ -173,6 +173,7 @@ in
     qtoolkit
     quacc
     redun
+    shakenbreak
     vise
     ;
 }
