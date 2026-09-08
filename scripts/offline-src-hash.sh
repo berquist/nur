@@ -11,18 +11,28 @@
 # GitHub's codeload tarball carries, so hashing that tree offline gives the same
 # NAR hash fetchFromGitHub will later check against.
 #
-# Three ways that equivalence breaks.  Only the first is fatal, and it is the
-# reason this script warns rather than pretending to be authoritative:
+# Three ways that equivalence breaks.  Only the first can be fatal, and only
+# then in the two cases spelled out below -- which is the reason this script
+# warns rather than pretending to be authoritative:
 #
-#   `.gitattributes` export-subst.  A file marked with it has its `$Format:...$`
-#   placeholders expanded at archive time, and the expansion is not the same on
-#   both sides.  `%(describe)` abbreviates the hash to whatever the archiving
-#   repository's `core.abbrev` heuristic picks -- ten characters on GitHub's
-#   servers, nine in a small local clone -- and `ref-names` lists the local
-#   refs, which are `HEAD -> main, origin/main` here and empty there.  sisl is
-#   the example: its .git_archival.txt differs in exactly those two fields, so
-#   the offline hash cannot match and the only honest source of the real one is
-#   a build that fails and prints it.
+#   `.gitattributes` export-subst, but only for *some* placeholders.  A file
+#   marked with it has its `$Format:...$` expanded at archive time, and two of
+#   those expansions differ between here and GitHub's servers:
+#
+#     - `%d` / `%D` (ref-names) lists the refs pointing at the commit, which
+#       here means local branches and remotes and there means almost nothing.
+#       Always fatal.
+#     - `%(describe...)` is fatal only when the commit is *past* a tag: the
+#       output then carries a `-<n>-g<sha>` suffix whose abbreviation length is
+#       the archiving repository's choice -- ten characters on GitHub, nine in a
+#       small local clone.  On a commit that *is* a tag, the output is the bare
+#       tag name and both sides agree.
+#
+#   Anything else in a `$Format:$` -- `%H`, `%cI`, `%ct` -- is a property of the
+#   commit and matches.  So this is checked by reading the marked files rather
+#   than by the presence of the attribute: sisl is the fatal case (ref-names
+#   *and* a non-tag describe), while dargs and deepmd-kit are the safe one, and
+#   their hashes were confirmed against real builds before this was relaxed.
 #
 #   Submodules.  These are fine, contrary to what this script used to do: a
 #   codeload tarball keeps the submodule path as an *empty directory*, and so
@@ -95,16 +105,53 @@ for attributes in "${attributes_files[@]}"; do
         grep 'export-ignore' "$attributes" | sed 's/^/  /' >&2
     fi
 
+    # export-subst is only *sometimes* fatal, and which it is depends on the
+    # placeholders rather than on the attribute.  Two of them differ between
+    # this clone and GitHub's servers:
+    #
+    #   %d / %D (ref-names) lists the refs pointing at the commit, which here
+    #   includes local branches and remotes and there does not.  Always fatal.
+    #
+    #   %(describe...) is fatal only when the commit is *past* a tag, because
+    #   then the output carries a `-<n>-g<sha>` suffix and the abbreviation
+    #   length is chosen by the archiving repository -- ten characters on
+    #   GitHub, nine in a small local clone.  On a commit that *is* a tag the
+    #   output is just the tag name, identical on both sides.
+    #
+    # Everything else -- %H, %h's siblings, %cI, %ct -- is a property of the
+    # commit and matches.  sisl is the fatal case (its .git_archival.txt has
+    # both a ref-names field and a non-tag describe); dargs and deepmd-kit are
+    # the safe one, and their hashes were confirmed by a real build.
     if grep -q 'export-subst' "$attributes"; then
-        printf 'ERROR: %s marks files export-subst:\n' "$rel" >&2
-        grep 'export-subst' "$attributes" | sed 's/^/  /' >&2
-        # shellcheck disable=SC2016  # $Format:...$ is the literal git syntax,
-        # not a shell expansion.
-        printf '       Their $Format:...$ placeholders expand differently here than on\n' >&2
-        printf '       GitHub -- describe-name abbreviates to a different length, and\n' >&2
-        printf '       ref-names lists this clone.  THE HASH BELOW WILL NOT MATCH.\n' >&2
-        printf '       Take the real one from the hash mismatch a build prints.\n' >&2
-        exit_code=1
+        mapfile -t subst_paths < <(
+            grep 'export-subst' "$attributes" | awk '{ print $1 }'
+        )
+        subst_content=""
+        for path in "${subst_paths[@]}"; do
+            subst_content+=$(git -C "$clone" show "$full_rev:$path" 2>/dev/null || true)
+        done
+
+        reason=""
+        # shellcheck disable=SC2016  # $Format:...$ is git's literal placeholder
+        # syntax being matched, not a shell expansion.
+        if grep -qE '\$Format:[^$]*%[dD]' <<<"$subst_content"; then
+            reason="a ref-names placeholder, which lists this clone's own refs"
+        elif grep -q 'describe' <<<"$subst_content" && [[ $described == *-g* ]]; then
+            reason="a describe placeholder, and $described is past a tag rather than on one"
+        fi
+
+        if [[ -n $reason ]]; then
+            printf 'ERROR: %s marks files export-subst, and one of them has\n' "$rel" >&2
+            printf '       %s.\n' "$reason" >&2
+            printf '       THE HASH BELOW WILL NOT MATCH.  Take the real one from the\n' >&2
+            printf '       hash mismatch a build prints.\n' >&2
+            exit_code=1
+        else
+            printf 'note: %s marks files export-subst, but their placeholders all\n' "$rel" >&2
+            printf '      expand identically here and on GitHub (no ref-names field, and\n' >&2
+            printf '      %s is a tag rather than a commit past one), so the\n' "$described" >&2
+            printf '      hash below still stands.\n' >&2
+        fi
     fi
 done
 

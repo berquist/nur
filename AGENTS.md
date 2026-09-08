@@ -119,6 +119,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | How do I evaluate one expression from inside the sandbox, without running the whole suite? | `scripts/sandbox-eval.sh` (the header comment), `just eval` |
 | Why does a green check here mean nothing if `<nixpkgs>` came from the flake registry? | `scripts/locked-nixpkgs.sh` (the header comment) |
 | Where does a `fetchFromGitHub` hash come from with no network and no daemon? | `scripts/offline-src-hash.sh` (the header comment), `just hash-src` |
+| When is a repository's `export-subst` actually fatal to an offline hash, and when is it not? | `scripts/offline-src-hash.sh` (the header comment, and the `export-subst` branch) |
 | Why is `sisl` pinned to a tag rather than main, and what did the extra commits break? | `pkgs/sisl/default.nix` (the note above `src`) |
 | Why is `node-graph` pinned to v0.6.5 exactly, one commit behind its main? | `pkgs/node-graph/default.nix` (the note above `src`) |
 | Why does `sisl` patch `cmake.verbose` at the tag it is pinned to? | `pkgs/sisl/default.nix` (`postPatch`) |
