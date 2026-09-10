@@ -26,6 +26,9 @@
   dask-jobqueue,
   distributed,
   fairchem-core,
+  fairchem-data-oc,
+  fairchem-data-omat,
+  fairchem-data-omol,
   jobflow,
   jobflow-remote,
   matcalc,
@@ -69,13 +72,20 @@ buildPythonPackage (finalAttrs: {
   # `version` is a plain string in pyproject.toml.
   build-system = [ setuptools ];
 
-  # Every upstream extra whose dependencies are all packaged.  Left out:
-  # `torchsim` (torch-sim is NVIDIA-blocked) and `fairchem`, which wants
-  # `fairchem-data-{omat,oc,omol}` out of the same monorepo as ../fairchem-core
-  # and those are not packaged.
+  # Every upstream extra whose dependencies are all packaged.  `torchsim` is the
+  # only one left out, and it is NVIDIA-blocked rather than merely unpackaged —
+  # torch-sim's core dependency `nvalchemi-toolkit-ops` is not in nixpkgs.  See
+  # ../../docs/TODO.md.
   #
-  # `mlip` *is* here now: it asks for `fairchem-core` alone beside
-  # `matcalc[matgl]` and `rootstock`, and all three are packaged.
+  # `mlip` asks for `fairchem-core` alone beside `matcalc[matgl]` and
+  # `rootstock`; `fairchem` adds the three data distributions out of the same
+  # monorepo, which are now ../fairchem-data-oc, ../fairchem-data-omat and
+  # ../fairchem-data-omol.  Its floors — `>=1.0.2`, `>=0.2`, `>=0.1.2` — are
+  # exactly the versions those three carry.
+  #
+  # ../fairchem-data-omol drops its own `quacc` requirement rather than
+  # declaring it, because this entry is the other half of that cycle; the note
+  # at its `optional-dependencies` says why the cut goes this way round.
   #
   # `defects` is the newest, and the reason seven packages beneath it exist —
   # ../shakenbreak, and under that doped, pydefect, vise, hiphive, trainstation,
@@ -88,6 +98,12 @@ buildPythonPackage (finalAttrs: {
       dask
       dask-jobqueue
       distributed
+    ];
+    fairchem = [
+      fairchem-core
+      fairchem-data-oc
+      fairchem-data-omat
+      fairchem-data-omol
     ];
     jobflow = [
       jobflow

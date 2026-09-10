@@ -321,6 +321,43 @@
           # it is Linux-only, and a VM test could not run anywhere else anyway.
           nwchem = if pkgs'.stdenv.hostPlatform.isLinux then pkgs'.nwchem else null;
 
+          # packmol, which pkgs/fairchem-data-oc shells out to and **nixpkgs
+          # does not have at all**.  Taken from NixOS-QChem rather than packaged
+          # here: reuse what that input already carries wherever it carries it,
+          # which is the standing rule for this repository — see "Reusing
+          # NixOS-QChem" in ./AGENTS.md.  Its own package list names this one
+          # `qchem.packmol`, at 21.1.0.
+          #
+          # Cheap in a way psi4 is not.  The interpreter override on qchemPkgs
+          # above is what makes Psi4 miss nix-qchem.cachix.org, and it costs this
+          # nothing: packmol is a gfortran build of a single Makefile producing a
+          # single binary, and reads no Python at all.
+          #
+          # Only where NixOS-QChem has outputs, for the reason given at psi4.
+          packmol = if system == "x86_64-linux" then qchemPkgs.qchem.packmol else null;
+
+          # fairchem-data-oc with that packmol on its check PATH, which is the
+          # only package set in this repository where its two `InterfaceConfig`
+          # tests run at all.  ./overlays is imported without flakes by
+          # default.nix, overlay.nix and ci.nix, so it cannot reach the
+          # nixos-qchem input — `final.packmol or final.qchem.packmol or null`
+          # resolves to null there and the module is deselected.  This is the
+          # counterpart of harmonwigTests below: a package that needs a flake
+          # input to be fully exercised, reachable as a check rather than as an
+          # output.
+          #
+          # An `override` of one check input rather than a second package set:
+          # nothing in the closure depends on packmol, so this rebuilds
+          # fairchem-data-oc and nothing else.  It is also the only place in the
+          # repository that builds fairchem-data-oc at all — it is internal, and
+          # ci.nix does not descend into python313Packages; see the standing item
+          # in ./docs/TODO.md.
+          fairchemDataOc =
+            if packmol != null then
+              pkgs'.python313Packages.fairchem-data-oc.override { inherit packmol; }
+            else
+              null;
+
           vmTests = import ./tests/qcarchive/vm.nix {
             pkgs = pkgs';
             inherit psi4 nwchem;
@@ -461,6 +498,12 @@
           # and therefore cclib, and so exist only where NixOS-QChem does:
           #   nix build .#checks.x86_64-linux.harmonwig
           #
+          # fairchem-data-oc rebuilt with NixOS-QChem's packmol on its check
+          # PATH, which is the only way its two InterfaceConfig tests run — and
+          # the only place anything builds this package, it being internal.
+          # Likewise NixOS-QChem-only:
+          #   nix build .#checks.x86_64-linux.fairchem-data-oc
+          #
           # AiiDA VM tests.  The first six need only nixpkgs -- the aiida-shell
           # one builds xtb, which is lib.platforms.linux like the VMs themselves.
           # The CP2K plugin round trip additionally needs a CP2K, whose nixpkgs
@@ -557,6 +600,9 @@
           }
           // lib.optionalAttrs (harmonwigTests != null) {
             harmonwig = harmonwigTests.all;
+          }
+          // lib.optionalAttrs (fairchemDataOc != null) {
+            fairchem-data-oc = fairchemDataOc;
           };
         };
     };

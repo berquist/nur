@@ -45,8 +45,8 @@ sitting unnoticed until someone builds it by hand.
 
 `ci.nix` walks `default.nix` and skips `python313Packages` — deliberately, and the note there
 explains why: it is the whole 3.13 set, so descending would try to build all of nixpkgs.  The
-consequence was not thought through.  Of the 132 packages this repository defines, 68 are
-re-exported as top-level attributes and **64 are internal**, reachable only through
+consequence was not thought through.  Of the 135 packages this repository defines, 68 are
+re-exported as top-level attributes and **67 are internal**, reachable only through
 `python313Packages`.
 
 Most of those 64 are still built, as build-time dependencies of something re-exported —
@@ -59,6 +59,9 @@ extra is not a build input of the package that declares it.  Nothing builds thos
     deepmd-kit        matcalc[deepmd]        and dargs beneath it
     fairchem-core     matcalc[fairchem], quacc[mlip]
                                              and clusterscope, ase-db-backends beneath it
+    fairchem-data-oc  quacc[fairchem]
+    fairchem-data-omat  quacc[fairchem]
+    fairchem-data-omol  quacc[fairchem]
     maml              matcalc[maml]
     rootstock         quacc[mlip]
 
@@ -85,8 +88,10 @@ and several of them have never been built on any channel.
 
 ## Package the remaining fairchem distributions
 
-**Want:** `quacc[fairchem]` wired, which needs three more distributions out of the same monorepo
-`pkgs/fairchem-core` already builds from; the rest are optional follow-ons.
+**Want:** nothing urgent any more.  `quacc[fairchem]` is wired — `fairchem-data-omol`,
+`fairchem-data-omat` and `fairchem-data-oc` are packaged beside `pkgs/fairchem-core` — and no
+package in this repository asks for any of the nine distributions left.  This is a survey kept so
+it does not have to be redone, not a queue.
 
 Every one of these was written off in `AGENTS.md` as "13-distribution monorepo, torch plus
 pretrained model weights", which counted the distributions instead of reading their dependency
@@ -94,26 +99,65 @@ lists.  Reading them:
 
 | Distribution | Core dependencies | Gap |
 |---|---|---|
-| `fairchem-data-omol` | `ase` | none |
-| `fairchem-data-omat` | `pymatgen` | none |
-| `fairchem-data-oc` | numpy, scipy, matplotlib, ase, pymatgen, tqdm | none |
+| `fairchem-data-omol` | `ase` | **done** — plus numpy/scipy/pymatgen, undeclared |
+| `fairchem-data-omat` | `pymatgen` | **done** |
+| `fairchem-data-oc` | numpy, scipy, matplotlib, ase, pymatgen, tqdm | **done** — plus `fairchem-core`, undeclared |
 | `fairchem-data-odac` | `ase`, `pymatgen` | none |
 | `fairchem-data-omc` | + `atomate2` | none — atomate2 is packaged |
 | `fairchem-demo-ocpapi` | dataclasses-json, inquirer, responses, tenacity, tqdm | none |
-| `fairchem-applications-cattsunami` | `fairchem-core`, `fairchem-data-oc` | after the above |
+| `fairchem-applications-cattsunami` | `fairchem-core`, `fairchem-data-oc` | none, now |
 | `fairchem-applications-fastcsp` | + `p_tqdm`, `rdkit` | `p-tqdm` |
 | `fairchem-applications-ocx` | + matminer, plotly, statsmodels, seaborn, `yellowbrick` | `yellowbrick` |
 | `fairchem-applications-AdsorbML` | declares none | read `setup.py` first |
 | `fairchem-lammps` | `fairchem.core` + LAMMPS | not surveyed |
 | `fairchem-core-numpy126` | a numpy-1.26 variant of core | skip — pointless here |
 
-The first three are what `quacc[fairchem]` asks for and are close to free.  Each builds from its
-own `packages/<name>/` with the same `src -> ../../src` symlink, so they are `sourceRoot` copies
-of `pkgs/fairchem-core` with a different tag; note the tags are per-distribution
-(`fairchem_data_omol-0.1.2` and so on), not one repository-wide version.
+Each builds from its own `packages/<name>/` with the same `src -> ../../src` symlink, so they are
+`sourceRoot` copies of `pkgs/fairchem-core` with a different tag; note the tags are
+per-distribution (`fairchem_data_omol-0.1.2` and so on), not one repository-wide version.
 
-Also unblocks `pkgs/fairchem-core`'s `tests/core/components/test_omol_recipes.py`, deselected
-today only because `fairchem-data-omol` is absent.
+**Two things this entry got wrong, worth knowing before trusting the rest of it.**
+
+*It said packaging `fairchem-data-omol` would unblock `tests/core/components/test_omol_recipes.py`.*
+It does not.  That module does need `fairchem.data.omol` to import, but it also carries
+`pytestmark = [pytest.mark.pretrained("uma-s-1p1")]` at module scope and an autouse
+`pretrained_checkpoint` fixture, so every one of its thirteen tests downloads a UMA checkpoint
+from Hugging Face before `setUp` returns.  It stays in `disabledTestPaths`, for the same reason
+the other eight modules there do.
+
+*It called the three data packages "close to free".*  Two of them were.  `fairchem-data-oc` was
+not: it needed a pin past its own tag, an undeclared dependency on `fairchem-core`, and a 36 MB
+`fetchurl` for the bulk database that six of its seven test modules open.  See its derivation.
+
+
+## Use fairchem's own `--exclude-models` instead of nine `disabledTestPaths` entries
+
+**Want:** `pkgs/fairchem-core`'s deselections expressed the way upstream expresses them, so the
+list stops needing to be rediscovered every time a test module is added.
+
+Nine of the fourteen entries in that derivation's `disabledTestPaths` are there because the test
+downloads a pretrained checkpoint from Hugging Face.  Upstream has a mechanism for exactly this,
+and this repository is not using it: `tests/conftest.py` registers a `pretrained` marker, every
+such test declares the model it wants through it, and the conftest adds an `--exclude-models`
+option that deselects tests by declared model.  Their own `CLAUDE.md` records the rule — "Tests
+that download registered checkpoints must declare their models with a `pretrained` marker.  This
+lets base CI deselect them with `--exclude-models`".
+
+So the shape is probably `--exclude-models=uma-s-1p1` (plus whatever else the suite declares) in
+`pytestFlags`, replacing nine paths with one flag that stays correct as modules come and go.
+
+The marker's coverage has been checked against the current list and the two agree, which is what
+makes this worth doing rather than a guess.  Fifteen modules under `tests/core` carry
+`pretrained`; nine are in `disabledTestPaths`, and the other six — `test_batcher.py`,
+`test_calculator_extensivity.py`, `test_hessian_predict.py`, `test_inference_serve.py` and the two
+already counted under another reason — are covered by `gpu` instead, either at module scope or on
+every test function they define.  So the flag would subsume the nine and change nothing else.
+
+**Not done here because it needs a build to verify**, and one detail has to be got right rather
+than assumed: `--exclude-models` validates each token against the model registry and errors on an
+unknown one.  That is the good failure mode — a typo is loud rather than a silent no-op — but it
+does mean the argument list has to be complete and correct the first time, and the registry is
+what decides, not the test files.
 
 ## Decide whether to allow cudaSupport
 

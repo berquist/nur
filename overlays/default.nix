@@ -573,6 +573,29 @@ in
         clusterscope = pself.callPackage ../pkgs/clusterscope { };
         fairchem-core = pself.callPackage ../pkgs/fairchem-core { };
 
+        # The three sibling distributions `quacc[fairchem]` names beside
+        # fairchem-core, out of the same thirteen-package monorepo and each
+        # built from its own `packages/<name>/`.  They are structure and input
+        # generation for three of the datasets — catalysis, inorganic
+        # materials, molecules — rather than any part of the model machinery,
+        # so nothing but that one extra reaches them, and they stop here.
+        #
+        # `fairchem-data-oc` depends on fairchem-core; the other two do not, and
+        # nothing in fairchem-core depends on any of the three.  See
+        # ../pkgs/fairchem-data-omol for why `quacc` is deliberately missing
+        # from its own dependency list.
+        # `packmol` the same way ../pkgs/postopus takes `octopus`, and for the
+        # same reason: no single spelling resolves everywhere.  The difference
+        # is which way round the usual case falls — nixpkgs has octopus and so
+        # postopus almost always finds one, while nixpkgs has no packmol at all,
+        # so this is null unless the consumer has composed `overlays.qchem`.
+        # Two tests are deselected when it is; see the derivation.
+        fairchem-data-oc = pself.callPackage ../pkgs/fairchem-data-oc {
+          packmol = final.packmol or final.qchem.packmol or null;
+        };
+        fairchem-data-omat = pself.callPackage ../pkgs/fairchem-data-omat { };
+        fairchem-data-omol = pself.callPackage ../pkgs/fairchem-data-omol { };
+
         # py-lmdb, pinned *down* to 1.7.3, which is the one place in this
         # repository where a version bound turned out to mean exactly what it
         # said.

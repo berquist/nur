@@ -52,9 +52,15 @@
 #
 # It is one package out of a thirteen-distribution monorepo, the same
 # arrangement as ../emmet-core.  `quacc[fairchem]` additionally wants
-# `fairchem-data-{omat,oc,omol}` out of the same tree; those are not packaged,
-# so that extra stays out while `quacc[mlip]` — which asks for `fairchem-core`
-# alone, beside the already-packaged ../matcalc and ../rootstock — is reachable.
+# `fairchem-data-{omat,oc,omol}` out of the same tree, and those are now
+# ../fairchem-data-omat, ../fairchem-data-oc and ../fairchem-data-omol — so
+# both that extra and `quacc[mlip]`, which asks for this distribution alone
+# beside ../matcalc and ../rootstock, are reachable.
+#
+# The dependency runs one way only.  ../fairchem-data-oc needs this package;
+# this package needs none of the three, and deliberately does not take
+# fairchem-data-omol even though one of its modules imports it — see
+# `pythonImportsCheck` below.
 buildPythonPackage (finalAttrs: {
   pname = "fairchem-core";
   version = "2.22.0";
@@ -278,7 +284,7 @@ buildPythonPackage (finalAttrs: {
   # them.  It has to repeat them, which is what the two `concatMapStringsSep`
   # lines do.  Without the `--ignore`s this pass dies exactly where the check
   # phase used to, on `test_omol_recipes.py` failing to import
-  # `fairchem-data-omol` — and a collection error aborts the whole run, so the
+  # `fairchem.data.omol` — and a collection error aborts the whole run, so the
   # four modules that do have serial tests never get to run at all.
   #
   # It is generated from the lists rather than written out so the two passes
@@ -336,14 +342,16 @@ buildPythonPackage (finalAttrs: {
   #
   #   `test_omol_recipes.py` imports `components/calculate/recipes/omol.py`,
   #   the one library module here that reaches a sibling distribution at module
-  #   scope — `from fairchem.data.omol.orca.calc import EVAL_OPT_PARAMETERS` —
-  #   so it needs `fairchem-data-omol`, which is not packaged.  It is the test
-  #   counterpart of the module already left out of `pythonImportsCheck` below,
-  #   and it has to go too: a collection error aborts the entire run, so this
-  #   one module was hiding the other seventy.
+  #   scope — `from fairchem.data.omol.orca.calc import EVAL_OPT_PARAMETERS`.
+  #   That is what first put it on this list, and packaging
+  #   ../fairchem-data-omol has since answered it; the module stays anyway,
+  #   because it turns out to belong to the group below.  Every test in it is
+  #   covered by a module-level `pytestmark = [pytest.mark.pretrained(...)]`
+  #   and an autouse `pretrained_checkpoint` fixture, so all thirteen download
+  #   a UMA checkpoint from Hugging Face before `setUp` finishes.  The import is
+  #   the cheaper of its two blockers, not the real one.
   #
-  #
-  #   Eight load a pretrained UMA checkpoint through
+  #   Eight more load a pretrained UMA checkpoint through
   #   `pretrained_mlip.get_predict_unit`, which fetches from Hugging Face.
   #   `tests/core/conftest.py` imports that module too, but only imports it —
   #   the fixtures that download are lazy, so the conftest itself is fine and
@@ -384,6 +392,14 @@ buildPythonPackage (finalAttrs: {
   # other two cross-package imports — in `calculate/ase_calculator.py` and
   # `recipes/adsorbml.py` — sit inside `try:` blocks and degrade.  Same shape as
   # ../dbstep's `dbstep.graph` and ../dargs' `dargs.sphinx`.
+  #
+  # ../fairchem-data-omol is packaged now, so adding it here would make that
+  # module import — and it stays out regardless.  Upstream's `pyproject.toml`
+  # names it in no group at all, not even `extras`, so the honest reading is an
+  # optional recipe that upstream forgot to guard rather than a dependency;
+  # taking it would make every consumer of fairchem-core carry a package that
+  # only the OMol ORCA recipes reach.  `quacc[fairchem]`, which is what actually
+  # wants the pair, asks for both by name.
   #
   # `calculate.ase_calculator` is named because it is what matcalc and quacc
   # actually reach for, and ../vise is the reminder of why that matters.

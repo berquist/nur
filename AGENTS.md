@@ -57,7 +57,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s), `maml` (`matcalc[maml]`'s), `deepmd-kit`
   (`matcalc[deepmd]`'s) and `dargs` (deepmd-kit's one gap), `fairchem-core`
   (`matcalc[fairchem]`'s and `quacc[mlip]`'s) with `clusterscope` and
-  `ase-db-backends` under it, the
+  `ase-db-backends` under it and `fairchem-data-{oc,omat,omol}` beside it
+  (`quacc[fairchem]`'s, three more distributions out of the same monorepo), the
   `quacc[defects]` cluster's lower layers — `doped` and `pydefect` and `hiphive`,
   `trainstation` (hiPhive's one gap), `cmcrameri` and `matplotlib-label-lines` (doped's plotting,
   the latter pydefect's too) — `tensorpotential` (`matcalc[grace]`'s, and **the one unfree package here**;
@@ -111,6 +112,30 @@ Note that cclib's overlay overrides the **top-level `python3` attribute** and no
 
 The `nixos-qchem` flake input supplies quantum-chemistry programs as `pkgs.qchem.*` and is
 re-exported as `overlays.qchem`.
+
+### Reusing NixOS-QChem
+
+**When a package here needs a program NixOS-QChem already carries, take theirs. Do not package
+it, and do not package it merely because nixpkgs lacks it.** That input exists to be the source
+of quantum chemistry and molecular-simulation programs for this repository; duplicating one is a
+second derivation to maintain, a second version to keep in step, and a cache miss where their
+Hydra already has a build. `package_list.json` at the root of the `nixos-qchem` checkout is the
+list to check first — around 60 programs, `qchem.<name>` each.
+
+The constraint is where the reference can be written, not whether to write it. `overlays/` holds
+plain `final: prev:` functions and is imported **without flakes** by `default.nix`, `overlay.nix`
+and `ci.nix`, so it cannot reach the input — the same wall as the cclib split above. So a
+dependant takes a defaulted argument, the overlay resolves it with
+`final.<name> or final.qchem.<name> or null`, and the derivation runs fewer tests (or is
+`meta.broken`) when it comes back null. `pkgs/postopus`' `octopus` and `pkgs/fairchem-data-oc`'s
+`packmol` are the two worked examples, and they differ in which way the usual case falls:
+nixpkgs has octopus, so postopus nearly always finds one; nixpkgs has no packmol at all, so that
+argument is null on every path but the flake's.
+
+Where a check needs the real program, `flake.nix` selects it from `qchemPkgs` — the same
+instantiation `psi4` and `cclibPkgs` come from — and exposes the result as a `checks` entry
+guarded on `system == "x86_64-linux"`, which is the only system NixOS-QChem's flake has outputs
+for. `checks.fairchem-data-oc` is the pattern; `checks.harmonwig` is the older one.
 
 ## Where the explanations live
 
@@ -334,7 +359,18 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Which of `fairchem-core`'s four relaxed pins is the one worth worrying about? | `pkgs/fairchem-core/default.nix` (the note above `pythonRelaxDeps`) |
 | Why does `torchtnt` get patched here, and what does setuptools 83 have to do with it? | `overlays/default.nix` (the `torchtnt` binding in the materials overlay) |
 | Why is `py-lmdb` pinned *down* to 1.7.3, and which three relaxations did that remove? | `overlays/default.nix` (the `lmdb` binding in the materials overlay) |
-| Why is `fairchem.core...recipes.omol` kept out of the import check? | `pkgs/fairchem-core/default.nix` (`pythonImportsCheck`) |
+| Why is `fairchem.core...recipes.omol` kept out of the import check, now that `fairchem-data-omol` exists? | `pkgs/fairchem-core/default.nix` (`pythonImportsCheck`) |
+| Why is `test_omol_recipes.py` still deselected after the distribution it wanted was packaged? | `pkgs/fairchem-core/default.nix` (the first entry in `disabledTestPaths`) |
+| How do four distributions out of one monorepo share the `fairchem/` import path? | `pkgs/fairchem-data-omol/default.nix` (the header) |
+| Why does `fairchem-data-omol` not declare the `quacc` its own module imports? | `pkgs/fairchem-data-omol/default.nix` (`optional-dependencies`), `pkgs/quacc/default.nix` (the `fairchem` extra) |
+| Why is `fairchem-data-oc` pinned past its tag when the other two data packages are not? | `pkgs/fairchem-data-oc/default.nix` (the `src` note) |
+| Where does `fairchem-data-oc`'s 36 MB bulk database come from, when upstream downloads it on first use? | `pkgs/fairchem-data-oc/default.nix` (the `bulksPkl` note) |
+| Why is `fairchem-data-oc` the one package here whose licence is a list for a *data* reason? | `pkgs/fairchem-data-oc/default.nix` (`meta.license`) |
+| Why must `fairchem-data-oc` never gain `pytest-xdist`? | `pkgs/fairchem-data-oc/default.nix` (`preCheck`), `pkgs/fireworks/default.nix` |
+| Why is `packmol` a defaulted argument, and why is it null where `postopus`' `octopus` is not? | `pkgs/fairchem-data-oc/default.nix` (the `packmol` argument), `overlays/default.nix` (the `fairchem-data-oc` callPackage), `pkgs/postopus/default.nix` |
+| Why does `fairchem-data-oc` take `fairchem-core` when upstream declares no such dependency? | `pkgs/fairchem-data-oc/default.nix` (`dependencies`) |
+| Why does `fairchem-data-omat` need no POTCAR directory when `vise` loses 23 tests to one? | `pkgs/fairchem-data-omat/default.nix` (the note above `pythonImportsCheck`) |
+| Why do the two fairchem data packages delete `tests/conftest.py` before running their own suites? | `pkgs/fairchem-data-omat/default.nix` (`preCheck`), `pkgs/fairchem-data-oc/default.nix` (the same note, from the other side) |
 | Why is `clusterscope` pinned to v0.0.18 rather than its own latest release? | `pkgs/clusterscope/default.nix` (the note above `src`) |
 | Why does `ase-db-backends` drop `psycopg2-binary` for `psycopg2`? | `pkgs/ase-db-backends/default.nix` (`pythonRemoveDeps`) |
 | Where do `ase-db-backends`' PostgreSQL and MySQL tests actually run, if not in its build? | `tests/materials/vm.nix` |
@@ -534,7 +570,10 @@ where the survey stands:
 | `fairchem-core` | `matcalc[fairchem]`, `quacc[mlip]` | **done**; `pkgs/fairchem-core`, internal — one distribution out of a thirteen-package monorepo, built from `packages/fairchem-core/` whose `src` is a symlink to `../../src`. Also recorded as blocked without its dependencies having been read: only two were missing. `tests/core` runs, less nine modules needing Hugging Face checkpoints or the NVIDIA stack |
 | `clusterscope` | `fairchem-core` | **done**; `pkgs/clusterscope`, internal — pinned to v0.0.18, the exact version fairchem-core's `==` names, rather than to its own latest |
 | `ase-db-backends` | `fairchem-core` | **done**; `pkgs/ase-db-backends`, internal. GitLab, like `hiphive` and `trainstation`; no tags at all, so `-unstable-`. Dist and import are `ase_db_backends`. Carries a real upstream bugfix — `close()` reopened the LMDB environment in order to close it |
-| `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `defects`, `jobflow`, `mp`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`, `mlip`. Missing: `torchsim` (NVIDIA-blocked) and `fairchem`, which wants `fairchem-data-{omat,oc,omol}` out of the same monorepo. Test round: ASE-native recipes + `wflow` |
+| `fairchem-data-omol` | `quacc[fairchem]` | **done**; `pkgs/fairchem-data-omol`, internal — ORCA input generation for OMol25. No tests exist upstream for this distribution, hence `doCheck = false`. Three undeclared module-scope imports added; `quacc` and `psutil`, which `orca/recipes.py` also imports, are deliberately *not* added — that is the other half of the `quacc[fairchem]` cycle |
+| `fairchem-data-omat` | `quacc[fairchem]` | **done**; `pkgs/fairchem-data-omat`, internal — OMat24's VASP input set and MP-style corrections. `pymatgen` is its whole dependency list and for once that is also its whole import list. `tests/data/omat` runs; no POTCARs needed |
+| `fairchem-data-oc` | `quacc[fairchem]` | **done**; `pkgs/fairchem-data-oc`, internal — OC20 adsorbate/slab generation. The awkward one of the three: pinned past its 2025-08 tag for a year of numpy/pymatgen catch-up, it takes `fairchem-core` (undeclared, module-scope, unguarded), and the 36 MB bulk database it is built around is a `fetchurl` installed into the wheel because upstream downloads it on first use. Six of its seven test modules would be dead without that; 30 of 34 tests pass, two xfail on a known pymatgen slab bug, and the last two want `packmol`, which **nixpkgs does not carry** — see the `octopus`-shaped defaulted argument |
+| `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `defects`, `fairchem`, `jobflow`, `mp`, `mlip`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `torchsim` alone, and that is NVIDIA-blocked rather than unpackaged. Test round: ASE-native recipes + `wflow` |
 | `shakenbreak` | `quacc[defects]` — the chain's last target | **done**; `pkgs/shakenbreak`, and with it the whole `defects` cluster: `doped`, `pydefect`, `vise`, `hiphive`, `trainstation`, `cmcrameri`, `matplotlib-label-lines`. It is the half of the `doped` cycle that declares the other; see `pkgs/doped` for why the cut goes that way |
 | `matminer` | `matcalc[benchmark]` | **done**; `pkgs/matminer` — `tests/{featurizers,utils}` only, the data-retrieval suites hit external APIs |
 | `redun` | `quacc[redun]` | **done**; `pkgs/redun` — `doCheck = false` (AWS-executor tests), `fancycompleter` removed |
@@ -635,7 +674,8 @@ deprecated APIs, so this one may not be cosmetic.
 **Treat every row below as unverified until you re-derive it.** Three entries in this table —
 `deepmd-kit`, `fairchem-core`, and the `fairchem-data-*` set — were recorded as blocked on the
 strength of a package's reputation rather than its `pyproject.toml`, and all three turned out to
-need one or two ordinary packages. The cost of checking is one `nix-instantiate --eval` over
+need one or two ordinary packages; all three are packaged now, and none of them needed anything
+the survey had not already read. The cost of checking is one `nix-instantiate --eval` over
 `python313Packages`; the cost of not checking was months of a chain sitting closed.
 
 | Not packaged | Blocker |
@@ -644,7 +684,7 @@ need one or two ordinary packages. The cost of checking is one `nix-instantiate 
 | `orb-models`, `mattersim`, `pet-mad` | same NVIDIA wall as `torch-sim` — `orb-models` lists `nvalchemi-toolkit-ops` as a core dep, `mattersim` lists `torch-sim-atomistic` (→ nvalchemi), `pet-mad` lists `nvalchemi-toolkit-ops` + `warp-lang`. These are the matcalc `orb` / `mattersim` / `petmad` extras |
 | `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
 | `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
-| `fairchem-data-{omat,oc,omol}` | **not blocked — queued.** Wanted by `quacc[fairchem]`. Their whole core dependency lists are `pymatgen`; `ase`; and numpy/scipy/matplotlib/ase/pymatgen/tqdm. `fairchem-core` itself is packaged and the monorepo was never the obstacle, since each distribution builds from its own `packages/` subdirectory. See `docs/TODO.md` |
+| `fairchem-applications-*`, `fairchem-demo-ocpapi`, `fairchem-lammps` | **not blocked — queued**, and nothing downstream here asks for them. The remaining nine distributions of the monorepo; `fastcsp` wants `p-tqdm` and `ocx` wants `yellowbrick`, and those two packages are the only gaps in the set. See `docs/TODO.md` |
 | `PsiDataViz` | uv workspace, never released, includes a React/TS frontend; only `packages/psidata` is plausible |
 | `crest` | Fortran/meson with vendored subprojects; not in nixpkgs. Feasible, just different work — `tblite` and `xtb` are already there to build against |
 
