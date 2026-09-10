@@ -3,40 +3,50 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
-## Pin py-lmdb to 1.7.3, and undo what py-lmdb 2.0 broke
+## Build the internal packages that nothing else builds
 
-**Want:** a `pkgs/lmdb` carrying py-lmdb 1.7.3, replacing nixpkgs' 2.3.0 in the materials
-overlay, plus `"lmdb"` removed from `pkgs/fairchem-core`'s `pythonRelaxDeps` and the two LMDB
-deselections dropped from `pkgs/ase-db-backends`.  The `pkgs/monty` pattern exactly: carry a
-version nixpkgs does not have, for one consumer group, with a note saying when it can go.
+**Want:** `just ci-matrix` to fail when an internal package breaks, instead of the breakage
+sitting unnoticed until someone builds it by hand.
 
-**The diagnosis is finished.** py-lmdb 2.0.0 added a process-wide registry of open environment
-paths and made a second `open()` of a registered path an error — commit `2b26c9f`, "Prevent
-opening the same LMDB environment twice (#230) (#412)", 2026-03-12.  `git grep _open_env_paths`
-returns nothing at tags `py-lmdb_1.7.3` and `py-lmdb_1.8.1`, and four hits at `py-lmdb_2.0.0`.
-That is the whole of it.
+`ci.nix` walks `default.nix` and skips `python313Packages` — deliberately, and the note there
+explains why: it is the whole 3.13 set, so descending would try to build all of nixpkgs.  The
+consequence was not thought through.  Of the 132 packages this repository defines, 68 are
+re-exported as top-level attributes and **64 are internal**, reachable only through
+`python313Packages`.
 
-**What it currently costs, all of it self-inflicted by relaxing a cap that meant something:**
+Most of those 64 are still built, as build-time dependencies of something re-exported —
+`plumpy` and `kiwipy` come along with `aiida-core`, `doped` and `pydefect` with `shakenbreak`.
+The gap is the ones reachable **only through an `optional-dependencies` entry**, because an
+extra is not a build input of the package that declares it.  Nothing builds those at all:
 
-- `pkgs/fairchem-core`: about 43 of the 51 failures and 24 errors in a full `tests/core` run.
-  The 38 `hydra.errors.InstantiationException` failures are not a separate group — every one
-  wraps `create_concat_dataset`, and underneath each is
-  `lmdb.Error: The environment '.../oc20_train.aselmdb' is already open in this process.`
-- `pkgs/ase-db-backends`: `test_db2` and `test_aselmdb_concurrency` are deselected for this and
-  nothing else.  Both should come back.
+    sevenn            matcalc[sevennet]
+    tensorpotential   matcalc[grace]
+    deepmd-kit        matcalc[deepmd]        and dargs beneath it
+    fairchem-core     matcalc[fairchem], quacc[mlip]
+                                             and clusterscope, ase-db-backends beneath it
+    maml              matcalc[maml]
+    rootstock         quacc[mlip]
 
-fairchem caps at `lmdb >= 1.6.2, <= 1.7.3`, which is exactly one release below the change, so
-1.7.3 satisfies it without any relaxation.  1.8.1 is also pre-registry and is the newest release
-without the behaviour, but it would need the cap relaxed again, so 1.7.3 is the one to take.
+**This is not hypothetical.** `pkgs/sevenn` was committed in caeb7af saying "Not build-verified
+— the sandbox has no nix-daemon", and stayed that way.  The first time it was ever built, months
+later, it failed: all eleven tests in `test_pretrained.py` download a checkpoint from github.com.
+A green `ci-matrix` said nothing about it either way.
 
-**Do this before reaching for `pytest-xdist` on fairchem.** The suite takes 1221 s serially and
-xdist is tempting, but the registry is per-*process* and these collisions are inside a single
-call, so parallel workers would not fix them — and each worker imports torch, which is a real
-memory cost for no gain.  Fix the pin, re-measure, then decide.
+**Options, roughly in order of preference:**
 
-**When it can go:** when nixpkgs' consumers of lmdb have caught up with 2.x, or when
-ase-db-backends and fairchem stop opening one path twice.  `pkgs/ase-db-backends`'
-`close-must-not-reopen.patch` is unaffected either way — that bug is real at any lmdb version.
+1. Give `default.nix` a second exposed set — say `internalPackages`, carrying
+   `recurseForDerivations` where `python313Packages` carries `dontRecurseIntoAttrs` — holding
+   exactly the packages this repo defines but does not re-export.  `ci.nix` then picks it up
+   without any risk of descending into nixpkgs.  Costs a fourth hand-maintained list, which
+   `tests/*/default.nix` already shows the shape of.
+2. Have `ci.nix` build every package named by an `optional-dependencies` attribute of a
+   re-exported package.  Narrower, and automatic, but expresses the rule obliquely.
+3. Re-export them.  Rejected: `AGENTS.md` explains why single-dependant packages stay internal,
+   and `tensorpotential` cannot be a top-level attribute at all without breaking `just ci-eval`.
+
+Whichever is chosen, expect the first green run to take a while: these are torch-sized closures,
+and several of them have never been built on any channel.
+
 
 ## Package the remaining fairchem distributions
 
@@ -150,17 +160,12 @@ database twice in one process hits it, which includes `pkgs/fairchem-core`, wher
 its splits are separate handles.  Applying the patch removes the `__del__` failures from the
 build log entirely.
 
-**Two further defects in the same area**, which the patch does *not* address and which are why
-`pkgs/ase-db-backends` deselects two modules.  Both open one LMDB path twice in a single process,
-which py-lmdb refuses; in both the first handle is still legitimately open, so no change to
-`close()` could help.
-
-- `test_aselmdb_concurrency` shares a single `LMDBDatabase` across eight forked workers, relying
-  on the `env` property to reopen in each child.  py-lmdb's registry of open paths is inherited
-  across the fork, so that reopen collides every time.  Fixing it means the child clearing the
-  inherited registry, or not sharing the handle at all.
-- `test_db2` opens the same path nested inside its own context manager — `with connect(name) as
-  c:` and then `c = connect(name)` — which cannot work against any py-lmdb that has the registry.
+**Two further defects in the same area**, which the patch does not address.  Both open one LMDB
+path twice in a single process — `test_aselmdb_concurrency` across eight forked workers,
+`test_db2` nested inside its own context manager — which py-lmdb 2.x refuses outright.  Neither
+is deselected any more: `overlays/default.nix` pins py-lmdb to 1.7.3, which predates that
+restriction, so both modules run.  They are still worth mentioning upstream, because the code
+will break again whenever ase-db-backends moves to py-lmdb 2.x.
 
 **And one that is not upstream's fault at all**, worth knowing before reading a failure here:
 `test_db` populates its database by shelling out to a nine-stage `ase -T build … | ase -T run

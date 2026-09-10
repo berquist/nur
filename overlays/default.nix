@@ -573,6 +573,50 @@ in
         clusterscope = pself.callPackage ../pkgs/clusterscope { };
         fairchem-core = pself.callPackage ../pkgs/fairchem-core { };
 
+        # py-lmdb, pinned *down* to 1.7.3, which is the one place in this
+        # repository where a version bound turned out to mean exactly what it
+        # said.
+        #
+        # py-lmdb 2.0.0 added a process-wide registry of open environment paths
+        # and made a second `open()` of a registered path an error — commit
+        # 2b26c9f, "Prevent opening the same LMDB environment twice (#230)
+        # (#412)", 2026-03-12.  `git grep _open_env_paths` returns nothing at
+        # tags `py-lmdb_1.7.3` and `py-lmdb_1.8.1` and four hits at
+        # `py-lmdb_2.0.0`.
+        #
+        # Three independent projects here cap below it, and this repository had
+        # relaxed all three as if they were boilerplate:
+        #
+        #   ../pkgs/fairchem-core   lmdb >= 1.6.2, <= 1.7.3
+        #   ../pkgs/sevenn          lmdb < 2.0.0
+        #   ../pkgs/ase-db-backends no bound, but its own suite breaks the same way
+        #
+        # The cost of the relaxations was about 43 of fairchem-core's test
+        # failures — every `create_concat_dataset` failure is this, since a
+        # dataset and its splits are separate handles — and two whole test
+        # modules deselected in ase-db-backends.  1.7.3 satisfies all four
+        # consumers with no relaxation at all, so this pin *removes* three
+        # `pythonRelaxDeps` entries rather than adding anything.
+        #
+        # Guarded on the version, like the `monty` binding above, so that a
+        # channel already carrying a pre-2.0 lmdb is left alone.  This should be
+        # deleted when upstreams stop opening one path twice — see
+        # ../docs/TODO.md, which also carries the `close()` fix that
+        # ../pkgs/ase-db-backends applies for a related but separate bug.
+        lmdb =
+          if final.lib.versionOlder psuper.lmdb.version "2" then
+            psuper.lmdb
+          else
+            psuper.lmdb.overridePythonAttrs (_old: {
+              version = "1.7.3";
+              src = final.fetchFromGitHub {
+                owner = "jnwatson";
+                repo = "py-lmdb";
+                tag = "py-lmdb_1.7.3";
+                hash = "sha256-NNF3PROta1PRl+qzL2etKKx/+RbYoANleKi75Vg6Upw=";
+              };
+            });
+
         # A fourth nixpkgs package repaired here rather than merely wrapped, and
         # this one is broken for *every* consumer, not just ours: torchtnt
         # 0.2.4's `utils/version.py` opens `import pkg_resources`, and the

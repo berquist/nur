@@ -46,9 +46,11 @@ buildPythonPackage {
 
   build-system = [ setuptools ];
 
-  # `lmdb < 2.0.0` — SevenNet uses it as a plain key-value store for the
-  # graph dataset cache, nothing 2.x changed.
-  pythonRelaxDeps = [ "lmdb" ];
+  # `lmdb < 2.0.0` is honoured rather than relaxed.  This once said "nothing
+  # 2.x changed", which was wrong: 2.0.0 made a second `open()` of an
+  # already-open environment path an error, and SevenNet is the third project
+  # here to cap below it.  The overlay pins py-lmdb to 1.7.3, so the bound is
+  # satisfied as written — see the `lmdb` binding in ../../overlays.
 
   # The `.cpp` files under `sevenn/pair_e3gnn/` are LAMMPS pair styles, built
   # against a LAMMPS tree by its users, not part of this wheel — setup.py
@@ -81,10 +83,16 @@ buildPythonPackage {
   # The cuEquivariance / OpenEquivariance / flash-attention accelerators
   # (NVIDIA CUDA wheels) and torch-sim are not packaged; these modules import
   # them at collection scope rather than guarding.
+  #
+  # `test_pretrained.py` is the network one: all eleven of its tests reach
+  # `pretrained_name_to_path`, which fetches a checkpoint from github.com, so
+  # every one of them fails with a `ConnectionError` in the build sandbox.  Same
+  # decision as ../matgl, ../matcalc and ../mp-api.
   disabledTestPaths = [
     "tests/unit_tests/test_cueq.py"
     "tests/unit_tests/test_oeq.py"
     "tests/unit_tests/test_flash.py"
+    "tests/unit_tests/test_pretrained.py"
     "tests/unit_tests/test_torchsim.py"
   ];
 

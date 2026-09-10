@@ -38,6 +38,7 @@
 
   # tests
   pytestCheckHook,
+  pytest-xdist,
   filelock,
   omegaconf,
   scikit-learn,
@@ -101,16 +102,11 @@ buildPythonPackage (finalAttrs: {
   #
   #   numpy `<2.5` against 2.5.1 is a defensive upper cap of the usual kind.
   #
-  #   lmdb `<=1.7.3` against 2.3.0 is **not**, and relaxing it was a mistake
-  #   that is still costing about 43 of this suite's failures.  py-lmdb 2.0.0
-  #   added a process-wide registry of open environment paths and made a second
-  #   `open()` of one an error (commit 2b26c9f, "Prevent opening the same LMDB
-  #   environment twice"); `_open_env_paths` is absent at tags 1.7.3 and 1.8.1
-  #   and present at 2.0.0.  fairchem caps exactly one release below the change
-  #   because `create_concat_dataset` opens a dataset and its splits as separate
-  #   handles.  The fix is to carry py-lmdb 1.7.3 and drop this entry, which is
-  #   queued in ../../docs/TODO.md; it also recovers the two LMDB modules
-  #   ../ase-db-backends deselects.
+  #   `lmdb <= 1.7.3` is **not** relaxed, and was the one bound here that meant
+  #   what it said.  Relaxing it cost about 43 of this suite's failures, all of
+  #   them `create_concat_dataset` opening a dataset and its splits as separate
+  #   handles against a py-lmdb that refuses the second open.  The overlay pins
+  #   py-lmdb to 1.7.3 instead; see the `lmdb` binding in ../../overlays.
   #
   #   setuptools `<81.0.0` against 83.0.0.  This one is not about fairchem's own
   #   code, which never imports setuptools or pkg_resources: `core/__init__.py`
@@ -123,7 +119,6 @@ buildPythonPackage (finalAttrs: {
   # this overlay replaces it with the 2026.7.16 backport that ../pymatgen-core
   # needs.  See ../monty.
   pythonRelaxDeps = [
-    "lmdb"
     "numpy"
     "setuptools"
     "torch"
@@ -197,21 +192,83 @@ buildPythonPackage (finalAttrs: {
   ]
   ++ ray.optional-dependencies.serve;
 
-  # Upstream's `test` requirements, less what is already a dependency above and
-  # less `pytest-xdist`, which is deliberately absent — see ../doped and
-  # ../fireworks for what parallel workers do to a suite that was not written
-  # for them, and note that nothing here has been shown to need it.
+  # Upstream's `test` requirements, less what is already a dependency above.
+  #
+  # `pytest-xdist` is here, which is the exception to the rule ../doped and
+  # ../fireworks set.  Those suites were never written for parallel workers;
+  # this one is.  Upstream's CI runs `pytest -n auto` over everything except
+  # three markers and a separate serial pass for one of them — see `pytestFlags`
+  # and `postCheck` below, which reproduce that split.  A serial run of
+  # `tests/core` takes 1221 s, and the machine it was measured on peaked at
+  # 9.64 GB of 125 GB, so the memory headroom for workers is ample.
   #
   # `syrupy` is the snapshot plugin several of the model tests assert through;
   # without it they fail at fixture resolution rather than skipping.  The rest
   # are ordinary imports scattered through `tests/core`.
   nativeCheckInputs = [
     pytestCheckHook
+    pytest-xdist
     filelock
     omegaconf
     scikit-learn
     syrupy
   ];
+
+  # Upstream's own marker split, and `not serial` is the load-bearing half.
+  #
+  # `serial` marks twelve tests across seven modules that cannot share a session
+  # with parallel workers, `test_graph_parallel.py` chief among them — it spawns
+  # torch multiprocessing groups that would contend for ports.  Upstream excludes
+  # them from its `-n auto` pass and runs them in a second serial one; `postCheck`
+  # below does the same.  Without xdist this would be unnecessary; with it, it is
+  # what keeps the suite honest.
+  #
+  # `not gpu` is deliberate but *not* load-bearing, and worth being clear about:
+  # `tests/conftest.py` already skips gpu-marked tests itself when
+  # `torch.cuda.is_available()` is false, so this changes no outcome — it only
+  # deselects 106 tests across 25 modules instead of collecting and setting each
+  # of them up in order to skip it.  Time, not correctness.
+  #
+  # The markers are registered in `tests/conftest.py` through `addinivalue_line`,
+  # so they resolve without any ini file — which matters, since running from the
+  # repository root means upstream's `[tool.pytest.ini_options]` is not in scope.
+  disabledTestMarks = [
+    "gpu"
+    "serial"
+  ];
+
+  # **The worker count is capped, and it has to be taken away from the hook to do
+  # it.**  `pytest-xdist`'s own setup hook is
+  #
+  #     pytestXdistHook() { appendToVar pytestFlags "--numprocesses=$NIX_BUILD_CORES"; }
+  #
+  # registered in `preInstallCheckHooks` — so it appends to the *same* variable
+  # this derivation sets, and appends later.  A `pytestFlags = [ "-n" "8" ]` here
+  # would be overridden by the `--numprocesses=32` that follows it, silently,
+  # because argparse takes the last occurrence.  `dontUsePytestXdist` is the
+  # documented off switch for that hook; the count is then set in `preCheck`,
+  # which `pytestCheckPhase` runs before it assembles `flagsArray`.
+  #
+  # Why cap it at all: on the machine this was measured on `NIX_BUILD_CORES` is
+  # 32, and 32 workers drove peak memory to 119 GB of 125 GB with one worker
+  # OOM-killed outright — `[gw23] node down: Not properly terminated`, which
+  # failed a test for no reason of its own.  A serial run peaks at 9.6 GB, so the
+  # marginal cost is about 6 GB per worker: eight of them measured 59 GB peak,
+  # and 870 s against 3221 s serial and 441 s at thirty-two.  Upstream's
+  # `-n auto` is safe for them only because their CI runners have two or four
+  # cores.
+  #
+  # `min` rather than a flat 8, so a two-core builder still gets two workers
+  # rather than eight fighting over it.
+  dontUsePytestXdist = true;
+
+  # The second pass, serial, exactly as upstream's workflow spells it.  Kept out
+  # of `pytestFlags` because it is a separate pytest invocation rather than more
+  # arguments to the first one.
+  postCheck = ''
+    echo "running the serial-marked tests, without xdist"
+    pytest -m 'serial and not gpu' tests/core -p no:cacheprovider
+  '';
 
   # The suite lives in `tests/` at the *repository* root, two levels above the
   # `sourceRoot` the wheel is built from.  The whole repo is unpacked, so
@@ -227,6 +284,25 @@ buildPythonPackage (finalAttrs: {
   # every one behind it, and this repository would rather see the whole list.
   preCheck = ''
     cd ../..
+
+    # The unpack phase makes only `sourceRoot` writable, and `sourceRoot` here
+    # is two directories down — so the tree we have just moved into is
+    # read-only.  Anything the suite writes relative to the working directory
+    # then fails: `test_relaxation_runner` calls `save_state("dummy_checkpoint")`,
+    # which swallows the `EACCES` and returns False, surfacing as a bare
+    # `assert False is True` with the cause only in a logged traceback.  pytest's
+    # own cache warnings are the same problem, and are the easier tell.
+    chmod -R u+w .
+
+    # min(8, NIX_BUILD_CORES); see dontUsePytestXdist above for why this is not
+    # simply an entry in pytestFlags.  NIX_BUILD_CORES can be 0, meaning "all",
+    # in which case the cap is the whole answer.
+    workers=8
+    if [ "''${NIX_BUILD_CORES:-0}" -gt 0 ] && [ "$NIX_BUILD_CORES" -lt 8 ]; then
+      workers="$NIX_BUILD_CORES"
+    fi
+    echo "pytest-xdist: $workers workers (NIX_BUILD_CORES=''${NIX_BUILD_CORES:-unset})"
+    appendToVar pytestFlags "--numprocesses=$workers"
   '';
 
   # `tests/core` only.  The sibling trees test the other twelve distributions of
@@ -235,7 +311,7 @@ buildPythonPackage (finalAttrs: {
   # benchmark.
   enabledTestPaths = [ "tests/core" ];
 
-  # Ten of the eighty modules under `tests/core`, and every one of them for a
+  # Fourteen of the eighty modules under `tests/core`, and every one of them for a
   # reason that is about the environment rather than about fairchem:
   #
   #   `test_omol_recipes.py` imports `components/calculate/recipes/omol.py`,
@@ -247,22 +323,33 @@ buildPythonPackage (finalAttrs: {
   #   one module was hiding the other seventy.
   #
   #
-  #   Seven load a pretrained UMA checkpoint through
+  #   Eight load a pretrained UMA checkpoint through
   #   `pretrained_mlip.get_predict_unit`, which fetches from Hugging Face.
   #   `tests/core/conftest.py` imports that module too, but only imports it —
   #   the fixtures that download are lazy, so the conftest itself is fine and
   #   the other seventy-one modules collect normally.
   #
-  #   `test_torchsim_interface.py` needs torch-sim and `test_radius_graph.py`
-  #   needs `nvalchemi-toolkit-ops`; both are behind the NVIDIA wall that keeps
-  #   torch-sim, orb-models, mattersim and pet-mad unpackaged.  See "Deferred
-  #   packaging" in ../../AGENTS.md.
+  #   `test_torchsim_interface.py` needs torch-sim, and four modules need
+  #   `nvalchemi-toolkit-ops`: `test_radius_graph.py` and
+  #   `test_graph_generation_nopbc.py` raise `RuntimeError: Requires
+  #   ``nvalchemiops`` to be installed` directly, while
+  #   `test_a2a_correctness.py` and `test_graph_parallel.py` raise it *inside*
+  #   `torch.multiprocessing.spawn`, so they surface as a
+  #   `ProcessRaisedException` and read at first glance like a distributed-setup
+  #   problem.  They are not; the cause is the same missing package.  All of it
+  #   is behind the NVIDIA wall that keeps torch-sim, orb-models, mattersim and
+  #   pet-mad unpackaged — see "Deferred packaging" in ../../AGENTS.md and the
+  #   nvalchemi entry in ../../docs/TODO.md.
   disabledTestPaths = [
     "tests/core/calculate/test_ase_calculator.py"
     "tests/core/calculate/test_pretrained_mlip.py"
     "tests/core/calculate/test_torchsim_interface.py"
+    "tests/core/common/parallelism/test_a2a_correctness.py"
+    "tests/core/common/parallelism/test_graph_parallel.py"
     "tests/core/components/benchmark/test_perf_check.py"
     "tests/core/components/test_omol_recipes.py"
+    "tests/core/components/test_uma_speed_benchmark.py"
+    "tests/core/graph/test_graph_generation_nopbc.py"
     "tests/core/graph/test_radius_graph.py"
     "tests/core/models/allscaip/test_allscaip_calculator.py"
     "tests/core/models/uma/uma_fast/test_execution_backends.py"

@@ -100,39 +100,18 @@ buildPythonPackage {
   # Two of the five modules want a live server — `test_mysql.py` and
   # `test_sql_db_ext_tables.py`, the latter parameterised over postgresql,
   # mysql and mariadb — and both call `pytest.skip` when they cannot connect,
-  # so they report as skips rather than failures.  That leaves the three LMDB
-  # modules as the whole of what actually runs here, which is why the `close()`
-  # patch above matters rather than being a deselection: without it all three
-  # fail and this suite verifies nothing at all.
+  # so they report as skips rather than failures here — ../../tests/materials/vm.nix
+  # runs them against real servers.  That leaves the three LMDB modules as the
+  # whole of what this build verifies, which is why both the `close()` patch
+  # above and the py-lmdb pin in ../../overlays matter: without either, all
+  # three fail and this suite verifies nothing at all.
   enabledTestPaths = [ "ase_db_backends/tests" ];
 
-  # The two modules the `close()` patch cannot rescue, because neither is about
-  # closing.  Both open one LMDB path twice over in a single process, which
-  # py-lmdb refuses outright — it keeps a process-wide registry of open paths —
-  # and in both cases the first handle is still legitimately open, so there is
-  # nothing a fix to `close()` could release.
-  #
-  # `test_aselmdb_concurrency` shares a single `LMDBDatabase` across eight
-  # forked workers on purpose, relying on the `env` property to reopen it in
-  # each child.  The registry is inherited across the fork, so that reopen
-  # collides every time.
-  #
-  # `test_db2` is blunter still:
-  #
-  #     with connect(name) as c:
-  #         c = connect(name)
-  #
-  # — the same path, nested inside its own context manager.
-  #
-  # Both are recorded in ../../docs/TODO.md beside the patch.  Deselecting the
-  # concurrency one is also what lets the others run at all: pytest holds a
-  # failed test's frames alive, so its `LMDBDatabase` is never collected and its
-  # environment stays open, which is why the first build reported all three
-  # modules failing when only it and test_db2 are actually broken.
-  disabledTestPaths = [
-    "ase_db_backends/tests/test_aselmdb_concurrency.py"
-    "ase_db_backends/tests/test_db2.py"
-  ];
+  # Nothing is deselected.  Two modules were, until the overlay pinned py-lmdb
+  # to 1.7.3: both open one path twice in a process — `test_db2` nested inside
+  # its own context manager, `test_aselmdb_concurrency` across eight forked
+  # workers — which py-lmdb 2.x refuses outright and 1.x allows.  See the `lmdb`
+  # binding in ../../overlays for why that pin exists.
 
   pythonImportsCheck = [
     "ase_db_backends"
