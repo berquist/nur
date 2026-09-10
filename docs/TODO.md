@@ -3,6 +3,41 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
+## Report fairchem's `test_unified_matches_per_layer` tolerance upstream
+
+**Want:** the tolerance in `tests/core/models/uma/nn/test_unified_radial.py` raised, or its fixture
+made physical, so `pkgs/fairchem-core` can drop its one `disabledTests` entry.
+
+**The test compares two orderings of the same arithmetic.** `UnifiedRadialMLP` `torch.stack`s
+eight `RadialMLP`s' weights into batched buffers and does one batched matmul; the reference runs
+eight separate ones. Same result in exact arithmetic, different reduction order in float32, so the
+last bits differ — and which bits differ depends on the BLAS kernel, so this will pass on some
+machines and fail on others.
+
+**What makes `atol = rtol = 1e-6` unreachable** is the fixture rather than the comparison. It
+overwrites *every* parameter with `torch.randn_like`, LayerNorm scales included, where those are
+normally 1:
+
+```python
+mlp = RadialMLP(edge_channels)   # edge_channels = [64, 128, 128, 256]
+for param in mlp.parameters():
+    param.data = torch.randn_like(param.data)
+```
+
+Pushed through three layers at those widths the intermediates are far larger than in a trained
+model, and float32 spacing at that magnitude is already around 1e-5 — an order of magnitude above
+the tolerance being asserted.
+
+**Either fix works:** leave the LayerNorm parameters at their initialised values, which is what a
+real model has, or raise the tolerance to something float32 can honour at these magnitudes.
+
+**Not diagnosed further here, and one thing to know before trying.** The test passes
+`msg=f"Layer {i} output mismatch"` to `torch.testing.assert_close`, and that *replaces* the default
+message — so the failure never reports how large the discrepancy actually was. Delete the `msg=`
+and the numbers appear; that is the first step for anyone confirming the reasoning above, which is
+argued from the shapes rather than measured.
+
+
 ## Build the internal packages that nothing else builds
 
 **Want:** `just ci-matrix` to fail when an internal package breaks, instead of the breakage

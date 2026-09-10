@@ -216,12 +216,20 @@ buildPythonPackage (finalAttrs: {
 
   # Upstream's own marker split, and `not serial` is the load-bearing half.
   #
-  # `serial` marks twelve tests across seven modules that cannot share a session
-  # with parallel workers, `test_graph_parallel.py` chief among them — it spawns
-  # torch multiprocessing groups that would contend for ports.  Upstream excludes
-  # them from its `-n auto` pass and runs them in a second serial one; `postCheck`
-  # below does the same.  Without xdist this would be unnecessary; with it, it is
-  # what keeps the suite honest.
+  # `serial` marks tests that cannot share a session with parallel workers,
+  # `test_graph_parallel.py` chief among them — it spawns torch multiprocessing
+  # groups that would contend for ports.  Upstream excludes them from its
+  # `-n auto` pass and runs them in a second serial one; `postCheck` below does
+  # the same.  Without xdist this would be unnecessary; with it, it is what keeps
+  # the suite honest.
+  #
+  # It is twelve `pytest.mark.serial` sites across seven modules, but only four
+  # of them are on a function: `test_gp_utils.py`, `test_graph_parallel.py` and
+  # `test_batcher.py` set a module-level `pytestmark`, so the count collected is
+  # 100 rather than 12.  Three of the seven modules drop out again before the
+  # serial pass runs anything — `test_graph_parallel.py` and `test_predict.py`
+  # are in `disabledTestPaths` below, and `test_batcher.py` carries `gpu` in its
+  # `pytestmark` list as well.
   #
   # `not gpu` is deliberate but *not* load-bearing, and worth being clear about:
   # `tests/conftest.py` already skips gpu-marked tests itself when
@@ -264,10 +272,22 @@ buildPythonPackage (finalAttrs: {
 
   # The second pass, serial, exactly as upstream's workflow spells it.  Kept out
   # of `pytestFlags` because it is a separate pytest invocation rather than more
-  # arguments to the first one.
+  # arguments to the first one — and *being* separate is the trap: pytestCheckHook
+  # turns `disabledTestPaths` and `disabledTests` into flags for the phase's own
+  # pytest call and for nothing else, so a bare `pytest` here inherits none of
+  # them.  It has to repeat them, which is what the two `concatMapStringsSep`
+  # lines do.  Without the `--ignore`s this pass dies exactly where the check
+  # phase used to, on `test_omol_recipes.py` failing to import
+  # `fairchem-data-omol` — and a collection error aborts the whole run, so the
+  # four modules that do have serial tests never get to run at all.
+  #
+  # It is generated from the lists rather than written out so the two passes
+  # cannot drift: adding a module to `disabledTestPaths` excludes it from both.
   postCheck = ''
     echo "running the serial-marked tests, without xdist"
-    pytest -m 'serial and not gpu' tests/core -p no:cacheprovider
+    pytest tests/core -p no:cacheprovider -m 'serial and not gpu' \
+      ${lib.concatMapStringsSep " " (p: "--ignore=${p}") finalAttrs.disabledTestPaths} \
+      -k '${lib.concatMapStringsSep " and " (t: "not ${t}") finalAttrs.disabledTests}'
   '';
 
   # The suite lives in `tests/` at the *repository* root, two levels above the
@@ -367,6 +387,25 @@ buildPythonPackage (finalAttrs: {
   #
   # `calculate.ase_calculator` is named because it is what matcalc and quacc
   # actually reach for, and ../vise is the reminder of why that matters.
+  # One test, by name rather than by path — the module's other five pass.
+  # `test_unified_matches_per_layer` is unique enough for `-k` to match it alone;
+  # nothing else in the suite has it as a prefix.
+  #
+  # It asserts that `UnifiedRadialMLP` reproduces a list of eight `RadialMLP`s to
+  # `atol = rtol = 1e-6`, and the two are the same arithmetic in a different
+  # order: the unified form `torch.stack`s the eight layers' weights into batched
+  # buffers and does one batched matmul where the reference does eight separate
+  # ones.  Different BLAS kernel, different reduction order, different last bits.
+  #
+  # What makes 1e-6 unreachable rather than merely tight is the fixture: it
+  # overwrites *every* parameter with `torch.randn_like`, LayerNorm scales
+  # included, where those are normally 1.  Pushed through 64 -> 128 -> 128 -> 256,
+  # the intermediates are far larger than in a trained model, and float32 spacing
+  # at that magnitude is already around 1e-5.  The tolerance is below what the
+  # type can represent there, so this is upstream's test to fix rather than a
+  # property of this build — recorded in ../../docs/TODO.md.
+  disabledTests = [ "test_unified_matches_per_layer" ];
+
   pythonImportsCheck = [
     "fairchem.core"
     "fairchem.core.calculate"
