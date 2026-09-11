@@ -221,7 +221,16 @@ in
         # Dependencies missing from nixpkgs.  Not re-exported at the top level
         # or from ../default.nix: they are implementation detail, and every
         # top-level attribute is another thing ci.nix builds.
-        basis-set-exchange = pself.callPackage ../pkgs/basis-set-exchange { };
+        # `wignernj` lives in the chemtools overlay, not this one, so it is here
+        # only when the two are composed — which ../default.nix and ci.nix both
+        # do, and `tests/cheminformatics` deliberately does not.  `or null` is
+        # what lets the narrow composition still evaluate; the derivation then
+        # runs fewer tests, exactly as it did before wignernj was reachable at
+        # all.  Same shape as the `packmol` line in the materials overlay, with
+        # an intra-repository package in place of a flake input.
+        basis-set-exchange = pself.callPackage ../pkgs/basis-set-exchange {
+          wignernj = pself.wignernj or null;
+        };
         colour-science = pself.callPackage ../pkgs/colour-science { };
         configurables = pself.callPackage ../pkgs/configurables { };
         griddataformats = pself.callPackage ../pkgs/griddataformats { };
@@ -565,6 +574,35 @@ in
         # and ../sevenn are: matcalc is its only dependant.
         dargs = pself.callPackage ../pkgs/dargs { };
         deepmd-kit = pself.callPackage ../pkgs/deepmd-kit { };
+
+        # dpdata is deepmd-kit's too — its `dpa-adapt` extra, and its `test`
+        # one.  It is a format converter with a CLI of its own, so it is closer
+        # to a tool than the rest of this group, but deepmd-kit is still its
+        # only dependant here and it stops with the others.
+        #
+        # Two packages exist for dpdata's check phase alone.  `parmed` is a real
+        # library that nixpkgs lacks; `dpdata-plugin-test` is the entry-point
+        # fixture out of dpdata's own `tests/plugin/`, which has to be installed
+        # rather than imported — see its header for the ordering that makes that
+        # so, and for the `doCheck = false` bootstrap that cuts the cycle
+        # between the two.
+        dpdata = pself.callPackage ../pkgs/dpdata { };
+        dpdata-plugin-test = pself.callPackage ../pkgs/dpdata-plugin-test { };
+
+        # `ambertools` for parmed's check phase, from NixOS-QChem, which is the
+        # standing rule for a program that input carries.  nixpkgs has no
+        # spelling of it at all, so this is null on every path that does not
+        # compose `overlays.qchem` — the NUR path, ci.nix and flake.nix's own
+        # `pkgs'` included — and thirteen tests skip there.
+        #
+        # Deliberately **not** given a `checks` entry in ../flake.nix, unlike
+        # ../pkgs/fairchem-data-oc's packmol: NixOS-QChem builds AmberTools from
+        # a `requireFile` source that the user has to fetch from ambermd.org by
+        # hand, so a check would fail everywhere the tarball is absent.  See the
+        # `ambertools` argument in ../pkgs/parmed for the rest of that.
+        parmed = pself.callPackage ../pkgs/parmed {
+          ambertools = final.qchem.ambertools or null;
+        };
 
         # ../fairchem-core's two gaps, both internal to it.  clusterscope is
         # pinned to the exact version fairchem-core's `==` asks for rather than

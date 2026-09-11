@@ -358,6 +358,34 @@
             else
               null;
 
+          # ...and the same shape for AmberTools, which thirteen of pkgs/parmed's
+          # tests gate on and which nixpkgs has no spelling of.
+          #
+          # **This one is deliberately not a check, and the difference is
+          # `requireFile`.**  NixOS-QChem cannot redistribute the AmberTools
+          # tarball, so its derivation asks the user to fetch it from
+          # ambermd.org and add it to the store by hand:
+          #
+          #   nix-store --add-fixed sha256 ambertools26.tar.bz2
+          #
+          # A `checks` entry would therefore fail on every machine that has not
+          # done that, CI included, which is not a failure mode a check should
+          # have.  It is exposed through `legacyPackages` instead — `nix flake
+          # check` does not force those, the same property the seven cclib
+          # packages rely on — so the attribute exists for whoever wants it and
+          # costs nothing to whoever does not:
+          #
+          #   nix build .#legacyPackages.x86_64-linux.parmed-ambertools
+          #
+          # Without the tarball that command prints NixOS-QChem's own
+          # instructions; `python313Packages.parmed` on the ordinary path keeps
+          # `ambertools = null` and skips the thirteen.
+          parmedWithAmbertools =
+            if system == "x86_64-linux" then
+              pkgs'.python313Packages.parmed.override { ambertools = qchemPkgs.qchem.ambertools; }
+            else
+              null;
+
           vmTests = import ./tests/qcarchive/vm.nix {
             pkgs = pkgs';
             inherit psi4 nwchem;
@@ -382,8 +410,19 @@
           # Driven by default.nix, which applies our overlays internally so that
           # the derivations here are identical to what python313.withPackages
           # returns.
+          #
+          # Plus one attribute that is not from default.nix: `parmed-ambertools`,
+          # which needs the nixos-qchem input and so cannot come from there.  It
+          # lives here rather than in `packages` or `checks` precisely because
+          # `nix flake check` does not force legacyPackages — see the note at
+          # `parmedWithAmbertools` above for why that matters when the underlying
+          # source is `requireFile`.
           # -------------------------------------------------------------------
-          legacyPackages = nurAttrs;
+          legacyPackages =
+            nurAttrs
+            // lib.optionalAttrs (parmedWithAmbertools != null) {
+              parmed-ambertools = parmedWithAmbertools;
+            };
 
           # Flake-style packages (derivations only, filtered).
           #

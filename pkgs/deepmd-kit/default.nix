@@ -28,6 +28,12 @@
   scipy,
   torch,
   wcmatch,
+
+  # optional-dependencies
+  dpdata,
+  e3nn,
+  rdkit,
+  scikit-learn,
 }:
 
 # DeePMD-kit — deep-learning interatomic potentials, and `matcalc`'s `deepmd`
@@ -165,12 +171,34 @@ buildPythonPackage (finalAttrs: {
     wcmatch
   ];
 
+  # `dpa-adapt`, the collective-variable adapter, and the only one of upstream's
+  # extras whose members are all packaged.  Its six are scikit-learn, dpdata,
+  # torch, ase, rdkit and e3nn — torch and ase are already dependencies above,
+  # and ../dpdata is the one that had to be packaged for it.
+  #
+  # The others stay out: `test` wants `dpgui` and `nvalchemi-toolkit`, `docs` is
+  # a Sphinx tree, and the backend extras want the TensorFlow and Paddle builds
+  # that `env` above switches off.
+  #
+  # Costs this build nothing — `doCheck = false` below, so nothing here is a
+  # check input.
+  optional-dependencies = {
+    dpa-adapt = [
+      dpdata
+      e3nn
+      rdkit
+      scikit-learn
+    ];
+  };
+
   # Not run, and this one is not a close call.  `source/tests/` is organised by
   # backend — `tf/`, `pt/`, `pd/`, `jax/` — and `consistent/` exists precisely
   # to cross-check the backends against each other, so most of it asks for the
-  # two that are deliberately off above.  What is left needs `dpdata`, `dpgui`
-  # and `e3nn`, none of which are packaged, and `tests/common` reaches for torch,
-  # jax and `array_api_strict` in the same breath.
+  # two that are deliberately off above.  What is left needs `dpgui` and
+  # `array_api_strict`, neither of which is packaged, and `tests/common` reaches
+  # for torch and jax in the same breath.  (`dpdata` and `e3nn` were on that
+  # list too and are packaged now — ../dpdata and nixpkgs' — so the gap is
+  # smaller than it was, though the backends remain the real obstacle.)
   #
   # `pythonImportsCheck` carries the weight instead, and it is not a formality
   # here: the same check is what caught ../vise shipping a console script that

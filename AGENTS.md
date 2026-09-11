@@ -55,7 +55,9 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   alone and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
   `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
   (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s), `maml` (`matcalc[maml]`'s), `deepmd-kit`
-  (`matcalc[deepmd]`'s) and `dargs` (deepmd-kit's one gap), `fairchem-core`
+  (`matcalc[deepmd]`'s) with `dargs` and `dpdata` under it — and `parmed` and
+  `dpdata-plugin-test` under *that*, both for dpdata's check phase alone —
+  `fairchem-core`
   (`matcalc[fairchem]`'s and `quacc[mlip]`'s) with `clusterscope` and
   `ase-db-backends` under it and `fairchem-data-{oc,omat,omol}` beside it
   (`quacc[fairchem]`'s, three more distributions out of the same monorepo), the
@@ -127,10 +129,11 @@ plain `final: prev:` functions and is imported **without flakes** by `default.ni
 and `ci.nix`, so it cannot reach the input — the same wall as the cclib split above. So a
 dependant takes a defaulted argument, the overlay resolves it with
 `final.<name> or final.qchem.<name> or null`, and the derivation runs fewer tests (or is
-`meta.broken`) when it comes back null. `pkgs/postopus`' `octopus` and `pkgs/fairchem-data-oc`'s
-`packmol` are the two worked examples, and they differ in which way the usual case falls:
-nixpkgs has octopus, so postopus nearly always finds one; nixpkgs has no packmol at all, so that
-argument is null on every path but the flake's.
+`meta.broken`) when it comes back null. Three worked examples, and the oldest is the one to copy:
+`pkgs/aqme` takes `xtb` and `crest` that way, `pkgs/postopus` takes `octopus`, and
+`pkgs/fairchem-data-oc` takes `packmol`. They differ only in which way the usual case falls —
+nixpkgs has xtb and octopus, so those nearly always resolve, while it has neither crest nor
+packmol, so those are null on every path but the flake's.
 
 Where a check needs the real program, `flake.nix` selects it from `qchemPkgs` — the same
 instantiation `psi4` and `cclibPkgs` come from — and exposes the result as a `checks` entry
@@ -355,6 +358,22 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `dargs`' licence `lgpl3Only` when its one dependant says `or-later`? | `pkgs/dargs/default.nix` (`meta.license`) |
 | Why does `dargs` pin a setuptools-scm version it would probably get right anyway? | `pkgs/dargs/default.nix` (the note above `env`) |
 | Why is `dargs.sphinx` left out of the import check? | `pkgs/dargs/default.nix` (`pythonImportsCheck`), `pkgs/dbstep/default.nix` (the same shape) |
+| Why is `dpdata`'s `lmdb>=2.0.0` relaxed when that repo *pinned* py-lmdb down for a reason? | `pkgs/dpdata/default.nix` (`pythonRelaxDeps`), `overlays/default.nix` (the `lmdb` binding) |
+| Why does `dpdata` delete its own source directory *and* run from `tests/`? | `pkgs/dpdata/default.nix` (`preCheck`), `pkgs/sella/default.nix` and `pkgs/wignernj/default.nix` (the same trap, less explicit) |
+| Why does `dpdata` empty pytest's `python_classes`, and what breaks without it? | `pkgs/dpdata/default.nix` (`pytestFlags`) |
+| Why does `dpdata` load a plugin with `-p` instead of packaging `tests/plugin`? | `pkgs/dpdata/default.nix` (`pytestFlags`) |
+| Which `dpdata` tests are deselected, and which of them is an upstream `try:` block with no import in it? | `pkgs/dpdata/default.nix` (`disabledTests`) |
+| Why does `dpdata-plugin-test` have to be installed rather than imported, and how is the cycle cut? | `pkgs/dpdata-plugin-test/default.nix` (the header, and `dependencies`) |
+| Why can `scripts/offline-src-hash.sh` not answer for `parmed`, and where did its hash come from? | `pkgs/parmed/default.nix` (the `src` note) |
+| Why does `parmed` need no pretend version when it uses versioneer and has no `.git`? | `pkgs/parmed/default.nix` (the `src` note) |
+| Which two `parmed` test modules are dropped, and which of them could come back through NixOS-QChem? | `pkgs/parmed/default.nix` (`disabledTestPaths`) |
+| How do I build `parmed` against AmberTools, and why is it not a check? | `flake.nix` (`parmedWithAmbertools`), `pkgs/parmed/default.nix` (the `ambertools` argument) |
+| Why does `parmed` set `GMXDATA`, and what did 93 skips turn out to be? | `pkgs/parmed/default.nix` (`nativeCheckInputs`, `preCheck`) |
+| Why does `parmed` pass `-rsfE` rather than `-rs`? | `pkgs/parmed/default.nix` (`pytestFlags`) |
+| Why does `basis-set-exchange` run its tests from `$out` rather than the unpacked source? | `pkgs/basis-set-exchange/default.nix` (`preCheck`) |
+| Why is `basis-set-exchange`'s `--runslow` left off, and what does turning it on cost? | `pkgs/basis-set-exchange/default.nix` (`nativeCheckInputs`), `docs/TODO.md` |
+| Why is `wignernj` a defaulted argument to `basis-set-exchange` when this repo has it? | `pkgs/basis-set-exchange/default.nix` (the `wignernj` argument), `overlays/default.nix` (the `basis-set-exchange` callPackage) |
+| Why is `openbabel-bindings` a `dpdata` check input when every openbabel import in it is function-local? | `pkgs/dpdata/default.nix` (the note above `nativeCheckInputs`) |
 | How does one distribution get built out of the thirteen-package `fairchem` monorepo? | `pkgs/fairchem-core/default.nix` (`sourceRoot`), `pkgs/emmet-core/default.nix` (the same arrangement) |
 | Which of `fairchem-core`'s four relaxed pins is the one worth worrying about? | `pkgs/fairchem-core/default.nix` (the note above `pythonRelaxDeps`) |
 | Why does `torchtnt` get patched here, and what does setuptools 83 have to do with it? | `overlays/default.nix` (the `torchtnt` binding in the materials overlay) |
@@ -425,9 +444,16 @@ counter-examples to weigh a new case against.
 `default.nix` is the NUR entry point and the canonical package list. `flake.nix` and
 `overlay.nix` both derive from it:
 
-- `flake.nix` → `legacyPackages` = `import ./default.nix`; `packages` = the derivations
-  filtered out of that.
+- `flake.nix` → `legacyPackages` = `import ./default.nix`, plus `parmed-ambertools`; `packages` =
+  the derivations filtered out of that, plus the seven cclib ones.
 - `overlay.nix` → the same attrset minus the *reserved* keys.
+
+Both additions are there because a flake input cannot be reached from `default.nix`, and the two
+sit in different outputs for a reason worth knowing: `nix flake check` forces `packages` but not
+`legacyPackages`. The cclib seven can live in `packages` because their sources are ordinary
+fetches; `parmed-ambertools` cannot, because NixOS-QChem builds AmberTools from a `requireFile`
+tarball the user has to fetch by hand, and a `packages` or `checks` entry would fail every build
+that has not. See `flake.nix` (`parmedWithAmbertools`).
 
 `flake.nix` is a **flake-parts** flake: `systems` comes from `nix-systems/default`, per-system
 outputs live in `perSystem`, and `nixosModules` / `overlays` sit in the system-agnostic `flake`
@@ -566,7 +592,10 @@ where the survey stands:
 | `mp-api` | `maml`, atomate2 `mp` | **done**; `pkgs/mp-api` — `doCheck = false` (every test drives a live MPRester). Dist `mp-api`, import `mp_api` |
 | `maml` | `matcalc[maml]` | **done**; `pkgs/maml`, internal — `doCheck = false` (TensorFlow / matgl-model tests, `apps/pes` needs external fitting binaries) |
 | `deepmd-kit` | `matcalc[deepmd]` | **done**; `pkgs/deepmd-kit`, internal — and it was on the *blocked* list for no better reason than never having been surveyed. Core dependencies are ordinary; `dargs` was the only gap. Built with `DP_ENABLE_TENSORFLOW=0` and `DP_ENABLE_PYTORCH=0`, which skips the CMake-against-libtorch op library — optional, see the derivation. `doCheck = false` |
-| `dargs` | `deepmd-kit` — its only gap | **done**; `pkgs/dargs`, internal. A real tagged release, unlike the rest of this cluster |
+| `dargs` | `deepmd-kit` — its only *core* gap | **done**; `pkgs/dargs`, internal. A real tagged release, unlike the rest of this cluster |
+| `dpdata` | `deepmd-kit[dpa-adapt]`, `deepmd-kit[test]` | **done**; `pkgs/dpdata`, internal — the format converter, and what makes the `dpa-adapt` extra reachable. Its `lmdb>=2.0.0` is **relaxed against this repo's py-lmdb 1.7.3 pin**, the one place those two collide, and that costs three tests rather than nothing. The suite is upstream's `python -m unittest` one and needs `python_classes` emptied to run under pytest at all; `tests/context.py` is the `sys.path` shadowing trap in its most explicit form, and it also dictates the working directory |
+| `parmed` | `dpdata[amber]`, `dpdata`'s suite | **done**; `pkgs/parmed`, internal — Amber/CHARMM/GROMACS topology editing, absent from nixpkgs, packaged so `dpdata`'s `TestPickByAmberMask` runs instead of erroring. One C++ extension, versioneer, and a `.gitattributes` export-subst that `scripts/offline-src-hash.sh` refuses to answer for — the hash was checked against the real codeload tarball |
+| `dpdata-plugin-test` | `dpdata`'s suite | **done**; `pkgs/dpdata-plugin-test`, internal — the entry-point fixture out of dpdata's own `tests/plugin/`, built from the same `src` one directory down. It has to be *installed*, not imported, and its dpdata is a `doCheck = false` override to cut the cycle; see its header for both |
 | `fairchem-core` | `matcalc[fairchem]`, `quacc[mlip]` | **done**; `pkgs/fairchem-core`, internal — one distribution out of a thirteen-package monorepo, built from `packages/fairchem-core/` whose `src` is a symlink to `../../src`. Also recorded as blocked without its dependencies having been read: only two were missing. `tests/core` runs, less nine modules needing Hugging Face checkpoints or the NVIDIA stack |
 | `clusterscope` | `fairchem-core` | **done**; `pkgs/clusterscope`, internal — pinned to v0.0.18, the exact version fairchem-core's `==` names, rather than to its own latest |
 | `ase-db-backends` | `fairchem-core` | **done**; `pkgs/ase-db-backends`, internal. GitLab, like `hiphive` and `trainstation`; no tags at all, so `-unstable-`. Dist and import are `ase_db_backends`. Carries a real upstream bugfix — `close()` reopened the LMDB environment in order to close it |
@@ -686,7 +715,7 @@ the survey had not already read. The cost of checking is one `nix-instantiate --
 | `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
 | `fairchem-applications-*`, `fairchem-demo-ocpapi`, `fairchem-lammps` | **not blocked — queued**, and nothing downstream here asks for them. The remaining nine distributions of the monorepo; `fastcsp` wants `p-tqdm` and `ocx` wants `yellowbrick`, and those two packages are the only gaps in the set. See `docs/TODO.md` |
 | `PsiDataViz` | uv workspace, never released, includes a React/TS frontend; only `packages/psidata` is plausible |
-| `crest` | Fortran/meson with vendored subprojects; not in nixpkgs. Feasible, just different work — `tblite` and `xtb` are already there to build against |
+| ~~`crest`~~ | **Not a gap, and never was.** NixOS-QChem has it as `qchem.crest`, and `pkgs/aqme` has been reaching it through `final.crest or final.qchem.crest or null` all along. This row said "not in nixpkgs, feasible, just different work" and was reasoning from nixpkgs alone — check `package_list.json` in the nixos-qchem checkout before writing another row like it. See "Reusing NixOS-QChem" above |
 
 ## Template leftovers
 

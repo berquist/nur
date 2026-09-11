@@ -3,6 +3,92 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
+## basis-set-exchange's `--runslow` suite (tabled)
+
+**Want:** a decision about whether any of upstream's slow suite is worth running here, and if so
+which part — not the whole thing.
+
+`basis_set_exchange/tests/conftest.py` defines a `--runslow` option.  Without it,
+`pytest_ignore_collect` drops all eight `*_slow.py` modules and `pytest_collection_modifyitems`
+skips anything marked `slow`, which is most of what `pkgs/basis-set-exchange` reports as skipped.
+It was turned on once, with pytest-xdist, and turned off again on the strength of the numbers:
+
+    798,417 collected · 788,216 passed · 10,201 failed · 1,570 skipped
+    4 h 12 m at 32 workers
+
+**The failures are upstream's converters refusing basis sets they cannot express**, not anything
+packaging did.  Nearly all of them are in `test_api_slow.py`, and they group tightly:
+
+| Count | Failure |
+|---|---|
+| 3,072 | `Converter veloxchem does not support all function types: {'sc…` |
+| 3,072 | `Converter fhiaims does not support all function types: {'scal…` |
+| 1,568 | `ECP contains l=5 term but Crystal format only supports up to …` |
+| 672 | `Converter veloxchem does not support all function types: {'gt…` |
+| 576 | `Electrons cover a partial shell. 9 electrons left` |
+| 256 | `KeyError: 'electron_shells'` |
+
+`test_convert_slow.py` adds about a thousand more of the same flavour — regexes that do not match
+a reader's own output, MD5 mismatches, `jsonschema` validation failures on empty lists.
+
+**What a plan here would have to settle**, none of which is a packaging question:
+
+1. Whether upstream's CI runs this at all.  If it does not, a green run may never have existed and
+   "10,201 failures" is the normal state rather than a regression.
+2. Whether the per-converter refusals are assertions about what *should* work, or the suite simply
+   enumerating every (format, basis) pair and letting the unsupported ones raise.  The wording
+   suggests the latter, in which case these are not failures so much as an unfiltered matrix.
+3. If some subset is genuinely meaningful, which modules — `test_lut_slow.py` is 18 failures and
+   might be tractable on its own, where `test_api_slow.py` is not.
+
+**Until then the option stays off**, and the reasoning lives at `pkgs/basis-set-exchange`'s
+`nativeCheckInputs`.  pytest-xdist stays on: it is right for this suite either way, and it is what
+made measuring the above possible at all.
+
+## Stop missing `nix-qchem.cachix.org`
+
+**Want:** the packages this repository takes from NixOS-QChem to come out of NixOS-QChem's own
+binary cache, instead of being rebuilt from source.
+
+**The miss is caused here, deliberately, and by one line.**  `qchemPkgs` in `flake.nix`
+reproduces NixOS-QChem's instantiation exactly — its nixpkgs pin, `allowUnfree`, and the
+`qchem-config` from its own `cfg.nix` with `allowEnv = false` and `optAVX = true` — except that
+it rewrites `python3` to the interpreter `services.qcfractalCompute` would run.  That rewrite is
+what `nixos-modules/qcfractal-compute.nix` asserts on: QCEngine imports a Python QC program into
+the worker process, so a program built for another Python is unusable.
+
+The cache is keyed on the derivation hash, so changing the interpreter changes it, and Psi4 and
+its whole Python closure are rebuilt.  `nix-qchem.cachix.org` is in `nixConfig.extra-substituters`
+and is not being used for the thing it was added for.
+
+**It is already narrower than it looks, and knowing that is half the answer.**  The rewrite only
+matters to packages that hang off `python3`.  `qchem.packmol` is a gfortran build of a single
+Makefile and reads no interpreter at all, so `checks.fairchem-data-oc` gets a cache hit today;
+the same goes for `qchem.crest` and `qchem.xtb`, which `pkgs/aqme` reaches.  Psi4 is the
+expensive one, and CFOUR would be if anything here wanted it.
+
+**Options, none of them costed yet:**
+
+1. *Move this repository's Python pin to whatever `nixpkgs-qchem` calls `python3`.*  The comment
+   at `qchemPkgs` already says the override "becomes a no-op the moment the two agree again".
+   The pin is `python313` and NixOS-QChem's list carries `qchem.python312`, so today they do not
+   agree.  Cheapest if the versions ever line up on their own; not something to force.
+2. *Take Psi4 from `nixos-qchem.packages.${system}.psi4` — their built output — and drop the
+   interpreter invariant for it.*  Rejected once already, and the note at `psi4` says why: that
+   output is a `filterAttrs` over the entire qchem set, so selecting one package forces the
+   predicate for every other one, and `builtins.tryEval` does not catch signature drift.  A
+   single broken package anywhere in NixOS-QChem then takes down the whole `checks` output.
+3. *Ask NixOS-QChem to build more than one interpreter*, or to make the interpreter a
+   `cfg.nix` knob their Hydra sweeps.  Upstream work, and the only option that fixes this for
+   good rather than by coincidence.
+4. *Accept it and scope it*: keep the invariant, and make sure nothing new takes a
+   Python-flavoured package out of `qchemPkgs` without knowing it pays for a rebuild.  This is
+   the status quo, and it is defensible — it is simply not written down anywhere until now.
+
+**Measure before choosing.**  Nobody has timed a cold `nix build .#checks.x86_64-linux.eval` or
+a Psi4-backed VM check against a warm one, so "expensive" here is inferred from Psi4 being large,
+not from a number.
+
 ## Report fairchem's `test_unified_matches_per_layer` tolerance upstream
 
 **Want:** the tolerance in `tests/core/models/uma/nn/test_unified_radial.py` raised, or its fixture
@@ -45,11 +131,11 @@ sitting unnoticed until someone builds it by hand.
 
 `ci.nix` walks `default.nix` and skips `python313Packages` — deliberately, and the note there
 explains why: it is the whole 3.13 set, so descending would try to build all of nixpkgs.  The
-consequence was not thought through.  Of the 135 packages this repository defines, 68 are
-re-exported as top-level attributes and **67 are internal**, reachable only through
+consequence was not thought through.  Of the 138 packages this repository defines, 68 are
+re-exported as top-level attributes and **70 are internal**, reachable only through
 `python313Packages`.
 
-Most of those 64 are still built, as build-time dependencies of something re-exported —
+Most of those 70 are still built, as build-time dependencies of something re-exported —
 `plumpy` and `kiwipy` come along with `aiida-core`, `doped` and `pydefect` with `shakenbreak`.
 The gap is the ones reachable **only through an `optional-dependencies` entry**, because an
 extra is not a build input of the package that declares it.  Nothing builds those at all:
@@ -57,6 +143,10 @@ extra is not a build input of the package that declares it.  Nothing builds thos
     sevenn            matcalc[sevennet]
     tensorpotential   matcalc[grace]
     deepmd-kit        matcalc[deepmd]        and dargs beneath it
+    dpdata            deepmd-kit[dpa-adapt]  an extra of a package that is itself
+                                             only an extra — two levels down,
+                                             and parmed and dpdata-plugin-test
+                                             sit under it for its check phase
     fairchem-core     matcalc[fairchem], quacc[mlip]
                                              and clusterscope, ase-db-backends beneath it
     fairchem-data-oc  quacc[fairchem]
@@ -245,6 +335,13 @@ path twice in a single process — `test_aselmdb_concurrency` across eight forke
 is deselected any more: `overlays/default.nix` pins py-lmdb to 1.7.3, which predates that
 restriction, so both modules run.  They are still worth mentioning upstream, because the code
 will break again whenever ase-db-backends moves to py-lmdb 2.x.
+
+**The pin now costs something in the other direction too**, and this is the ledger to keep if it
+is ever revisited.  `pkgs/dpdata` requires `lmdb>=2.0.0` and is relaxed onto 1.7.3, which
+deselects three of its tests: all three assert that a second open *raises*, which is precisely
+what 2.0.0 added.  So the pin buys back two ase-db-backends modules and about 43 fairchem-core
+failures, and sells three dpdata tests.  It is still the right trade by a wide margin — but it is
+a trade, not a free win, and `pkgs/dpdata`'s `disabledTests` is where the receipt is.
 
 **And one that is not upstream's fault at all**, worth knowing before reading a failure here:
 `test_db` populates its database by shelling out to a nine-stage `ase -T build … | ase -T run
