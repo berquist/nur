@@ -327,12 +327,88 @@
           # it is Linux-only, and a VM test could not run anywhere else anyway.
           nwchem = if pkgs'.stdenv.hostPlatform.isLinux then pkgs'.nwchem else null;
 
+          # packmol, which pkgs/fairchem-data-oc shells out to and **nixpkgs
+          # does not have at all**.  Taken from NixOS-QChem rather than packaged
+          # here: reuse what that input already carries wherever it carries it,
+          # which is the standing rule for this repository — see "Reusing
+          # NixOS-QChem" in ./AGENTS.md.  Its own package list names this one
+          # `qchem.packmol`, at 21.1.0.
+          #
+          # Cheap in a way psi4 is not.  The interpreter override on qchemPkgs
+          # above is what makes Psi4 miss nix-qchem.cachix.org, and it costs this
+          # nothing: packmol is a gfortran build of a single Makefile producing a
+          # single binary, and reads no Python at all.
+          #
+          # Only where NixOS-QChem has outputs, for the reason given at psi4.
+          packmol = if system == "x86_64-linux" then qchemPkgs.qchem.packmol else null;
+
+          # fairchem-data-oc with that packmol on its check PATH, which is the
+          # only package set in this repository where its two `InterfaceConfig`
+          # tests run at all.  ./overlays is imported without flakes by
+          # default.nix, overlay.nix and ci.nix, so it cannot reach the
+          # nixos-qchem input — `final.packmol or final.qchem.packmol or null`
+          # resolves to null there and the module is deselected.  This is the
+          # counterpart of harmonwigTests below: a package that needs a flake
+          # input to be fully exercised, reachable as a check rather than as an
+          # output.
+          #
+          # An `override` of one check input rather than a second package set:
+          # nothing in the closure depends on packmol, so this rebuilds
+          # fairchem-data-oc and nothing else.  It is also the only place in the
+          # repository that builds fairchem-data-oc at all — it is internal, and
+          # ci.nix does not descend into python313Packages; see the standing item
+          # in ./docs/TODO.md.
+          fairchemDataOc =
+            if packmol != null then
+              pkgs'.python313Packages.fairchem-data-oc.override { inherit packmol; }
+            else
+              null;
+
+          # The same shape again, for atomate2's one packmol-gated test —
+          # `tests/common/jobs/test_mpmorph.py::test_packmol_job`, which packs
+          # an amorphous box through `MPMorphMDMaker`.  Unlike fairchem-data-oc
+          # this package *is* built elsewhere (it is a top-level attribute, so
+          # ci.nix takes it), and the override buys exactly the one test; the
+          # rest of `tests/common` runs on every path.
+          atomate2WithPackmol =
+            if packmol != null then pkgs'.python313Packages.atomate2.override { inherit packmol; } else null;
+
+          # ...and the same shape for AmberTools, which thirteen of pkgs/parmed's
+          # tests gate on and which nixpkgs has no spelling of.
+          #
+          # **This one is deliberately not a check, and the difference is
+          # `requireFile`.**  NixOS-QChem cannot redistribute the AmberTools
+          # tarball, so its derivation asks the user to fetch it from
+          # ambermd.org and add it to the store by hand:
+          #
+          #   nix-store --add-fixed sha256 ambertools26.tar.bz2
+          #
+          # A `checks` entry would therefore fail on every machine that has not
+          # done that, CI included, which is not a failure mode a check should
+          # have.  It is exposed through `legacyPackages` instead — `nix flake
+          # check` does not force those, the same property the seven cclib
+          # packages rely on — so the attribute exists for whoever wants it and
+          # costs nothing to whoever does not:
+          #
+          #   nix build .#legacyPackages.x86_64-linux.parmed-ambertools
+          #
+          # Without the tarball that command prints NixOS-QChem's own
+          # instructions; `python313Packages.parmed` on the ordinary path keeps
+          # `ambertools = null` and skips the thirteen.
+          parmedWithAmbertools =
+            if system == "x86_64-linux" then
+              pkgs'.python313Packages.parmed.override { ambertools = qchemPkgs.qchem.ambertools; }
+            else
+              null;
+
           vmTests = import ./tests/qcarchive/vm.nix {
             pkgs = pkgs';
             inherit psi4 nwchem;
           };
 
           aiidaVmTests = import ./tests/aiida/vm.nix { pkgs = pkgs'; };
+
+          materialsVmTests = import ./tests/materials/vm.nix { pkgs = pkgs'; };
 
           # Given cclibPkgs rather than pkgs', because that is the only package
           # set in which harmonwig has a cclib; see ./tests/harmonwig and the
@@ -349,26 +425,41 @@
           # Driven by default.nix, which applies our overlays internally so that
           # the derivations here are identical to what python313.withPackages
           # returns.
+          #
+          # Plus one attribute that is not from default.nix: `parmed-ambertools`,
+          # which needs the nixos-qchem input and so cannot come from there.  It
+          # lives here rather than in `packages` or `checks` precisely because
+          # `nix flake check` does not force legacyPackages — see the note at
+          # `parmedWithAmbertools` above for why that matters when the underlying
+          # source is `requireFile`.
           # -------------------------------------------------------------------
-          legacyPackages = nurAttrs;
+          legacyPackages =
+            nurAttrs
+            // lib.optionalAttrs (parmedWithAmbertools != null) {
+              parmed-ambertools = parmedWithAmbertools;
+            };
 
           # Flake-style packages (derivations only, filtered).
           #
-          # The five cclib-dependent packages are replaced rather than
+          # The seven cclib-dependent packages are replaced rather than
           # inherited: the ones in nurAttrs come from the bare ./overlays and
           # carry meta.broken because ./overlays cannot reach the cclib flake
           # input.  These are the working ones.  `nix build .#dbstep` therefore
           # succeeds while `nix-build -A dbstep` does not, which is the same
           # split the Psi4-backed VM checks already live with.
           #
-          # aiida-gaussian is the one cclib dependant *not* replaced here; see
-          # the cclibPkgs binding above for why.
+          # Three cclib dependants are *not* replaced here, for three different
+          # reasons.  aiida-gaussian cannot be — see the cclibPkgs binding above.
+          # qmzyme does not need to be: its cclib use is test-only and lazy, so
+          # it is not meta.broken and the inherited one works.  And graphrc is
+          # not in nurAttrs at all, ../default.nix having deliberately declined
+          # to re-export it, so there is nothing here to override.
           #
           # Broken derivations are filtered out rather than left to fail.
           # `nix flake check` forces every member of `packages`, and forcing a
           # meta.broken derivation throws — so leaving `aiida-gaussian` in would
-          # take the whole check down, and so would the four below on any system
-          # where cclibPkgs is null.  They stay reachable through
+          # take the whole check down, and so would the seven below on any
+          # system where cclibPkgs is null.  They stay reachable through
           # legacyPackages, which flake check does not force, and which answers
           # with nixpkgs' own "marked as broken" message rather than an
           # attribute-not-found.
@@ -384,18 +475,6 @@
                 metallogen
                 xyzrender
                 ;
-              # molcat is deliberately absent, for the same reason
-              # aiida-gaussian is: `nix flake check` forces every attribute of
-              # `packages`, and molcat has no licence at all — no LICENSE file,
-              # no metadata field — so ../pkgs/molcat marks it
-              # `lib.licenses.unfree` and nixpkgs refuses to evaluate it.
-              # Naming it here would take the whole check down with a
-              # "refusing to evaluate" throw.
-              #
-              # It stays reachable through legacyPackages and through
-              # python313Packages, neither of which flake check forces, so
-              # `nix build .#legacyPackages.x86_64-linux.molcat` still works for
-              # anyone who has set allowUnfree.
             };
 
           # -------------------------------------------------------------------
@@ -473,6 +552,16 @@
           # and therefore cclib, and so exist only where NixOS-QChem does:
           #   nix build .#checks.x86_64-linux.harmonwig
           #
+          # fairchem-data-oc rebuilt with NixOS-QChem's packmol on its check
+          # PATH, which is the only way its two InterfaceConfig tests run — and
+          # the only place anything builds this package, it being internal.
+          # Likewise NixOS-QChem-only:
+          #   nix build .#checks.x86_64-linux.fairchem-data-oc
+          #
+          # atomate2 with the same packmol, for the one `tests/common` test
+          # that gates on it.  Also NixOS-QChem-only:
+          #   nix build .#checks.x86_64-linux.atomate2
+          #
           # AiiDA VM tests.  The first six need only nixpkgs -- the aiida-shell
           # one builds xtb, which is lib.platforms.linux like the VMs themselves.
           # The CP2K plugin round trip additionally needs a CP2K, whose nixpkgs
@@ -488,6 +577,10 @@
           # and a real login shell, so it cannot run in the package's check
           # phase — see the comment on the test:
           #   nix build .#checks.x86_64-linux.vm-aiida-transports-ssh
+          #
+          # The materials VM test exists because ase-db-backends' PostgreSQL and
+          # MySQL suites can only skip in a check phase:
+          #   nix build .#checks.x86_64-linux.vm-materials-ase-db-backends
           #
           # VM integration tests (require KVM and real packages):
           #   nix build .#checks.x86_64-linux.vm-server-local-db
@@ -545,6 +638,8 @@
             vm-aiida-daemon-sqlite = aiidaVmTests.daemon-sqlite;
             vm-aiida-transports-ssh = aiidaVmTests.transports-ssh;
             vm-aiida-plugin-shell = aiidaVmTests.plugin-shell;
+
+            vm-materials-ase-db-backends = materialsVmTests.ase-db-backends;
           }
           // lib.optionalAttrs (nwchem != null) {
             vm-compute-nwchem-singlepoint = vmTests.compute-nwchem-singlepoint;
@@ -563,6 +658,12 @@
           }
           // lib.optionalAttrs (harmonwigTests != null) {
             harmonwig = harmonwigTests.all;
+          }
+          // lib.optionalAttrs (fairchemDataOc != null) {
+            fairchem-data-oc = fairchemDataOc;
+          }
+          // lib.optionalAttrs (atomate2WithPackmol != null) {
+            atomate2 = atomate2WithPackmol;
           };
         };
     };

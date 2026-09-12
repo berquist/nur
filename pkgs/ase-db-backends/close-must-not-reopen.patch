@@ -1,0 +1,62 @@
+Do not reopen the LMDB environment in order to close it.
+
+`close()` reached the environment through the `env` property:
+
+    @property
+    def env(self):
+        if self._env is None or self._env_pid != os.getpid():
+            self._open_lmdb_env()
+        return self._env
+
+    def close(self) -> None:
+        self.env.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+That property exists to reopen the environment after a fork, which is right for
+every reader of it but one.  On the close path it inverts the meaning: closing
+an already-closed database *opens* it, and closing one in a forked child opens a
+second handle to the parent's file, because `_env_pid != os.getpid()` is exactly
+what a fork guarantees.  Since `__del__` calls `close()`, this runs at garbage
+collection, where the reopen has nothing to close it again.
+
+py-lmdb keeps a process-wide registry of open environment paths and refuses a
+second `open()` of one, so the reopen does not leak quietly -- it raises
+
+    lmdb.Error: The environment '.../testase.aselmdb' is already open in this process.
+
+from inside `__del__`, which Python then reports as an ignored exception while
+the environment stays registered.  Every later `connect()` to the same path in
+that process then fails.
+
+This is not the whole of why upstream's LMDB tests fail -- see
+`test_aselmdb_concurrency`, which shares one handle across forked workers and
+collides with py-lmdb's registry no matter what `close()` does -- but it is a
+defect in its own right, and it is the one that reaches ordinary callers rather
+than only forking ones.
+
+Closing touches `_env` directly instead, does nothing when there is nothing to
+close, and clears the handle so a second `close()` is harmless.  The `env`
+property is left alone -- reopening after a fork is what every other caller
+wants.
+
+--- a/ase_db_backends/aselmdb.py
++++ b/ase_db_backends/aselmdb.py
+@@ -114,8 +114,14 @@
+         self.close()
+
+     def close(self) -> None:
+-        # Close the lmdb environment
+-        self.env.close()
++        # Close the lmdb environment, if one is actually open.  Deliberately
++        # not via the `env` property: that reopens when `_env` is None or the
++        # pid has changed, so closing would resurrect the environment instead
++        # of releasing it -- and py-lmdb then refuses the reopen outright,
++        # because the path is still in its process-wide registry.
++        if self._env is not None:
++            self._env.close()
++            self._env = None
+
+     def __del__(self) -> None:
+         # If we delete this object, make sure we also close the lmdb env

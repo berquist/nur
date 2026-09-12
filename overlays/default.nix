@@ -16,27 +16,34 @@ let
   # It cannot simply be dropped instead.  aiida-quantumespresso depends on
   # `aiida_core[atomic_tools]`, pymatgen is in that extra, and the alternative —
   # pinning that whole family to 3.12 — would put a third interpreter in the
-  # repo for the sake of one nixpkgs annotation.  The materials overlay needs
-  # the same lift for a different reason: custodian's suite imports pymatgen in
-  # seven of its twenty-one modules.
+  # repo for the sake of one nixpkgs annotation.
   #
   # **A function returning a `let`-bindable value, never a member of a package
   # set.**  Injecting a repaired pymatgen into the set would silently change
   # pymatgen for everything else in a consumer's package set, which taking
-  # `overlays.aiida` or `overlays.materials` has no business doing.  Each
-  # caller binds it locally and passes it to the packages that need it — for
-  # aiida that is aiida-core and aiida-gaussian, for materials it is custodian.
-  # The aiida-overlay-pymatgen-override-is-local eval test asserts it stays
-  # invisible from outside.
+  # `overlays.aiida` has no business doing.  The caller binds it locally and
+  # passes it to the packages that need it — aiida-core, aiida-gaussian and
+  # aiida-nwchem.  The aiida-overlay-pymatgen-override-is-local eval test
+  # asserts it stays invisible from outside.
   #
-  # Shared rather than copied because the nine deselections and the plotting
-  # patch below are the expensive part to keep in step, and two overlays
-  # drifting apart on which pymatgen tests fail would be invisible until one of
-  # them broke.
+  # The materials overlay used to share this binding and no longer does.  It
+  # replaces `pymatgen` in the package set outright with upstream's post-split
+  # pair — see ../pkgs/pymatgen-core — which is a different kind of change and
+  # one that overlay exists to make.
   #
-  # Those nine are none of them ours and none of them about the interpreter.
-  # They are pymatgen 2025.10.7 against dependency versions newer than it was
-  # released for, in three groups:
+  # **Hence the version guard.**  ../default.nix composes every overlay, and the
+  # materials extension is applied after this one, so under a full composition
+  # `pself.pymatgen` is already the 2026 split: no interpreter gate to lift, and
+  # none of the files the repairs below name.  Applying them anyway is not a
+  # harmless no-op — the `--replace-fail` on tests/util/test_plotting.py aborts
+  # the build, because that module went to pymatgen-core along with the rest of
+  # `pymatgen.util`.  Keyed on the version rather than on the presence of some
+  # attribute, for the same reason the `monty` binding below is: nothing about
+  # the derivation says which shape its source has.
+  #
+  # The nine deselections are none of them ours and none of them about the
+  # interpreter.  They are pymatgen 2025.10.7 against dependency versions newer
+  # than it was released for, in three groups:
   #
   #   pandas 3.0 removed DataFrame.swapaxes, which is what made
   #   `np.array_split` return DataFrames rather than plain arrays.  The
@@ -56,60 +63,72 @@ let
   #   there is no display.  nixpkgs deselects the neighbouring
   #   tests/cli/test_pmg_plot.py on darwin for the same reason.
   #
+  # Upstream has since fixed the first two — `np.array_split` now has a note
+  # about it and `_angle_dot` runs everything through `np.real_if_close` — and
+  # rewrote `test_pmg_view` to monkeypatch `show`.  That is another way of
+  # saying the guard above is the whole future of this binding: these entries
+  # describe 2025.10.7 and nothing else.
+  #
   # Node ids rather than bare names: `disabledTests` becomes a `-k` expression,
   # and `test_get_str` and `test_write_file` are common enough in a suite this
   # size to take unrelated tests with them.  An entry containing `::` is passed
   # to pytest as `--deselect`, which is exact.
   pymatgenFor =
     pself:
-    pself.pymatgen.overridePythonAttrs (old: {
-      disabled = false;
-      disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
-        "tests/io/lammps/test_data.py::TestLammpsData::test_get_str"
-        "tests/io/lammps/test_data.py::TestLammpsData::test_write_file"
-        "tests/io/lammps/test_data.py::TestCombinedData::test_get_str"
-        "tests/io/lammps/test_data.py::TestCombinedData::test_as_lammpsdata"
-        "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_compute_directionality_quality_criterion"
-        "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_visualization_directionality_criterion"
-        "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_mean_field"
-        "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_get_igraph"
-        "tests/cli/test_pmg.py::test_pmg_view"
-      ];
+    if builtins.compareVersions pself.pymatgen.version "2026" >= 0 then
+      pself.pymatgen
+    else
+      pself.pymatgen.overridePythonAttrs (old: {
+        disabled = false;
+        disabledTestPaths = (old.disabledTestPaths or [ ]) ++ [
+          "tests/io/lammps/test_data.py::TestLammpsData::test_get_str"
+          "tests/io/lammps/test_data.py::TestLammpsData::test_write_file"
+          "tests/io/lammps/test_data.py::TestCombinedData::test_get_str"
+          "tests/io/lammps/test_data.py::TestCombinedData::test_as_lammpsdata"
+          "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_compute_directionality_quality_criterion"
+          "tests/phonon/test_thermal_displacements.py::TestThermalDisplacement::test_visualization_directionality_criterion"
+          "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_mean_field"
+          "tests/analysis/magnetism/test_heisenberg.py::TestHeisenbergMapper::test_get_igraph"
+          "tests/cli/test_pmg.py::test_pmg_view"
+        ];
 
-      # A tenth failure that is not a deselect, because it is a flake
-      # rather than a broken test, and deselecting it would drop real
-      # coverage of van_arkel_triangle:
-      #
-      #   assert ax.get_title() == ""
-      #   E  AssertionError: assert 'Coordination numbers' == ''
-      #
-      # van_arkel_triangle sets no title.  It ends with `ax = plt.gca()`
-      # — pyplot's *current* axes, whatever that happens to be — and
-      # tests/analysis/chemenv/coordination_environments/test_structure_environments.py
-      # calls get_environments_figure, whose title defaults to
-      # "Coordination numbers", and never closes the figure.  When both
-      # land in one xdist worker in that order the assertion reads the
-      # leftover.  Which tests share a worker is a scheduling accident
-      # under xdist's default --dist load, so this appears and vanishes
-      # between runs; --numprocesses is $NIX_BUILD_CORES, and 128 workers
-      # make it likely enough to matter here and rare enough that nixpkgs
-      # has never had to deselect it.
-      #
-      # Retrying would not help, and pytest-rerunfailures is deliberately
-      # not the answer as it is for aiida-core: a rerun runs in the same
-      # process and finds the same stale figure.
-      #
-      # So give the test the clean state it assumes.  `plt` is already
-      # imported at the top of that file, and the second van_arkel_triangle
-      # call in the test only asserts isinstance, so nothing else moves.
-      postPatch = (old.postPatch or "") + ''
-        substituteInPlace tests/util/test_plotting.py \
-          --replace-fail \
-            '        random_list = [("Fe", "C"), ("Ni", "F")]' \
-            '        plt.close("all")
-                random_list = [("Fe", "C"), ("Ni", "F")]'
-      '';
-    });
+        # A tenth failure that is not a deselect, because it is a flake
+        # rather than a broken test, and deselecting it would drop real
+        # coverage of van_arkel_triangle:
+        #
+        #   assert ax.get_title() == ""
+        #   E  AssertionError: assert 'Coordination numbers' == ''
+        #
+        # van_arkel_triangle sets no title.  It ends with `ax = plt.gca()`
+        # — pyplot's *current* axes, whatever that happens to be — and
+        # tests/analysis/chemenv/coordination_environments/test_structure_environments.py
+        # calls get_environments_figure, whose title defaults to
+        # "Coordination numbers", and never closes the figure.  When both
+        # land in one xdist worker in that order the assertion reads the
+        # leftover.  Which tests share a worker is a scheduling accident
+        # under xdist's default --dist load, so this appears and vanishes
+        # between runs; --numprocesses is $NIX_BUILD_CORES, and 128 workers
+        # make it likely enough to matter here and rare enough that nixpkgs
+        # has never had to deselect it.
+        #
+        # Retrying would not help, and pytest-rerunfailures is deliberately
+        # not the answer as it is for aiida-core: a rerun runs in the same
+        # process and finds the same stale figure.
+        #
+        # So give the test the clean state it assumes.  `plt` is already
+        # imported at the top of that file, and the second van_arkel_triangle
+        # call in the test only asserts isinstance, so nothing else moves.
+        #
+        # Upstream's split fixed this too, with an autouse fixture in
+        # tests/conftest.py that closes every figure a test leaves open.
+        postPatch = (old.postPatch or "") + ''
+          substituteInPlace tests/util/test_plotting.py \
+            --replace-fail \
+              '        random_list = [("Fe", "C"), ("Ni", "F")]' \
+              '        plt.close("all")
+                  random_list = [("Fe", "C"), ("Ni", "F")]'
+        '';
+      });
 in
 {
   # dotdrop is a standalone CLI application — nothing here imports it as a
@@ -202,7 +221,16 @@ in
         # Dependencies missing from nixpkgs.  Not re-exported at the top level
         # or from ../default.nix: they are implementation detail, and every
         # top-level attribute is another thing ci.nix builds.
-        basis-set-exchange = pself.callPackage ../pkgs/basis-set-exchange { };
+        # `wignernj` lives in the chemtools overlay, not this one, so it is here
+        # only when the two are composed — which ../default.nix and ci.nix both
+        # do, and `tests/cheminformatics` deliberately does not.  `or null` is
+        # what lets the narrow composition still evaluate; the derivation then
+        # runs fewer tests, exactly as it did before wignernj was reachable at
+        # all.  Same shape as the `packmol` line in the materials overlay, with
+        # an intra-repository package in place of a flake input.
+        basis-set-exchange = pself.callPackage ../pkgs/basis-set-exchange {
+          wignernj = pself.wignernj or null;
+        };
         colour-science = pself.callPackage ../pkgs/colour-science { };
         configurables = pself.callPackage ../pkgs/configurables { };
         griddataformats = pself.callPackage ../pkgs/griddataformats { };
@@ -279,7 +307,6 @@ in
     dbstep = final.python3.pkgs.callPackage ../pkgs/dbstep { };
     digichem-core = final.python3.pkgs.callPackage ../pkgs/digichem-core { };
     metallogen = final.python3.pkgs.callPackage ../pkgs/metallogen { };
-    molcat = final.python3.pkgs.callPackage ../pkgs/molcat { };
     xyzrender = final.python3.pkgs.callPackage ../pkgs/xyzrender { };
 
     # graphrc breaks the rule this file otherwise keeps, and it has to.
@@ -377,39 +404,369 @@ in
       ;
   };
 
-  # The materials-project workflow family.  Only custodian and fireworks today,
-  # which between them need nothing nixpkgs lacks — but they are the two leaves
-  # of a much larger tree (jobflow, atomate2, quacc, matgl, …) that is gated on
-  # six missing shared dependencies: pymatgen-core, emmet-core, maggma,
-  # mp-pyrho, qtoolkit and mp-api.  This overlay exists now so that work has an
-  # obvious home when those land, rather than being wedged into cheminformatics.
+  # The materials-project workflow family, and the overlay that owns upstream
+  # pymatgen's 2026 split.  custodian, fireworks, qtoolkit, maggma, jobflow,
+  # jobflow-remote and pubchempy today; what is still gated is emmet-core and
+  # pymatgen-io-validation, and through them atomate2 and quacc.  See "Deferred
+  # packaging" in ../AGENTS.md.
+  #
+  # **This overlay replaces `monty` and `pymatgen` in the package set.**  Both
+  # are nixpkgs packages and neither replacement can be kept local the way
+  # `pymatgenFor` keeps its repair local: an import path admits exactly one
+  # implementation, so a consumer who takes `overlays.materials` takes these.
+  # That is the deal the overlay exists to offer, and it is documented at each
+  # binding below and in the headers of ../pkgs/monty and ../pkgs/pymatgen-core.
   materials = final: prev: {
     pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
-      (
-        pself: _psuper:
-        let
-          # custodian's suite imports pymatgen in seven of its twenty-one
-          # modules, and nixpkgs gates pymatgen off 3.13.  Same lift the aiida
-          # overlay needs; see `pymatgenFor` at the top of this file, including
-          # why it stays a `let` binding rather than entering the package set.
-          pymatgen = pymatgenFor pself;
-        in
-        {
-          custodian = pself.callPackage ../pkgs/custodian { inherit pymatgen; };
-          fireworks = pself.callPackage ../pkgs/fireworks { };
+      (pself: psuper: {
+        # ../pkgs/pymatgen-core declares `monty>=2026.7.16`, and
+        # pythonRuntimeDepsCheckHook fails the wheel outright when that is not
+        # met — it is a hard floor rather than a pin to relax.  The nixpkgs
+        # pinned in ../flake.lock carries 2025.3.3.
+        #
+        # A backport, not a package of ours, so it is shaped like the `pycifrw`
+        # binding in the aiida overlay below: take the channel's monty whenever
+        # it is new enough, and fall back to ../pkgs/monty for the legs that are
+        # not.  Pinning ours unconditionally would *downgrade* a channel that
+        # has moved past 2026.7.16.
+        #
+        # `psuper`, not `pself`, or the fallback test would refer to itself.
+        # And a fresh `callPackage` rather than an override of `psuper.monty`:
+        # under a full composition the aiida overlay has already patched that
+        # derivation's 2025.3.3 source for pandas 3, so layering a version bump
+        # on top would abort on a `--replace-fail` whose literal the new source
+        # does not have.  Replacing the derivation outright sidesteps the
+        # ordering entirely.  When the channel *is* new enough, `psuper.monty`
+        # is that same aiida-patched derivation and the patch it carries is the
+        # bson fix ../pkgs/monty applies itself — the two branches agree.
+        monty =
+          if final.lib.versionAtLeast psuper.monty.version "2026.7.16" then
+            psuper.monty
+          else
+            pself.callPackage ../pkgs/monty { };
 
-          # A test-only dependency of fireworks, so it stops here rather than
-          # being re-exported: it stays reachable as python313Packages.* without
-          # ci.nix building it in its own right.
-          mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
-        }
-      )
+        # Upstream split `pymatgen` in two in 2026.  Both halves are ours
+        # because nixpkgs is still on the pre-split monolith and the three
+        # cannot coexist — read ../pkgs/pymatgen-core's header for what that
+        # means and why the two halves do not collide with each other.
+        #
+        # This is what the `pymatgenFor` version guard at the top of this file
+        # is about: the aiida overlay is applied before this one, so under a
+        # full composition its `pself.pymatgen` is what these two lines
+        # produce, and none of its repairs apply to it.
+        pymatgen-core = pself.callPackage ../pkgs/pymatgen-core { };
+        pymatgen = pself.callPackage ../pkgs/pymatgen { };
+
+        # custodian and maggma both want pymatgen — custodian's suite imports
+        # it in seven of its twenty-one modules, maggma offers it as the
+        # `vasp` extra — and both used to be handed the `pymatgenFor` repair
+        # by hand.  Neither needs threading any more: the set's own attribute
+        # is now the one they want.
+        custodian = pself.callPackage ../pkgs/custodian { };
+        fireworks = pself.callPackage ../pkgs/fireworks { };
+        qtoolkit = pself.callPackage ../pkgs/qtoolkit { };
+
+        maggma = pself.callPackage ../pkgs/maggma { };
+        jobflow = pself.callPackage ../pkgs/jobflow { };
+        jobflow-remote = pself.callPackage ../pkgs/jobflow-remote { };
+
+        # The Materials Project schema layer.  atomate2 and quacc both depend
+        # on it, and it was the last gap in that chain.  Its suite runs against
+        # what is installed, including the add-ons below — see the
+        # `nativeCheckInputs` note in ../pkgs/emmet-core.
+        emmet-core = pself.callPackage ../pkgs/emmet-core { };
+
+        # emmet-core dependencies, re-exported rather than left internal like
+        # mongomock-ng: each is a general-purpose tool in its own right — a
+        # PubChem client, a VASP I/O validator, pymatgen add-ons, an OPTIMADE
+        # model library, a LOBSTER analyser, an ML-potential library — not
+        # implementation details of emmet-core, and being top-level is what makes
+        # ci.nix build each on its own.  The add-ons and pymatgen-io-validation
+        # are further distributions in the `pymatgen/` namespace beside
+        # pymatgen-core and pymatgen — see their headers.  Most are also
+        # atomate2's own follow-on targets.
+        pubchempy = pself.callPackage ../pkgs/pubchempy { };
+        pymatgen-io-validation = pself.callPackage ../pkgs/pymatgen-io-validation { };
+
+        # The FHI-aims half of the same namespace, and the one piece pymatgen
+        # *shed* in the 2026 split rather than never having had — see
+        # ../pkgs/pymatgen-io-aims' header.  atomate2's `aims` extra is its
+        # only dependant here, and pyfhiaims is its only gap.  Both internal.
+        pymatgen-io-aims = pself.callPackage ../pkgs/pymatgen-io-aims { };
+        pyfhiaims = pself.callPackage ../pkgs/pyfhiaims { };
+        pymatgen-analysis-alloys = pself.callPackage ../pkgs/pymatgen-analysis-alloys { };
+        pymatgen-analysis-defects = pself.callPackage ../pkgs/pymatgen-analysis-defects { };
+        pymatgen-analysis-diffusion = pself.callPackage ../pkgs/pymatgen-analysis-diffusion { };
+        optimade = pself.callPackage ../pkgs/optimade { };
+        lobsterpy = pself.callPackage ../pkgs/lobsterpy { };
+        matgl = pself.callPackage ../pkgs/matgl { };
+
+        # The materials chain's near-term target — its full `dependencies` set
+        # is now satisfied.  Optional extras that need unpackaged code (chgnet,
+        # abipy, openff, torch-sim, mp-api) are left out; see ../pkgs/atomate2.
+        #
+        # `packmol` the same way `fairchem-data-oc` below takes it, and with
+        # the same consequence: null everywhere `overlays.qchem` is not
+        # composed, and one `tests/common` test skipping there.
+        atomate2 = pself.callPackage ../pkgs/atomate2 {
+          packmol = final.packmol or final.qchem.packmol or null;
+        };
+
+        # atomate2's two follow-on targets.  matcalc runs materials-property
+        # calculations on an ML potential; quacc is a workflow engine beside
+        # atomate2.  Both `doCheck`-limited — see their headers.
+        matcalc = pself.callPackage ../pkgs/matcalc { };
+        quacc = pself.callPackage ../pkgs/quacc { };
+
+        # Optional-dependency packages for matcalc and quacc that are tools in
+        # their own right: matminer (data mining / featurization, matcalc's
+        # `benchmark` extra), redun (a workflow engine, quacc's `redun`
+        # adapter), phono3py (lattice thermal conductivity, the phonopy sibling,
+        # matcalc's `phonon3` extra).
+        # The first step of the `quacc[defects]` cluster, and the only member of
+        # it whose dependencies are all already here.  A VASP input-set
+        # generator with its own CLI, so a tool rather than an implementation
+        # detail — `doped` wants it for eigenvalue analysis and `pydefect` is
+        # built on it outright.  See "Deferred packaging" in ../AGENTS.md.
+        vise = pself.callPackage ../pkgs/vise { };
+
+        matminer = pself.callPackage ../pkgs/matminer { };
+        redun = pself.callPackage ../pkgs/redun { };
+        phono3py = pself.callPackage ../pkgs/phono3py { };
+        mp-api = pself.callPackage ../pkgs/mp-api { };
+
+        # Dependencies of one package each, so they stop here rather than
+        # being re-exported: they stay reachable as python313Packages.*
+        # without ci.nix building them in their own right.
+        #
+        # mongomock-persistence is fireworks'.  mongomock-ng is maggma's, and
+        # is a third distinct mongomock rather than a version of either — see
+        # the note at the top of ../pkgs/mongomock-ng.  mp-pyrho is
+        # pymatgen-analysis-defects'.  mendeleev is lobsterpy[featurizer]'s.
+        mongomock-persistence = pself.callPackage ../pkgs/mongomock-persistence { };
+        mongomock-ng = pself.callPackage ../pkgs/mongomock-ng { };
+        mp-pyrho = pself.callPackage ../pkgs/mp-pyrho { };
+        # The `quacc[defects]` cluster's lower layers, all internal.  hiphive is
+        # shakenbreak's, trainstation is hiphive's one gap, and cmcrameri and
+        # matplotlib-label-lines are doped's plotting dependencies —
+        # matplotlib-label-lines is pydefect's too.  ../vise, the one member of
+        # this cluster that is a tool in its own right, is re-exported below.
+        cmcrameri = pself.callPackage ../pkgs/cmcrameri { };
+        doped = pself.callPackage ../pkgs/doped { };
+        hiphive = pself.callPackage ../pkgs/hiphive { };
+        matplotlib-label-lines = pself.callPackage ../pkgs/matplotlib-label-lines { };
+        pydefect = pself.callPackage ../pkgs/pydefect { };
+        trainstation = pself.callPackage ../pkgs/trainstation { };
+
+        # The cluster's target, and the one member of it besides ../vise that is
+        # a tool in its own right — ten console scripts under two prefixes — so
+        # it is re-exported below rather than stopping here.
+        shakenbreak = pself.callPackage ../pkgs/shakenbreak { };
+
+        # rootstock is quacc[mlip]'s alone; sevenn is matcalc[sevennet]'s;
+        # maml is matcalc[maml]'s.
+        rootstock = pself.callPackage ../pkgs/rootstock { };
+        sevenn = pself.callPackage ../pkgs/sevenn { };
+
+        # GRACE, matcalc's `grace` backend — and the one unfree package in this
+        # repository.  Deliberately **not** re-exported to the top level, unlike
+        # every other member of this overlay that is a tool in its own right:
+        # ../default.nix's attributes are what `just ci-eval` walks with
+        # `nix-env -qa --drv-path`, and forcing an unfree derivation's drvPath
+        # there is an evaluation error rather than a skip.  Reachable as
+        # `python313Packages.tensorpotential`, which is the same arrangement the
+        # twenty-odd internal dependencies here already use.
+        tensorpotential = pself.callPackage ../pkgs/tensorpotential { };
+        maml = pself.callPackage ../pkgs/maml { };
+        mendeleev = pself.callPackage ../pkgs/mendeleev { };
+
+        # dargs is ../deepmd-kit's, and the only core dependency of it that
+        # nixpkgs lacks — everything else it needs is either there already or
+        # is `mendeleev` just above, packaged for lobsterpy.  deepmd-kit is
+        # matcalc's `deepmd` extra, and internal for the same reason ../maml
+        # and ../sevenn are: matcalc is its only dependant.
+        dargs = pself.callPackage ../pkgs/dargs { };
+        deepmd-kit = pself.callPackage ../pkgs/deepmd-kit { };
+
+        # dpdata is deepmd-kit's too — its `dpa-adapt` extra, and its `test`
+        # one.  It is a format converter with a CLI of its own, so it is closer
+        # to a tool than the rest of this group, but deepmd-kit is still its
+        # only dependant here and it stops with the others.
+        #
+        # Two packages exist for dpdata's check phase alone.  `parmed` is a real
+        # library that nixpkgs lacks; `dpdata-plugin-test` is the entry-point
+        # fixture out of dpdata's own `tests/plugin/`, which has to be installed
+        # rather than imported — see its header for the ordering that makes that
+        # so, and for the `doCheck = false` bootstrap that cuts the cycle
+        # between the two.
+        dpdata = pself.callPackage ../pkgs/dpdata { };
+        dpdata-plugin-test = pself.callPackage ../pkgs/dpdata-plugin-test { };
+
+        # `ambertools` for parmed's check phase, from NixOS-QChem, which is the
+        # standing rule for a program that input carries.  nixpkgs has no
+        # spelling of it at all, so this is null on every path that does not
+        # compose `overlays.qchem` — the NUR path, ci.nix and flake.nix's own
+        # `pkgs'` included — and thirteen tests skip there.
+        #
+        # Deliberately **not** given a `checks` entry in ../flake.nix, unlike
+        # ../pkgs/fairchem-data-oc's packmol: NixOS-QChem builds AmberTools from
+        # a `requireFile` source that the user has to fetch from ambermd.org by
+        # hand, so a check would fail everywhere the tarball is absent.  See the
+        # `ambertools` argument in ../pkgs/parmed for the rest of that.
+        parmed = pself.callPackage ../pkgs/parmed {
+          ambertools = final.qchem.ambertools or null;
+        };
+
+        # ../fairchem-core's two gaps, both internal to it.  clusterscope is
+        # pinned to the exact version fairchem-core's `==` asks for rather than
+        # to its own latest — see the note at its `src`.
+        ase-db-backends = pself.callPackage ../pkgs/ase-db-backends { };
+        clusterscope = pself.callPackage ../pkgs/clusterscope { };
+        fairchem-core = pself.callPackage ../pkgs/fairchem-core { };
+
+        # The three sibling distributions `quacc[fairchem]` names beside
+        # fairchem-core, out of the same thirteen-package monorepo and each
+        # built from its own `packages/<name>/`.  They are structure and input
+        # generation for three of the datasets — catalysis, inorganic
+        # materials, molecules — rather than any part of the model machinery,
+        # so nothing but that one extra reaches them, and they stop here.
+        #
+        # `fairchem-data-oc` depends on fairchem-core; the other two do not, and
+        # nothing in fairchem-core depends on any of the three.  See
+        # ../pkgs/fairchem-data-omol for why `quacc` is deliberately missing
+        # from its own dependency list.
+        # `packmol` the same way ../pkgs/postopus takes `octopus`, and for the
+        # same reason: no single spelling resolves everywhere.  The difference
+        # is which way round the usual case falls — nixpkgs has octopus and so
+        # postopus almost always finds one, while nixpkgs has no packmol at all,
+        # so this is null unless the consumer has composed `overlays.qchem`.
+        # Two tests are deselected when it is; see the derivation.
+        fairchem-data-oc = pself.callPackage ../pkgs/fairchem-data-oc {
+          packmol = final.packmol or final.qchem.packmol or null;
+        };
+        fairchem-data-omat = pself.callPackage ../pkgs/fairchem-data-omat { };
+        fairchem-data-omol = pself.callPackage ../pkgs/fairchem-data-omol { };
+
+        # py-lmdb, pinned *down* to 1.7.3, which is the one place in this
+        # repository where a version bound turned out to mean exactly what it
+        # said.
+        #
+        # py-lmdb 2.0.0 added a process-wide registry of open environment paths
+        # and made a second `open()` of a registered path an error — commit
+        # 2b26c9f, "Prevent opening the same LMDB environment twice (#230)
+        # (#412)", 2026-03-12.  `git grep _open_env_paths` returns nothing at
+        # tags `py-lmdb_1.7.3` and `py-lmdb_1.8.1` and four hits at
+        # `py-lmdb_2.0.0`.
+        #
+        # Three independent projects here cap below it, and this repository had
+        # relaxed all three as if they were boilerplate:
+        #
+        #   ../pkgs/fairchem-core   lmdb >= 1.6.2, <= 1.7.3
+        #   ../pkgs/sevenn          lmdb < 2.0.0
+        #   ../pkgs/ase-db-backends no bound, but its own suite breaks the same way
+        #
+        # The cost of the relaxations was about 43 of fairchem-core's test
+        # failures — every `create_concat_dataset` failure is this, since a
+        # dataset and its splits are separate handles — and two whole test
+        # modules deselected in ase-db-backends.  1.7.3 satisfies all four
+        # consumers with no relaxation at all, so this pin *removes* three
+        # `pythonRelaxDeps` entries rather than adding anything.
+        #
+        # Guarded on the version, like the `monty` binding above, so that a
+        # channel already carrying a pre-2.0 lmdb is left alone.  This should be
+        # deleted when upstreams stop opening one path twice — see
+        # ../docs/TODO.md, which also carries the `close()` fix that
+        # ../pkgs/ase-db-backends applies for a related but separate bug.
+        lmdb =
+          if final.lib.versionOlder psuper.lmdb.version "2" then
+            psuper.lmdb
+          else
+            psuper.lmdb.overridePythonAttrs (_old: {
+              version = "1.7.3";
+              src = final.fetchFromGitHub {
+                owner = "jnwatson";
+                repo = "py-lmdb";
+                tag = "py-lmdb_1.7.3";
+                hash = "sha256-NNF3PROta1PRl+qzL2etKKx/+RbYoANleKi75Vg6Upw=";
+              };
+            });
+
+        # A fourth nixpkgs package repaired here rather than merely wrapped, and
+        # this one is broken for *every* consumer, not just ours: torchtnt
+        # 0.2.4's `utils/version.py` opens `import pkg_resources`, and the
+        # setuptools in the same package set is 83.0.0, which no longer ships
+        # it.  So `import torchtnt.framework` — which is the first thing
+        # ../pkgs/fairchem-core reaches — dies with `ModuleNotFoundError: No
+        # module named 'pkg_resources'`.
+        #
+        # This is the concrete form of the risk noted at fairchem-core's
+        # `pythonRelaxDeps`: upstream caps `setuptools < 81.0.0`, and that cap
+        # is not about fairchem's own code at all — it is holding pkg_resources
+        # in place for torchtnt.  Relaxing it is still right; the cap papers
+        # over a torchtnt bug rather than fixing one.
+        #
+        # The import has exactly one use, in the `else` arm of
+        # `if hasattr(torch, "__version__")` in `get_torch_version`.  Every
+        # torch in living memory has `__version__`, so the arm is unreachable in
+        # practice, but it is rewritten rather than deleted: `importlib.metadata`
+        # is the stdlib successor to `pkg_resources.get_distribution` and
+        # returns the same string, so the fallback keeps working if it is ever
+        # reached.
+        torchtnt = psuper.torchtnt.overridePythonAttrs (old: {
+          postPatch = (old.postPatch or "") + ''
+            substituteInPlace torchtnt/utils/version.py \
+              --replace-fail \
+                'import pkg_resources' \
+                'import importlib.metadata' \
+              --replace-fail \
+                'pkg_resources.get_distribution("torch").version' \
+                'importlib.metadata.version("torch")'
+          '';
+        });
+      })
     ];
 
+    # Not a Python package, so a plain top-level callPackage rather than a
+    # member of the extension above — the same arrangement as the chemtools
+    # overlay's `chemfiles`.  It is a pair of Fortran executables that pymatgen
+    # shells out to, and atomate2 takes it as a check input for that reason;
+    # see ../pkgs/enumlib.
+    enumlib = final.callPackage ../pkgs/enumlib { };
+
     # Keep in sync with the `inherit (py)` list in ../default.nix.
+    #
+    # `monty` is deliberately absent.  It is a replacement for a package
+    # nixpkgs already ships rather than something this repo publishes, and
+    # nixpkgs has no top-level `monty` to shadow; adding one would only give
+    # ci.nix another thing to build.  `pymatgen` and `pymatgen-core` are here
+    # for the opposite reason — they are the deliverable.
     inherit (final.python313Packages)
+      atomate2
       custodian
+      emmet-core
       fireworks
+      jobflow
+      jobflow-remote
+      lobsterpy
+      maggma
+      matcalc
+      matgl
+      matminer
+      mp-api
+      optimade
+      phono3py
+      pubchempy
+      pymatgen
+      pymatgen-analysis-alloys
+      pymatgen-analysis-defects
+      pymatgen-analysis-diffusion
+      pymatgen-core
+      pymatgen-io-validation
+      qtoolkit
+      quacc
+      redun
+      shakenbreak
+      vise
       ;
   };
 

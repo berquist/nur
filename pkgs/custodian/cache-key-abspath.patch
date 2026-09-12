@@ -1,0 +1,86 @@
+Key the vasp output caches on an absolute path.
+
+custodian.vasp.io.load_outcar and load_vasprun are wrapped in
+tracked_lru_cache, so the argument they are called with *is* the cache key.
+Every caller in custodian/vasp/handlers.py and custodian/vasp/validators.py
+builds that argument as os.path.join(directory, "OUTCAR"), and `directory`
+defaults to "./" throughout -- so the key is the constant string "./OUTCAR"
+no matter which directory the process is actually in.
+
+Anything that chdirs between two checks therefore gets the first directory's
+parsed output handed back for the second.  Custodian clears the cache after
+each run's checks, which hides this in production, but it is a real hazard for
+any caller that reuses a validator across directories, and it makes the
+library's behaviour depend on the process's cwd rather than on its arguments.
+
+tests/vasp/test_validators.py::TestVaspNpTMDValidator::test_check_and_correct
+is where it shows: the test walks npt_common, npt_nvt and npt_bad_vasp by
+os.chdir inside one test function.  npt_bad_vasp exists to carry an OUTCAR
+with no MDALGO line -- how a VASP built without -Dtbdyn gives itself away --
+but the third check receives npt_common's cached Outcar, reads MDALGO = 3 out
+of it, and reports the run as good:
+
+    assert handler.check()
+    E    assert False
+
+The autouse _clear_tracked_cache fixture is per-test, so it never fires
+between the three directories.
+
+Normalising in the public function does not work on its own, because the key
+is computed from the argument before the body runs.  So the caching moves to a
+private inner function and the public one resolves the path first, which fixes
+every call site at once and leaves both signatures and the returned objects
+unchanged.  os.path.abspath rather than realpath: this is meant to fix the
+cwd-relative collision, not to start collapsing distinct symlinks to one entry.
+
+tests/vasp/test_io.py keeps passing: it asserts that two calls with the same
+path return the identical object, and that exactly one function is registered
+in tracked_lru_cache.cached_functions -- both still hold, with the private
+function as the registered one.
+
+diff -ruN custodian-pristine/src/custodian/vasp/io.py custodian-patched/src/custodian/vasp/io.py
+--- a/src/custodian/vasp/io.py	2026-08-30 11:13:20.926323388 -0400
++++ b/src/custodian/vasp/io.py	2026-08-30 11:13:30.355478203 -0400
+@@ -1,11 +1,24 @@
+ """Helper functions for dealing with vasp files."""
+ 
++import os
++
+ from pymatgen.io.vasp.outputs import Outcar, Vasprun
+ 
+ from custodian.utils import tracked_lru_cache
+ 
+ 
+ @tracked_lru_cache
++def _load_vasprun(filepath, **vasprun_kwargs):
++    """Parse a vasprun.xml. Keyed on an absolute path; see load_vasprun."""
++    return Vasprun(filepath, **vasprun_kwargs)
++
++
++@tracked_lru_cache
++def _load_outcar(filepath):
++    """Parse an OUTCAR. Keyed on an absolute path; see load_outcar."""
++    return Outcar(filepath)
++
++
+ def load_vasprun(filepath, **vasprun_kwargs):
+     """
+     Load Vasprun object from file path.
+@@ -18,10 +31,9 @@
+     Returns:
+         The Vasprun object
+     """
+-    return Vasprun(filepath, **vasprun_kwargs)
++    return _load_vasprun(os.path.abspath(filepath), **vasprun_kwargs)
+ 
+ 
+-@tracked_lru_cache
+ def load_outcar(filepath):
+     """
+     Load Outcar object from file path.
+@@ -33,4 +45,4 @@
+     Returns:
+         The Vasprun object
+     """
+-    return Outcar(filepath)
++    return _load_outcar(os.path.abspath(filepath))

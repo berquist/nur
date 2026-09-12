@@ -91,12 +91,17 @@ buildPythonPackage (finalAttrs: {
     #     import numpy as np
     #   ModuleNotFoundError: No module named 'numpy'
     #
-    # monty imports numpy unconditionally at the top of json.py, but nixpkgs
-    # lists numpy only in monty's `optional-dependencies`, never in
-    # `dependencies`.  So every monty dependant that reaches serialization has
-    # to carry numpy itself.  That is a latent nixpkgs bug rather than ours;
-    # repairing monty here instead would change it for every consumer of this
-    # overlay, which is a bigger blast radius than the problem deserves.
+    # monty imports numpy unconditionally at the top of json.py, and on
+    # nixos-26.05 — monty 2025.3.3 — the nixpkgs derivation propagates only
+    # msgpack and ruamel-yaml, so every monty dependant that reaches
+    # serialization has to carry numpy itself.  A latent nixpkgs bug rather
+    # than ours, and repairing monty here would change it for every consumer of
+    # this overlay, a bigger blast radius than the problem deserves.
+    #
+    # Both unstable legs carry monty 2026.7.16, where nixpkgs propagates numpy
+    # and this line is redundant.  Keeping it costs nothing — numpy is already
+    # in that closure — and it is what holds the 26.05 leg up.  ../qtoolkit
+    # needs the same thing beside its own monty, for the same reason.
     numpy
     pymongo
     python-dateutil
@@ -123,6 +128,35 @@ buildPythonPackage (finalAttrs: {
       ++ mongomock;
   };
 
+  # No pytest-xdist in this list, and it has to stay that way.  Adding it is not
+  # inert: nixpkgs' pytest-xdist carries a setup hook of its own that appends
+  # `--numprocesses=$NIX_BUILD_CORES` to pytestFlags, so the dependency alone
+  # switches the suite to xdist's default `--dist load` across however many
+  # cores the builder has — 128 here, for 165 tests.
+  #
+  # FireWorks cannot survive that.  Three kinds of mutable state are shared by
+  # tests that `--dist load` puts in different processes:
+  #
+  #   the source tree     CompressDecompressArchiveDirTest chdirs into
+  #                       fireworks/user_objects/firetasks/tests and gzips every
+  #                       file in it, __init__.py included.  A worker importing
+  #                       that package meanwhile gets
+  #                         CollectError: ImportError while importing test
+  #                           module '.../firetasks/tests/__init__.py'
+  #                       which is where seven collection errors came from.
+  #   the build directory SerializationTest.setUp writes ./test.json and its
+  #                       tearDown removes it, so one worker deletes the file
+  #                       another just wrote: FileNotFoundError: 'test.json'.
+  #   the mock database   MONGOMOCK_SERVERSTORE_FILE below is read when a client
+  #                       is built and rewritten when it is finalised, so the
+  #                       workers race on one JSON file and read each other's
+  #                       launch ids and workflow states.
+  #
+  # Measured at `-n 16`, where the serial run is green: 15 failed, 1 error.
+  #
+  # `--dist loadfile` does keep it green, and buys nothing — 110.6s against
+  # 110.1s serial, because test_launchpad.py alone is 108s of the suite.  The
+  # runtime was never the scheduler; it was two tests.  See disabledTestPaths.
   nativeCheckInputs = [
     pytestCheckHook
   ]
@@ -156,7 +190,7 @@ buildPythonPackage (finalAttrs: {
   # `mongomock_persistence.MongoClient` and enables mongomock's gridfs
   # integration — which GRIDFS_FALLBACK_COLLECTION turns on by default.  That
   # took the run from 97 passed / 59 skipped / 20 failed in 17:06 to 157 passed
-  # / 9 skipped / 12 failed in 2:24; see pytestFlags below for what is left.
+  # / 9 skipped / 12 failed in 2:24; see disabledTestMarks below for the rest.
   #
   # It has to be exported before fireworks is first imported, which is why it
   # lives here rather than in an `env` attribute alongside a pytest flag.
@@ -216,6 +250,42 @@ buildPythonPackage (finalAttrs: {
   # Note it is silent about a mark that matches nothing, unlike disabledTestPaths
   # — so if this ever stops excluding anything, the run just gets longer.
   disabledTestMarks = [ "mongodb" ];
+
+  # Ninety of the suite's hundred and ten seconds, spent to reach two skips.
+  #
+  # WFLockTest launches a slow firework in a multiprocessing.Process and a fast
+  # one in this one, and the fast one's WaitWFLockTask polls the workflows
+  # collection for up to 20s waiting to see the lock the other process took.
+  # Under mongomock that other process is a fork carrying its own copy of an
+  # in-memory database, so nothing it writes is ever visible here: the poll
+  # times out, the task raises SkipTest("The WF wasn't locked"), the firework
+  # FIZZLEs, and the test's own escape hatch reads that back out of the stored
+  # stacktrace and turns it into
+  #
+  #   self.skipTest("The test didn't run correctly")
+  #
+  # Each test also spends its full 10s waiting for fw_id=1 to reach RUNNING —
+  # which for the same reason it never does — and then joins the 10s
+  # SlowAdditionTask.  45s apiece, twice, for no coverage whatsoever.
+  # Deselecting the pair takes the check phase from 110s to 20s, with 155
+  # passed either way.
+  #
+  # A real MongoDB would fix them, and a real MongoDB is exactly what the
+  # preCheck note above rules out.  Node ids rather than a marker because
+  # upstream marks neither — and unlike a bare path, the hook does not check
+  # that a `::` entry matches anything, so these go quiet if upstream renames
+  # them rather than aborting the way disabledTestPaths usually would.
+  disabledTestPaths = [
+    "fireworks/core/tests/test_launchpad.py::WFLockTest::test_fix_db_inconsistencies_completed"
+    "fireworks/core/tests/test_launchpad.py::WFLockTest::test_fix_db_inconsistencies_fizzled"
+  ];
+
+  # -rs so the remaining skips explain themselves in the build log instead of
+  # having to be rediscovered from the source.  Six survive the deselection
+  # above: the three AuthenticationTest cases that upstream's own _is_mongomock()
+  # turns off, and the three LaunchPadLostRunsDetectTest cases it gates on
+  # pymongo 3 or older, where nixpkgs carries 4.17.0.
+  pytestFlags = [ "-rs" ];
 
   # Several modules import `fw_tutorials.*`, which is a second top-level package
   # in this repository rather than a test fixture.  setup.py's bare
