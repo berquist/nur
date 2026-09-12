@@ -487,6 +487,13 @@ in
         # atomate2's own follow-on targets.
         pubchempy = pself.callPackage ../pkgs/pubchempy { };
         pymatgen-io-validation = pself.callPackage ../pkgs/pymatgen-io-validation { };
+
+        # The FHI-aims half of the same namespace, and the one piece pymatgen
+        # *shed* in the 2026 split rather than never having had — see
+        # ../pkgs/pymatgen-io-aims' header.  atomate2's `aims` extra is its
+        # only dependant here, and pyfhiaims is its only gap.  Both internal.
+        pymatgen-io-aims = pself.callPackage ../pkgs/pymatgen-io-aims { };
+        pyfhiaims = pself.callPackage ../pkgs/pyfhiaims { };
         pymatgen-analysis-alloys = pself.callPackage ../pkgs/pymatgen-analysis-alloys { };
         pymatgen-analysis-defects = pself.callPackage ../pkgs/pymatgen-analysis-defects { };
         pymatgen-analysis-diffusion = pself.callPackage ../pkgs/pymatgen-analysis-diffusion { };

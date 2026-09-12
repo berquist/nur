@@ -228,9 +228,36 @@ buildPythonPackage (finalAttrs: {
   # EMT, so deselecting the directory would cost two working modules to silence
   # six skips.  `-rsfE` below is what keeps those six visible.
   #
-  # The last two entries are a different kind of exclusion: they are *not*
+  # The first two entries are a different kind of exclusion: they are *not*
   # skipped, they run, in a second pytest process of their own.  See
   # `postCheck`.
+  #
+  # The three at the end are a Quantum ESPRESSO bug, and the only reason they
+  # are named individually rather than the whole module being dropped is that
+  # the other seven tests beside them pass.  ph.x dies with
+  #
+  #   At line 191 of file PHonon/PH/phq_summary.f90 (unit = 6, file = 'stdout')
+  #   Fortran runtime error: Missing comma between descriptors
+  #   (1x,"cryst.",3x,"s(",i2,") = (",3(i6,5x)            " )    f =( ",f10.7
+  #
+  # — a malformed FORMAT in QE 7.5, missing the comma after `3(i6,5x)`.
+  # gfortran parses a FORMAT at run time rather than compile time, so the file
+  # builds and the program dies only when that particular WRITE executes.  It
+  # executes when `phq_summary` lists a symmetry operation that has a
+  # **fractional translation**, at `verbosity = 'high'` — which is quacc's own
+  # default for `phonon_job`, so every one of these runs asks for it.
+  #
+  # That is the whole of why seven pass and three fail, and it is visible in
+  # one column of the test file: the seven use `bulk("Li")` and `bulk("Pt")`,
+  # which are bcc and fcc with one atom in the cell and symmorphic groups, so
+  # no operation has a fractional translation to print.  The three use
+  # `bulk("Si")` and `bulk("C")` — diamond, Fd-3m, non-symmorphic — and ph.x
+  # aborts partway through the listing, immediately after `isym = 2`.
+  #
+  # Deselected rather than patched because the fix belongs in nixpkgs, where
+  # Hydra would carry the rebuilt QE; patching it in ../../overlays would make
+  # every channel here compile Quantum ESPRESSO from source for a cosmetic
+  # defect in a verbose listing.  See ../../docs/TODO.md.
   disabledTestPaths = [
     "tests/core/atoms/test_defects.py"
     "tests/core/recipes/emt_recipes/test_emt_defect_recipes.py"
@@ -239,28 +266,39 @@ buildPythonPackage (finalAttrs: {
     "tests/core/recipes/torchsim_recipes"
     "tests/core/recipes/qchem_recipes/jenkins"
     "tests/core/recipes/vasp_recipes/jenkins"
+    "tests/core/recipes/espresso_recipes/test_phonons.py::test_phonon_calculation_si_spin_orbit"
+    "tests/core/recipes/espresso_recipes/test_phonons.py::test_phonon_induced_renormalization"
+    "tests/core/recipes/espresso_recipes/test_phonons.py::test_phonon_dvscf_q2r_inplace"
   ];
 
   # pytest-asyncio because `[tool.pytest.ini_options]` sets
   # `asyncio_mode = "auto"`; pytest-cov because `addopts` in the parent carries
   # coverage flags.
   #
-  # Four of the thirteen extras declared above, and they are the four whose
+  # Five of the thirteen extras declared above, and they are the five whose
   # tests run offline.  Each was already reachable from this repository and
-  # each was costing a silently skipped module:
+  # each was costing silently skipped tests:
   #
   #   defects   tests/core/atoms/test_defects.py,
   #             tests/core/recipes/emt_recipes/test_emt_defect_recipes.py
+  #   mp        20 tests in tests/core/recipes/vasp_recipes/mocked/
   #   phonons   tests/core/atoms/test_phonons.py,
   #             tests/core/recipes/emt_recipes/test_emt_phonons.py,
   #             tests/core/recipes/tblite_recipes/test_tblite_phonons.py
   #   sella     tests/core/runners/test_sella.py
   #   tblite    tests/core/recipes/tblite_recipes/ (already here)
   #
+  # `mp` is only ../atomate2, and it is the one entry here that is expensive
+  # rather than free: it makes this build wait on atomate2's own suite.  The 20
+  # tests it buys are the `mocked` VASP recipes that build an atomate2 flow —
+  # they skip with "atomate2 not installed" otherwise, and they mock the run
+  # like the rest of that directory, so nothing about VASP is involved.  There
+  # is no cycle: atomate2 depends on neither quacc nor anything that does.
+  #
   # `mlip` and `fairchem` are the two that stay out despite being packaged:
   # every test they unlock pulls a pretrained checkpoint over the network.
-  # `mp`, `jobflow`, `dask`, `parsl`, `prefect`, `ray` and `redun` unlock
-  # nothing under `tests/core` — the engine-adapter suites are `tests/dask`,
+  # `jobflow`, `dask`, `parsl`, `prefect`, `ray` and `redun` unlock nothing
+  # under `tests/core` — the engine-adapter suites are `tests/dask`,
   # `tests/parsl` and so on, outside upstream's `testpaths` entirely, and each
   # wants a live scheduler.
   #
@@ -280,6 +318,7 @@ buildPythonPackage (finalAttrs: {
     quantum-espresso
   ]
   ++ finalAttrs.passthru.optional-dependencies.defects
+  ++ finalAttrs.passthru.optional-dependencies.mp
   ++ finalAttrs.passthru.optional-dependencies.phonons
   ++ finalAttrs.passthru.optional-dependencies.sella
   ++ finalAttrs.passthru.optional-dependencies.tblite;

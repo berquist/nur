@@ -64,7 +64,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   `quacc[defects]` cluster's lower layers — `doped` and `pydefect` and `hiphive`,
   `trainstation` (hiPhive's one gap), `cmcrameri` and `matplotlib-label-lines` (doped's plotting,
   the latter pydefect's too) — `tensorpotential` (`matcalc[grace]`'s, and **the one unfree package here**;
-  see "Deferred packaging"), and `monty`, a
+  see "Deferred packaging"), `pymatgen-io-aims` (`atomate2[aims]`'s, the FHI-aims I/O that
+  upstream pymatgen *shed* in the 2026 split) with `pyfhiaims` under it, and `monty`, a
   backport that exists only because `pymatgen-core` needs a version no channel here ships yet.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
   upstream split it and the two layouts cannot coexist, `monty` on the legs that are behind,
@@ -333,11 +334,19 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Where does `enumlib`'s check get an expected answer, when upstream runs no tests? | `pkgs/enumlib/default.nix` (`checkPhase`) |
 | Why must `enumlib` be on atomate2's *PATH* rather than merely installed? | `pkgs/atomate2/default.nix` (`nativeCheckInputs`) |
 | Why do atomate2's cp2k, qchem, jdftx, lammps and aims suites need none of those programs? | `pkgs/atomate2/default.nix` (`enabledTestPaths`) |
+| Why does atomate2 relax a timestamp regex in one cp2k test, and what has `SOURCE_DATE_EPOCH` to do with it? | `pkgs/atomate2/default.nix` (the second hunk of `postPatch`) |
+| Why does `pyfhiaims` rewrite a build-system pin instead of relaxing it? | `pkgs/pyfhiaims/default.nix` (`postPatch`), `pkgs/aiida-gromacs/default.nix` |
+| Why does atomate2 set `HOME` in `preBuild` when nothing in its import check needs one? | `pkgs/atomate2/default.nix` (`preBuild`) |
+| Why is `pymatgen.io.aims` a separate distribution, and who still has to know that? | `pkgs/pymatgen-io-aims/default.nix` (the header) |
+| Why does `pyfhiaims` need a `default-version` when its `default-tag` is right there? | `pkgs/pyfhiaims/default.nix` (`postPatch`) |
+| Why does `pymatgen-io-aims` export `PMG_TEST_FILES_DIR` at its own `tests/files`? | `pkgs/pymatgen-io-aims/default.nix` (`preCheck`), `pkgs/pymatgen-core/default.nix` |
 | Why is atomate2 the second package to take a defaulted `packmol`, and which one test wants it? | `pkgs/atomate2/default.nix` (the `packmol` argument), `flake.nix` (`atomate2WithPackmol`) |
 | Why does quacc run eight `*_recipes` suites with no program installed, and which one is real? | `pkgs/quacc/default.nix` (`enabledTestPaths`) |
 | Which four of quacc's thirteen extras are check inputs, and why not the other nine? | `pkgs/quacc/default.nix` (`nativeCheckInputs`) |
 | Why does quacc patch `mpirun` out of the espresso conftest? | `pkgs/quacc/default.nix` (`postPatch`) |
 | Why is `dftb_recipes` deselected rather than left to skip, when nothing provides `dftb+`? | `pkgs/quacc/default.nix` (`disabledTestPaths`), `docs/TODO.md` |
+| Why does quacc run two of its own test modules in a second pytest process? | `pkgs/quacc/default.nix` (`postCheck`), `docs/TODO.md` |
+| Why do three quacc phonon tests fail on Si and C but not on Li or Pt? | `pkgs/quacc/default.nix` (the last note above `disabledTestPaths`), `docs/TODO.md` |
 | Why does `vise` delete two `distutils` imports rather than add setuptools at runtime? | `pkgs/vise/default.nix` (`postPatch`) |
 | Why does `vise` declare nine dependencies its own requirements.txt does not? | `pkgs/vise/default.nix` (`dependencies`) |
 | Why is `vise` pinned 827 commits past its tag, and are its POTCARs a licensing problem? | `pkgs/vise/default.nix` (the `src` note, `enabledTestPaths`) |
@@ -583,6 +592,8 @@ where the survey stands:
 | `pymatgen-core` | everything left | **done**; the split below |
 | `pymatgen` | `emmet-core`, `atomate2` | **done**; the other half of the same split |
 | `pymatgen-io-validation` | `emmet-core` | **done**; `pkgs/pymatgen-io-validation`, re-exported like `pubchempy` for the same reason |
+| `pymatgen-io-aims` | `atomate2[aims]`, its `tests/aims` | **done**; `pkgs/pymatgen-io-aims`, internal — the FHI-aims I/O pymatgen *shed* in the 2026 split, not an add-on that was always separate. GitLab, v0.2.1, the repo's only tag |
+| `pyfhiaims` | `pymatgen-io-aims` — its only gap | **done**; `pkgs/pyfhiaims`, internal. GitLab, and with **no tags at all**, so `-unstable-`; `1.1.1` comes from `__init__.py`, which is what satisfies the dependant's `>=1.1.0` |
 | `mp-pyrho` | `pymatgen-analysis-defects` | **done**; `pkgs/mp-pyrho`, internal (dist `mp-pyrho`, import `pyrho`) |
 | `pymatgen-analysis-alloys` | `emmet-core` tests, atomate2 `alloys` | **done**; `pkgs/pymatgen-analysis-alloys` |
 | `pymatgen-analysis-defects` | `emmet-core` tests, atomate2 `defects` | **done**; `pkgs/pymatgen-analysis-defects` |
@@ -592,7 +603,7 @@ where the survey stands:
 | `mendeleev` | `lobsterpy[featurizer]` | **done**; `pkgs/mendeleev`, internal — element data from a bundled SQLite db |
 | `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
-| `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `aims`, `amset`. `tests/{vasp,ase,lobster,common,aims,cp2k,jdftx,lammps,qchem}` run in full — the last six mock the run, so none of them needs the program its name mentions — and `test_magnetic_orderings` is included since `enumlib` landed |
+| `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `amset`. `tests/{vasp,ase,lobster,common,aims,cp2k,jdftx,lammps,qchem}` run in full — the last six mock the run, so none of them needs the program its name mentions — and `test_magnetic_orderings` is included since `enumlib` landed |
 | `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3` (phonopy-4 channels only), `benchmark`, `grace` (unfree — see `tensorpotential` below), `maml`, `matgl`, `mace` (unstable only), `sevennet`, `deepmd`, `fairchem`. Missing: none but `orb`/`mattersim`/`petmad`, which are NVIDIA-blocked (see below) |
 | `tensorpotential` | `matcalc[grace]` | **done**; `pkgs/tensorpotential` (repo `ICAMS/grace-tensorpotential`) — **the one unfree package here.** Academic Software Licence: GPLv2 with a non-commercial clause, "not an open-source licence" by its own preamble. Reachable as `python313Packages.tensorpotential` only, deliberately not a top-level attribute — see `ci.nix` and the overlay binding |
 | `mp-api` | `maml`, atomate2 `mp` | **done**; `pkgs/mp-api` — `doCheck = false` (every test drives a live MPRester). Dist `mp-api`, import `mp_api` |
@@ -608,7 +619,7 @@ where the survey stands:
 | `fairchem-data-omol` | `quacc[fairchem]` | **done**; `pkgs/fairchem-data-omol`, internal — ORCA input generation for OMol25. No tests exist upstream for this distribution, hence `doCheck = false`. Three undeclared module-scope imports added; `quacc` and `psutil`, which `orca/recipes.py` also imports, are deliberately *not* added — that is the other half of the `quacc[fairchem]` cycle |
 | `fairchem-data-omat` | `quacc[fairchem]` | **done**; `pkgs/fairchem-data-omat`, internal — OMat24's VASP input set and MP-style corrections. `pymatgen` is its whole dependency list and for once that is also its whole import list. `tests/data/omat` runs; no POTCARs needed |
 | `fairchem-data-oc` | `quacc[fairchem]` | **done**; `pkgs/fairchem-data-oc`, internal — OC20 adsorbate/slab generation. The awkward one of the three: pinned past its 2025-08 tag for a year of numpy/pymatgen catch-up, it takes `fairchem-core` (undeclared, module-scope, unguarded), and the 36 MB bulk database it is built around is a `fetchurl` installed into the wheel because upstream downloads it on first use. Six of its seven test modules would be dead without that; 30 of 34 tests pass, two xfail on a known pymatgen slab bug, and the last two want `packmol`, which **nixpkgs does not carry** — see the `octopus`-shaped defaulted argument |
-| `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `defects`, `fairchem`, `jobflow`, `mp`, `mlip`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `torchsim` alone, and that is NVIDIA-blocked rather than unpackaged. Tests: the whole of upstream's `tests/core`, less `dftb_recipes`, `psi4_recipes`, `torchsim_recipes` and the two `jenkins` directories — `defects`, `phonons`, `sella` and `tblite` are check inputs, and so are `openbabel-bindings` and a real `quantum-espresso` |
+| `quacc` | atomate2 follow-on | **done**; `pkgs/quacc`. Core `dependencies` all satisfied. Extras done: `dask`, `defects`, `fairchem`, `jobflow`, `mp`, `mlip`, `parsl`, `phonons`, `prefect`, `ray`, `redun`, `sella`, `tblite`. Missing: `torchsim` alone, and that is NVIDIA-blocked rather than unpackaged. Tests: the whole of upstream's `tests/core`, less `dftb_recipes`, `psi4_recipes`, `torchsim_recipes`, the two `jenkins` directories and three phonon tests that hit a QE bug — `defects`, `mp`, `phonons`, `sella` and `tblite` are check inputs, and so are `openbabel-bindings` and a real `quantum-espresso`. Two modules run in a second pytest process; see `postCheck` |
 | `shakenbreak` | `quacc[defects]` — the chain's last target | **done**; `pkgs/shakenbreak`, and with it the whole `defects` cluster: `doped`, `pydefect`, `vise`, `hiphive`, `trainstation`, `cmcrameri`, `matplotlib-label-lines`. It is the half of the `doped` cycle that declares the other; see `pkgs/doped` for why the cut goes that way |
 | `matminer` | `matcalc[benchmark]` | **done**; `pkgs/matminer` — `tests/{featurizers,utils}` only, the data-retrieval suites hit external APIs |
 | `redun` | `quacc[redun]` | **done**; `pkgs/redun` — `doCheck = false` (AWS-executor tests), `fancycompleter` removed |

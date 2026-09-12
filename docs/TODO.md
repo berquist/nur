@@ -3,6 +3,45 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
+## Fix Quantum ESPRESSO's `phq_summary.f90` FORMAT, in nixpkgs and upstream
+
+**Want:** the three `pkgs/quacc` espresso tests currently in `disabledTestPaths` running again —
+`test_phonon_calculation_si_spin_orbit`, `test_phonon_induced_renormalization`,
+`test_phonon_dvscf_q2r_inplace`.
+
+**The bug is one missing comma, in QE 7.5.** `ph.x` aborts with:
+
+```
+At line 191 of file PHonon/PH/phq_summary.f90 (unit = 6, file = 'stdout')
+Fortran runtime error: Missing comma between descriptors
+(1x,"cryst.",3x,"s(",i2,") = (",3(i6,5x)                     " )    f =( ",f10.7
+```
+
+There is no comma between `3(i6,5x)` and the `" )    f =( "` literal. gfortran parses a FORMAT
+at *run* time, so the file compiles and the program dies only when that WRITE executes — which is
+when `phq_summary` prints a symmetry operation carrying a **fractional translation**, at
+`verbosity = 'high'`.
+
+**Why seven of quacc's ten phonon tests pass.** The passing ones use `bulk("Li")` and
+`bulk("Pt")` — bcc and fcc, one atom per cell, symmorphic, so no operation has a fractional
+translation to print. The three failing ones use `bulk("Si")` and `bulk("C")`: diamond, Fd-3m,
+non-symmorphic. `ph.x` gets as far as `isym = 2` and stops. `verbosity = 'high'` is quacc's own
+default for `phonon_job`, not something the tests choose, so there is nothing to turn off.
+
+**Two places to send it, and the order matters.** Upstream QE first, since it is their defect;
+nixpkgs second, as a `patches` entry on `quantum-espresso` so Hydra carries the rebuilt package.
+Doing it in `overlays/default.nix` here instead would make every channel compile Quantum ESPRESSO
+from source — half an hour a leg, uncached — to fix the formatting of a verbose listing, which is
+why `pkgs/quacc` deselects instead.
+
+**Not yet read:** the statement itself. The diagnosis above is from the runtime error, which
+names the file, the line and the format text, but nobody has opened
+`PHonon/PH/phq_summary.f90` — the nixpkgs source was not in the store when this was written.
+Do that before writing the patch; the fix is almost certainly `3(i6,5x),` but "almost certainly"
+is not how a patch should be written. Also worth checking whether QE's own `qe-7.5` branch has
+already fixed it, since conda-forge's `qe=7.5` — which quacc's CI installs and which evidently
+does not hit this — may simply be a later commit.
+
 ## Report doped's `get_symmetry_operations` cache to upstream
 
 **Want:** `doped/utils/efficiency.py` fixed, so `pkgs/quacc` can drop the second pytest process
@@ -44,27 +83,6 @@ no single thing to undo.
 and a pymatgen-heavy suite. `pkgs/doped` and `pkgs/shakenbreak` are self-consistent, and
 `pkgs/atomate2`'s `defects` extra is `pymatgen-analysis-defects` without shakenbreak, so quacc
 looks like the only case — but that was not searched for exhaustively.
-
-## Package `pymatgen-io-aims`
-
-**Want:** `pymatgen.io.aims` importable, which turns on `pkgs/atomate2`'s `tests/aims` (22 tests)
-and lets its `aims` extra be declared.
-
-pymatgen's 2026 split moved FHI-aims I/O *out* of the core distribution, alongside Fleur. The
-note at the end of `src/pymatgen/io/registry.py` in `pymatgen-core` says so plainly —
-"`pymatgen-io-fleur` and `pymatgen-io-aims` live outside pymatgen-core" — and keeps
-compatibility shims that import `pymatgen.io.aims.inputs` lazily. atomate2 names it as
-`pymatgen-io-aims>=0.0.5` in its `aims` extra.
-
-Nothing here suggests it is hard: it is a namespace package under `pymatgen/io/aims/`, the same
-PEP 420 arrangement that already lets `pymatgen-core`, `pymatgen` and `pymatgen-io-validation`
-share the `pymatgen/` tree — see the header of `pkgs/pymatgen-core/default.nix`. Its
-dependencies have not been read yet, which per the rest of this file is exactly the step not to
-skip.
-
-`tests/aims` is excluded from `pkgs/atomate2` until then, and the note there records why. Note
-that the exclusion is *not* about FHI-aims the program: that conftest mocks the run, like the
-other five suites beside it.
 
 ## The QCArchive family runs no tests at all
 
