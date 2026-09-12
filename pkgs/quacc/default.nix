@@ -221,12 +221,14 @@ buildPythonPackage (finalAttrs: {
   # `which(...CMD)` and both skipping cleanly, but there is no path on which
   # this repository can supply either.
   #
-  # `mlip_recipes` is deliberately *not* here.  Six of its eight modules
-  # `importorskip("torch")` or ask for matcalc, matgl, fairchem or ray and
-  # would download a pretrained checkpoint if they had them — but `test_io.py`
-  # and `test_rootstock_recipes.py` stub the calculator out entirely and run on
-  # EMT, so deselecting the directory would cost two working modules to silence
-  # six skips.  `-rsfE` below is what keeps those six visible.
+  # `mlip_recipes` is deliberately *not* here.  Six of its eight modules end up
+  # collecting nothing — they want matcalc, matgl or ray, or a Hugging Face
+  # token, and would download a pretrained checkpoint if they had them — but
+  # `test_io.py` and `test_rootstock_recipes.py` stub the calculator out
+  # entirely and run on EMT, so deselecting the directory would cost two
+  # working modules to silence six skips.  `-rsfE` below is what keeps those
+  # six visible, and `nativeCheckInputs` has the account of why torch being
+  # present does not change the outcome.
   #
   # The first two entries are a different kind of exclusion: they are *not*
   # skipped, they run, in a second pytest process of their own.  See
@@ -275,12 +277,15 @@ buildPythonPackage (finalAttrs: {
   # `asyncio_mode = "auto"`; pytest-cov because `addopts` in the parent carries
   # coverage flags.
   #
-  # Five of the thirteen extras declared above, and they are the five whose
+  # Six of the thirteen extras declared above, and they are the six whose
   # tests run offline.  Each was already reachable from this repository and
   # each was costing silently skipped tests:
   #
   #   defects   tests/core/atoms/test_defects.py,
   #             tests/core/recipes/emt_recipes/test_emt_defect_recipes.py
+  #   fairchem  orca_recipes::test_fairchem_omol,
+  #             vasp_recipes/mocked::test_fairchem_omat,
+  #             vasp_recipes/mocked::test_fairchem_oc20
   #   mp        20 tests in tests/core/recipes/vasp_recipes/mocked/
   #   phonons   tests/core/atoms/test_phonons.py,
   #             tests/core/recipes/emt_recipes/test_emt_phonons.py,
@@ -288,19 +293,53 @@ buildPythonPackage (finalAttrs: {
   #   sella     tests/core/runners/test_sella.py
   #   tblite    tests/core/recipes/tblite_recipes/ (already here)
   #
-  # `mp` is only ../atomate2, and it is the one entry here that is expensive
-  # rather than free: it makes this build wait on atomate2's own suite.  The 20
-  # tests it buys are the `mocked` VASP recipes that build an atomate2 flow —
-  # they skip with "atomate2 not installed" otherwise, and they mock the run
-  # like the rest of that directory, so nothing about VASP is involved.  There
-  # is no cycle: atomate2 depends on neither quacc nor anything that does.
+  # `mp` is only ../atomate2, and it makes this build wait on atomate2's own
+  # suite.  The 20 tests it buys are the `mocked` VASP recipes that build an
+  # atomate2 flow — they skip with "atomate2 not installed" otherwise, and they
+  # mock the run like the rest of that directory, so nothing about VASP is
+  # involved.  There is no cycle: atomate2 depends on neither quacc nor
+  # anything that does.
   #
-  # `mlip` and `fairchem` are the two that stay out despite being packaged:
-  # every test they unlock pulls a pretrained checkpoint over the network.
-  # `jobflow`, `dask`, `parsl`, `prefect`, `ray` and `redun` unlock nothing
-  # under `tests/core` — the engine-adapter suites are `tests/dask`,
-  # `tests/parsl` and so on, outside upstream's `testpaths` entirely, and each
-  # wants a live scheduler.
+  # **`fairchem` is here despite the checkpoints, and the distinction is worth
+  # keeping straight.**  The extra is four packages, and its three tests want
+  # only the *data* ones — ../fairchem-data-omol generates an ORCA input and
+  # the two `mocked` VASP tests generate parameter dicts, all three asserting
+  # on the generated input and running nothing.  No model is loaded and no
+  # network is touched.  ../fairchem-core comes along because the extra names
+  # it, and with it torch, which is the real cost of this line: a torch-sized
+  # closure on quacc's check inputs for three tests.  Two things make it pay
+  # anyway — it is also the only thing in this repository that builds
+  # fairchem-core, the three data distributions, clusterscope and
+  # ase-db-backends at all (they are internal, and `ci.nix` does not descend
+  # into `python313Packages`; see the standing item in ../../docs/TODO.md),
+  # and torch arriving does *not* wake the checkpoint tests.
+  #
+  # That last point is the one to check before touching this.  Four
+  # `mlip_recipes` modules `importorskip("torch")` and would now get past it,
+  # but each then builds a `libraries` list from `find_spec("matcalc")` and
+  # `find_spec("matgl")` — absent, because `mlip` is not here — and appends
+  # `"fairchem"` only when `huggingface_hub`'s `get_token()` returns one, which
+  # a build has no way to have.  `libraries` stays empty,
+  # `@pytest.mark.parametrize("library", [])` collects nothing, and pytest's
+  # default `empty_parameter_set_mark` reports a skip.  `test_fairchem_ray_serve`
+  # says so itself, in as many words: "HF_TOKEN required".
+  #
+  # So `mlip` is the one extra that stays out despite being packaged, and it is
+  # matcalc[matgl] and rootstock.  **The eight `libraries`-parametrised skips
+  # are the reason it has to stay out rather than a cost of doing so**: each of
+  # those tests calls `matcalc.load_fp(name="TensorNet-PES-MatPES-PBE-2025.2")`
+  # or similar, which resolves a foundation-potential name over the network, so
+  # adding the extra would convert eight quiet skips into eight failures rather
+  # than eight tests.  ../matcalc and ../matgl are `doCheck = false` for the
+  # same reason.  It is fixable — matgl will load a model from a local
+  # directory of three files, so the weights could be a `fetchurl` the way
+  # ../fairchem-data-oc's bulk database is — and that is written up in
+  # ../../docs/TODO.md.
+  #
+  # `jobflow`, `dask`, `parsl`, `prefect`,
+  # `ray` and `redun` unlock nothing under `tests/core` — the engine-adapter
+  # suites are `tests/dask`, `tests/parsl` and so on, outside upstream's
+  # `testpaths` entirely, and each wants a live scheduler.
   #
   # openbabel-bindings is not an extra of quacc's at all.  Five tests under
   # `tests/core/calculators/qchem` gate on `find_spec("openbabel")`, upstream's
@@ -318,6 +357,7 @@ buildPythonPackage (finalAttrs: {
     quantum-espresso
   ]
   ++ finalAttrs.passthru.optional-dependencies.defects
+  ++ finalAttrs.passthru.optional-dependencies.fairchem
   ++ finalAttrs.passthru.optional-dependencies.mp
   ++ finalAttrs.passthru.optional-dependencies.phonons
   ++ finalAttrs.passthru.optional-dependencies.sella
@@ -370,10 +410,13 @@ buildPythonPackage (finalAttrs: {
 
   # `-rsfE` because most of what this suite declines to run, it declines by
   # skipping rather than by being deselected, and a skip is indistinguishable
-  # from a pass in a build log.  Six `mlip_recipes` modules are the whole of
-  # the standing set on Linux — the `skipif os.name == "nt"` cases scattered
+  # from a pass in a build log.  The six `mlip_recipes` modules are the whole
+  # of the standing set on Linux — the `skipif os.name == "nt"` cases scattered
   # through `utils` and `wflow` all run here — so anything else appearing in
   # that report means an input this derivation thinks it has did not arrive.
+  # Note that four of the six report one skip per test function rather than one
+  # for the module, because they are collected now and parametrised over an
+  # empty `libraries`; see `nativeCheckInputs`.
   #
   # Not a bare `-rs`, and the difference matters: pytest's `-r` *replaces* the
   # default report characters instead of adding to them, and the default is

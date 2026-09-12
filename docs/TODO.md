@@ -3,6 +3,65 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
+## Bundle a matgl foundation potential, and turn eight skips into tests
+
+**Want:** one pretrained matgl model available offline, so `pkgs/quacc` can take the `mlip` extra
+as a check input, and so `pkgs/matcalc` and `pkgs/matgl` can stop being `doCheck = false`.
+
+**What is skipped today, and it is the last cluster of skips quacc has.** With `fairchem` now a
+check input, ten skips remain and all ten are `tests/core/recipes/mlip_recipes`:
+
+    test_phonon_recipes.py      1   could not import 'matcalc'
+    test_core_recipes.py        3   got empty parameter set for (library)
+    test_elastic_recipes.py     1   got empty parameter set for (library)
+    test_md_recipes.py          4   got empty parameter set for (library)
+    test_fairchem_ray_serve.py  1   HF_TOKEN required
+
+The first is a plain `importorskip`. The next eight are the interesting ones: those modules build
+a `libraries` list from `find_spec("matcalc") and find_spec("matgl")`, and `parametrize` over it,
+so an absent matcalc collects nothing rather than skipping loudly. **Adding the `mlip` extra
+without the weights would turn all nine into failures**, not passes — every one of them calls
+`matcalc.load_fp(name=...)` with a foundation-potential name such as
+`TensorNet-PES-MatPES-PBE-2025.2`, and that resolves over the network.
+
+**The mechanism that makes this feasible is already in matgl, and it is worth writing down
+because it is easy to miss.** `_get_file_paths` in `matgl/utils/io.py` checks for a local
+directory *before* it reaches Hugging Face:
+
+```python
+_MODEL_FILES = ("model.pt", "state.pt", "model.json")
+
+if all((path / fn).exists() for fn in fnames):
+    return {fn: path / fn for fn in fnames}
+```
+
+So a model is three files in a directory, and matgl will take them from disk. A bare name with no
+`/` is what sends it to `hf_hub_download` under the `materialyze` org instead.
+
+**Two shapes this could take**, and the second is the one that keeps the tests honest:
+
+1. *Fetch the three files and pass a path.* A `fetchurl` each, or one `fetchzip`, and a patch to
+   the quacc tests replacing the model name with the store path. Simple, and it stops testing
+   name resolution.
+2. *Pre-populate a Hugging Face cache and set `HF_HUB_OFFLINE=1`.* `_download_from_hf_hub` takes
+   `cache_dir`, defaulting to `MATGL_CACHE`, so pointing that at a store path with the right
+   `models--materialyze--<name>/snapshots/<sha>/` layout would let the unmodified test run. More
+   faithful, more fiddly, and the snapshot sha has to be pinned.
+
+**Three things to settle first**, none of them packaging:
+
+1. The licence on the weights. MatPES and the matgl models are published under permissive terms
+   as far as anyone here has looked, which is not far enough to put in a `meta.license`.
+2. The size. matgl foundation potentials are megabytes rather than gigabytes, which is what makes
+   this worth considering at all — compare the 36 MB `fetchurl` in `pkgs/fairchem-data-oc`, which
+   is the precedent for the whole idea.
+3. Whether one model covers all nine tests. `test_phonon_recipes.py` names
+   `TensorNet-PES-MatPES-PBE-2025.2` explicitly; the parametrised ones may ask for others.
+
+`pkgs/matcalc` and `pkgs/matgl` are the larger prize. Both are `doCheck = false` for exactly this
+reason, and `pkgs/sevenn` is the standing warning about what a package with no check phase is
+worth — see "Build the internal packages that nothing else builds" below.
+
 ## Fix Quantum ESPRESSO's `phq_summary.f90` FORMAT, in nixpkgs and upstream
 
 **Want:** the three `pkgs/quacc` espresso tests currently in `disabledTestPaths` running again —
