@@ -358,6 +358,15 @@
             else
               null;
 
+          # The same shape again, for atomate2's one packmol-gated test —
+          # `tests/common/jobs/test_mpmorph.py::test_packmol_job`, which packs
+          # an amorphous box through `MPMorphMDMaker`.  Unlike fairchem-data-oc
+          # this package *is* built elsewhere (it is a top-level attribute, so
+          # ci.nix takes it), and the override buys exactly the one test; the
+          # rest of `tests/common` runs on every path.
+          atomate2WithPackmol =
+            if packmol != null then pkgs'.python313Packages.atomate2.override { inherit packmol; } else null;
+
           # ...and the same shape for AmberTools, which thirteen of pkgs/parmed's
           # tests gate on and which nixpkgs has no spelling of.
           #
@@ -543,6 +552,10 @@
           # Likewise NixOS-QChem-only:
           #   nix build .#checks.x86_64-linux.fairchem-data-oc
           #
+          # atomate2 with the same packmol, for the one `tests/common` test
+          # that gates on it.  Also NixOS-QChem-only:
+          #   nix build .#checks.x86_64-linux.atomate2
+          #
           # AiiDA VM tests.  The first six need only nixpkgs -- the aiida-shell
           # one builds xtb, which is lib.platforms.linux like the VMs themselves.
           # The CP2K plugin round trip additionally needs a CP2K, whose nixpkgs
@@ -642,6 +655,9 @@
           }
           // lib.optionalAttrs (fairchemDataOc != null) {
             fairchem-data-oc = fairchemDataOc;
+          }
+          // lib.optionalAttrs (atomate2WithPackmol != null) {
+            atomate2 = atomate2WithPackmol;
           };
         };
     };

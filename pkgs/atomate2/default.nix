@@ -41,6 +41,16 @@
   pytest-xdist,
   enumlib,
   fireworks,
+
+  # packmol, for the one test in `tests/common/jobs/test_mpmorph.py` that gates
+  # on `which("packmol")` — `MPMorphMDMaker` shells out to it to pack an
+  # amorphous box.  Defaulted and resolved in ../../overlays/default.nix
+  # exactly as ../fairchem-data-oc's is, for the same two reasons: nixpkgs has
+  # no packmol at all, and `overlays/` is imported without flakes so it cannot
+  # reach the `nixos-qchem` input that does.  See "Reusing NixOS-QChem" in
+  # ../../AGENTS.md, and `checks.atomate2` in ../../flake.nix, which is the one
+  # place this repository builds atomate2 with it.
+  packmol ? null,
 }:
 
 # atomate2 — the library of Materials Project workflows, and the near-term
@@ -124,18 +134,50 @@ buildPythonPackage (finalAttrs: {
     approxneb = [ pymatgen-analysis-diffusion ];
   };
 
-  # First round: the workflow families whose code and test dependencies are all
-  # present.  `tests/vasp` is the core and mocks VASP execution against 340 MB
-  # of reference data — and its flow tests reach into the phonon, defect,
+  # `tests/vasp` is the core and mocks VASP execution against 340 MB of
+  # reference data — and its flow tests reach into the phonon, defect,
   # approx-NEB, electrode and lobster workflows, so all the extras above are
-  # check inputs.  The rest — `tests/common` (cclib, icet),
-  # `tests/forcefields`, `tests/openff_md`, `tests/torchsim`, `tests/abinit`,
-  # `tests/aims`, `tests/cp2k`, `tests/qchem`, `tests/jdftx`, `tests/lammps` —
-  # wait on packages no channel here carries.
+  # check inputs.
+  #
+  # The five that follow it were held back on the strength of the programs
+  # their names mention, which was the wrong question to ask: **every one of
+  # them mocks the run**, in the same `fake_run_*` shape `tests/vasp`
+  # established, and between them they import nothing outside atomate2's own
+  # dependency set and never call `shutil.which`.  That is 98 tests that were
+  # being skipped by omission.
+  #
+  # `tests/aims` is the sixth of that group and the one exception, though not
+  # for the reason the old comment gave: its conftest is explicit that it mocks
+  # FHI-aims too (a `mock_aims` fixture, and `--generate-test-data` to run the
+  # real thing).  What it needs is Python — `pymatgen.io.aims`, which upstream
+  # moved *out* of pymatgen when it split in 2026.  It is now a distribution of
+  # its own, `pymatgen-io-aims`, alongside `pymatgen-io-fleur`; see the note at
+  # the end of `pymatgen/io/registry.py` in `pymatgen-core`, which carries
+  # compatibility shims for both.  atomate2 names it in an `aims` extra this
+  # derivation does not declare, so collecting `tests/aims/conftest.py` fails
+  # outright with `ModuleNotFoundError: No module named 'pymatgen.io.aims'`.
+  # Packaging it is the whole of the work; see ../../docs/TODO.md.
+  #
+  # `tests/common` was written off here as needing cclib and icet, and needs
+  # neither to be worth running: its one cclib module carries an unconditional
+  # `@pytest.mark.skip(reason="cclib is not working in CI")` upstream, and icet
+  # gates two SQS tests out of 37.  What it does have is
+  # `test_mpmorph.py::test_packmol_job`, on `which("packmol")` — see the
+  # `packmol` argument above.
+  #
+  # Still out, and genuinely so: `tests/forcefields` (torch, plus chgnet/mace
+  # model weights), `tests/openff_md` and `tests/openmm_md` (the openff stack,
+  # which is conda-first — see ../../AGENTS.md), `tests/torchsim` and
+  # `tests/abinit` (torch-sim and abipy, neither packaged).
   enabledTestPaths = [
     "tests/vasp"
     "tests/ase"
     "tests/lobster"
+    "tests/common"
+    "tests/cp2k"
+    "tests/jdftx"
+    "tests/lammps"
+    "tests/qchem"
   ];
 
   # pytest-cov because `[tool.pytest.ini_options] addopts` carries
@@ -155,7 +197,21 @@ buildPythonPackage (finalAttrs: {
     enumlib
     fireworks
   ]
+  ++ lib.optional (packmol != null) packmol
   ++ lib.concatLists (builtins.attrValues finalAttrs.passthru.optional-dependencies);
+
+  # `-rsfE`, so that what this suite declines to run says so in the build log.
+  # Two icet SQS cases and one unconditionally skipped cclib module are the
+  # standing set, plus `test_packmol_job` wherever `packmol` above came back
+  # null; anything else in that report is an input that did not arrive.
+  #
+  # `f` and `E` are not decoration: pytest's `-r` *replaces* the default report
+  # characters rather than adding to them, and the default is `fE`.  A bare
+  # `-rs` therefore buys the skip list at the cost of the failure list, which
+  # is how the first run of this change reported four failures and named none
+  # of them.  ../parmed passes `-rsfE` for exactly this reason; ../fireworks'
+  # `-rs` predates the discovery.
+  pytestFlags = [ "-rsfE" ];
 
   pythonImportsCheck = [
     "atomate2"

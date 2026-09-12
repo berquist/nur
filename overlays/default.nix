@@ -497,7 +497,13 @@ in
         # The materials chain's near-term target — its full `dependencies` set
         # is now satisfied.  Optional extras that need unpackaged code (chgnet,
         # abipy, openff, torch-sim, mp-api) are left out; see ../pkgs/atomate2.
-        atomate2 = pself.callPackage ../pkgs/atomate2 { };
+        #
+        # `packmol` the same way `fairchem-data-oc` below takes it, and with
+        # the same consequence: null everywhere `overlays.qchem` is not
+        # composed, and one `tests/common` test skipping there.
+        atomate2 = pself.callPackage ../pkgs/atomate2 {
+          packmol = final.packmol or final.qchem.packmol or null;
+        };
 
         # atomate2's two follow-on targets.  matcalc runs materials-property
         # calculations on an ML potential; quacc is a workflow engine beside

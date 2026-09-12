@@ -3,6 +3,139 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
+## Report doped's `get_symmetry_operations` cache to upstream
+
+**Want:** `doped/utils/efficiency.py` fixed, so `pkgs/quacc` can drop the second pytest process
+in its `postCheck` and run `tests/core/atoms/test_defects.py` beside everything else.
+
+**The bug, and it is one line.** doped wraps pymatgen's `SpacegroupAnalyzer.get_symmetry_operations`
+in an `lru_cache` and then does not pass the argument through:
+
+```python
+_original_get_symmetry_operations = SpacegroupAnalyzer.get_symmetry_operations
+
+
+@lru_cache(maxsize=int(1e3))
+def _get_symmetry_operations(self, cartesian: bool = False) -> list[SymmOp]:
+    return _original_get_symmetry_operations(self)  # call the original method
+
+
+SpacegroupAnalyzer.get_symmetry_operations = _get_symmetry_operations
+```
+
+`cartesian` is in the cache key and nowhere else, so `get_symmetry_operations(cartesian=True)`
+returns the fractional operations. The fix is `_original_get_symmetry_operations(self, cartesian)`.
+
+**What makes it worth reporting rather than working around.** The rebinding happens at *import*
+of `doped.utils.efficiency`, which `shakenbreak.input` imports at its own module scope, so any
+process that touches shakenbreak has a different pymatgen from then on — including every later
+test in the same pytest session. `pkgs/quacc` found it the expensive way: enabling the `defects`
+extra turned on two modules that reach shakenbreak, `tests/core/atoms/` collects first, and an
+unrelated EMT elastic-tensor test three directories later came back with a bulk modulus of
+173.077 GPa where 134.579 was expected. pymatgen's elastic fit symmetrises with the *Cartesian*
+operations.
+
+The same module also replaces `Structure.__eq__` / `__hash__` / `__deepcopy__`, and the same
+three on `IStructure`, `PeriodicSite`, `Composition` and `Molecule`. Those look correct, but they
+are the reason the workaround is a separate process rather than a `monkeypatch.undo` — there is
+no single thing to undo.
+
+**Not yet checked:** whether any other package here shares a pytest session between shakenbreak
+and a pymatgen-heavy suite. `pkgs/doped` and `pkgs/shakenbreak` are self-consistent, and
+`pkgs/atomate2`'s `defects` extra is `pymatgen-analysis-defects` without shakenbreak, so quacc
+looks like the only case — but that was not searched for exhaustively.
+
+## Package `pymatgen-io-aims`
+
+**Want:** `pymatgen.io.aims` importable, which turns on `pkgs/atomate2`'s `tests/aims` (22 tests)
+and lets its `aims` extra be declared.
+
+pymatgen's 2026 split moved FHI-aims I/O *out* of the core distribution, alongside Fleur. The
+note at the end of `src/pymatgen/io/registry.py` in `pymatgen-core` says so plainly —
+"`pymatgen-io-fleur` and `pymatgen-io-aims` live outside pymatgen-core" — and keeps
+compatibility shims that import `pymatgen.io.aims.inputs` lazily. atomate2 names it as
+`pymatgen-io-aims>=0.0.5` in its `aims` extra.
+
+Nothing here suggests it is hard: it is a namespace package under `pymatgen/io/aims/`, the same
+PEP 420 arrangement that already lets `pymatgen-core`, `pymatgen` and `pymatgen-io-validation`
+share the `pymatgen/` tree — see the header of `pkgs/pymatgen-core/default.nix`. Its
+dependencies have not been read yet, which per the rest of this file is exactly the step not to
+skip.
+
+`tests/aims` is excluded from `pkgs/atomate2` until then, and the note there records why. Note
+that the exclusion is *not* about FHI-aims the program: that conftest mocks the run, like the
+other five suites beside it.
+
+## The QCArchive family runs no tests at all
+
+**Want:** a check phase on `qcportal` and `qcfractal`, or a written reason there cannot be one.
+
+Of the 138 packages here, the four oldest are the only ones with no test phase of any kind —
+`qcportal`, `qcfractal` and `qcfractalcompute` carry a `pythonImportsCheck` and nothing else, and
+`qcarchivetesting`'s `doCheck = false` is deliberate and correct (it is the fixture library, and
+its own header explains the `qcfractal → qcportal → qcarchivetesting → qcfractal` cycle). Nothing
+records why the other three have none; they predate the habit rather than having been argued
+about.
+
+**This is less bare than it sounds, and that is the thing to weigh first.** `tests/qcarchive`'s
+VM tests boot a real server against a real PostgreSQL and push a singlepoint through a real
+worker — `vm-server-local-db`, `vm-compute-singlepoint`, `vm-compute-nwchem-singlepoint` and the
+rest. That is end-to-end coverage of the paths this repository actually ships, and it is more
+than most packages here get. What is missing is the unit layer: upstream's own suites, which are
+large.
+
+**What it would take.** `qcfractal`'s tests want a PostgreSQL and `qcarchivetesting`'s fixtures,
+which is the aiida-core arrangement exactly — `pgtest` plus `postgresql` as check inputs, a
+per-xdist-worker port, and a `HOME` — so there is a worked pattern in this repository for the
+hard part. The cycle is the awkward part: `qcarchivetesting` depends on `qcfractal`, so
+`qcfractal`'s check inputs would need a `doCheck = false` override of itself underneath it, the
+way `pkgs/dpdata-plugin-test` cuts its own.
+
+`qcportal` is the cheaper half and the place to start: its suite is client-side and much of it
+needs only a snowflake server, which `qcfractal` provides in-process.
+
+## Ask NixOS-QChem for a DFTB+ with tblite
+
+**Want:** `qchem.dftbplus` built with `-DWITH_TBLITE=ON`, so `pkgs/quacc` can drop
+`tests/core/recipes/dftb_recipes` from its `disabledTestPaths` and run those ten tests through a
+`checks` entry the way `checks.fairchem-data-oc` runs packmol's two.
+
+**Why it is not simply wired today.** The `packmol`-shaped answer — a defaulted argument, resolved
+in `overlays/default.nix` as `final.dftbplus or final.qchem.dftbplus or null`, and a `checks`
+entry that supplies NixOS-QChem's — does not work here, and the reason is one cmake flag.
+nixpkgs has no `dftbplus` at all; NixOS-QChem has one, at `qchem.dftbplus`, and its
+`pkgs/by-name/dftbplus/package.nix` carries:
+
+```nix
+cmakeFlags = [
+  # ...
+  "-DWITH_TBLITE=OFF"
+  "-DWITH_SDFTD3=OFF"
+];
+```
+
+**Every one of quacc's ten dftb tests asks for the xTB Hamiltonian** — `Hamiltonian_ = "xTB"`,
+`Hamiltonian_Method = "GFN2-xTB"`, asserted in all ten — and that is precisely what
+`WITH_TBLITE=OFF` compiles out. The gate upstream uses is `which("dftb+")`, not a capability
+probe, so putting that binary on PATH would convert ten clean skips into ten failures. It is
+deselected in `pkgs/quacc` for that reason rather than left to skip, since the skip is only
+correct while nothing provides the binary.
+
+Worth knowing: none of those tests wants Slater-Koster parameter files. `DFTB_PREFIX` appears
+nowhere in quacc's dftb recipes or their tests, so the *only* thing standing between this suite
+and a green run is the flag.
+
+**Three ways out, in order of preference:**
+
+1. *Ask upstream to turn it on.* `qchem.tblite` is already in that package set at 0.6.0, so the
+   dependency is there; this is a one-line change to their derivation and it benefits anyone
+   using DFTB+ for xTB, which is most of its modern use.
+2. *`overrideAttrs` it here*, in `flake.nix` beside `packmol`, adding `-DWITH_TBLITE=ON` and
+   `qchem.tblite` to `buildInputs`. Cheap to write, and a full rebuild of DFTB+ that no cache
+   has — and a second, silently divergent DFTB+ of exactly the kind the `cclibPkgs` note warns
+   about.
+3. *Leave it.* Ten tests, all of them thin wrappers over ASE's DFTB+ calculator.
+
 ## basis-set-exchange's `--runslow` suite (tabled)
 
 **Want:** a decision about whether any of upstream's slow suite is worth running here, and if so
