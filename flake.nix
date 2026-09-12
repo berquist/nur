@@ -43,7 +43,7 @@
     # Pinning it by hand rather than reading nixos-qchem's lock at eval time is
     # deliberate: flakes offer no supported way to reach a transitive input's
     # locked revision, and `follows` cannot express "match the dependency".
-    nixpkgs-qchem.url = "github:NixOS/nixpkgs/e5fdb7e586eb743c4e36c8846910c8fd0b5c8290";
+    nixpkgs-qchem.url = "github:NixOS/nixpkgs/a1bdc9c956d0eb0cf49dd372a2be6a09f10fdc51";
 
     # cclib is not in nixpkgs and upstream carries its own flake, so take it
     # from there rather than repackaging.  Only overlays.default is used — a
