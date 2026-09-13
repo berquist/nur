@@ -7,6 +7,8 @@
 #   qcarchive/vm.nix        NixOS VM integration tests for the same
 #   aiida/default.nix       evaluation tests for the AiiDA NixOS module
 #   aiida/vm.nix            NixOS VM integration tests for the same
+#   materials/vm.nix        NixOS VM integration tests for the materials overlay
+#                           — the suites that need a live PostgreSQL or MySQL
 #   cheminformatics/default.nix  evaluation tests for the two cheminformatics
 #                                overlays, including the cclib split
 #   chemtools/default.nix   evaluation tests for the chemtools and materials
@@ -29,6 +31,7 @@
 # directly:
 #   nix-build tests/qcarchive/vm.nix -A server-local-db
 #   nix-build tests/aiida/vm.nix -A daemon-local-db
+#   nix-build tests/materials/vm.nix -A ase-db-backends
 #
 # The harmonwig suite is not dispatched from here either, for a different
 # reason: harmonwig's cclib comes from a flake input, so a package set built by

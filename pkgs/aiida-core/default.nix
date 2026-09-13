@@ -98,6 +98,38 @@ buildPythonPackage rec {
     hash = "sha256-8zuLtmE/IkYoZSd3Sqm+ZptpMrUq/Ek1ooHuufz+Vbw=";
   };
 
+  # `core.sqlite_dos` opens its database on SQLite's two defaults: a rollback
+  # journal, under which one open read transaction blocks every write, and the
+  # DB-API's five-second busy timeout.  A daemon worker plus a client on one
+  # profile is the ordinary way to run AiiDA, so an ordinary small write fails
+  # for no reason the caller can act on:
+  #
+  #     sqlite3.OperationalError: database is locked
+  #     [SQL: UPDATE db_dbauthinfo SET auth_params=? WHERE db_dbauthinfo.id = ?]
+  #
+  # That statement is `Computer.configure()`, reached through the
+  # `aiida_localhost` fixture, losing to a graph that a *passing*
+  # ../aiida-workgraph test left running in the daemon.  The knock-on is worse
+  # than the failure: a failed flush leaves the shared session DEACTIVE, so the
+  # next test on that xdist worker fails as a PendingRollbackError naming a lock
+  # it never met, in a module that never started a daemon.  One contended write
+  # is reported as two unrelated defects — see ../aiida-workgraph/default.nix,
+  # whose note used to attribute this to the test above it aborting.
+  #
+  # The patch puts the profile database in WAL mode, raises the busy timeout to
+  # 60s, and checkpoints the log before `verdi storage backup` rsyncs the
+  # database file, since WAL would otherwise let a backup miss the newest
+  # commits without saying so.  ../../nixos-modules/aiida.nix's
+  # `core.sqlite_dos` backend has the same daemon-plus-client shape and gains
+  # the same fix; `core.psql_dos` is unaffected either way.  The header is
+  # written to be sent upstream as-is.
+  #
+  # A patch file rather than `postPatch`, for the reason
+  # ../aiida-workgraph/default.nix gives above its own: the insertion is
+  # multi-line Python, and ../pymatgen/default.nix has what Nix's indented
+  # strings quietly do to one of those.
+  patches = [ ./sqlite-dos-concurrent-access.patch ];
+
   build-system = [ flit-core ];
 
   # click is relaxed here rather than through pythonRelaxDeps below, because
@@ -901,6 +933,101 @@ buildPythonPackage rec {
                 except RuntimeError as exception:
                     if 'Is server running?' not in str(exception):
                         raise"
+
+    # Six fixed wall-clock budgets, every one of them upstream's, and every one
+    # calibrated for a CI runner whose only job is this suite.  This build runs
+    # it at `--numprocesses=$NIX_BUILD_CORES` — 128 on the machine below — and
+    # `just check` in particular has LLVM compiling alongside it.  On the run
+    # that prompted this, nine tests failed or errored and every single one was
+    # a clock rather than a defect:
+    #
+    #     FAILED tests/brokers/test_zeromq_communicator.py::…::test_rpc_round_trip — TimeoutError
+    #     FAILED tests/cmdline/commands/test_process.py::test_process_kill_failing_ebm_kill
+    #     FAILED tests/engine/…/test_calc_job.py::test_restart_after_daemon_reset — DaemonTimeoutException
+    #     FAILED tests/cmdline/commands/test_devel.py::test_launch_add_daemon
+    #     FAILED tests/cmdline/commands/test_devel.py::test_launch_multiply_add_daemon
+    #     FAILED tests/engine/processes/test_control.py::test_play_processes_all_entries
+    #     FAILED tests/engine/processes/test_control.py::test_revive
+    #     ERROR  tests/cmdline/commands/test_process.py::test_process_repair_dry_run — DaemonTimeoutException
+    #     ERROR  tests/cmdline/commands/test_group.py::…::test_show — DaemonTimeoutException
+    #
+    # None of them is an `--only-rerun` candidate.  A retry hides a real timeout
+    # exactly as readily as a spurious one, which is why the patterns in
+    # `pytestFlags` are kept narrow.  Nothing below weakens an assertion either:
+    # each of these tests still waits for the same state and still asserts the
+    # same thing about it.  Only the patience changes.
+    #
+    # `daemon.timeout` is two seconds, and it bounds *every* circus RPC the
+    # DaemonClient makes — `get_status`, `stop_daemon`, `restart_daemon`, and
+    # `start_daemon`'s own wait for the pid file to appear.  Three of the nine
+    # are it directly.  `test_process_repair_dry_run` asks for
+    # `stopped_daemon_client`, whose `stop_daemon(wait=True)` ran out during
+    # *setup*, which is why it is an error rather than a failure.
+    # `test_restart_after_daemon_reset` calls `restart_daemon(wait=True)`
+    # itself.  And `TestVerdiGroup::test_show` touches no daemon at all — that
+    # one is the session-scoped `daemon_client` fixture's teardown, which
+    # catches only DaemonNotRunningException, attributed to whichever test ran
+    # last on the worker.  `test_revive` is the fourth and the only one not
+    # accounted for exactly: it failed because `is_daemon_running` was false at
+    # `submit()`, which is what a `restart_daemon` or `stop_daemon` abandoned
+    # halfway leaves behind.
+    #
+    # 30 because ../../nixos-modules/aiida.nix already sets exactly that for the
+    # deployed service, and ../aiida-workgraph sets it in its own conftest for
+    # this same reason.
+    #
+    # It has to go on the *profile*.  DaemonClient reads the option as
+    # `config.get_option('daemon.timeout', scope=profile.name)`, and a scoped
+    # `Config.get_option` falls back to the option's own default rather than to
+    # the global value — so a global `aiida_config.set_option` would be accepted
+    # and then silently ignored.  `store()` is what puts it on disk, where the
+    # `verdi daemon start-circus` subprocess can read it too.
+    #
+    # `yield profile` occurs once in the file, so this needs none of the
+    # indentation care a multi-line replacement would.
+    substituteInPlace tests/conftest.py \
+      --replace-fail \
+        'yield profile' \
+        "profile.set_option('daemon.timeout', 30); aiida_config.store(); yield profile"
+
+    # `submit_and_await` allows a process 20 seconds to reach the state asked
+    # for, and three more of the nine spent it without arriving:
+    # `test_launch_add_daemon` stuck at RUNNING, `test_launch_multiply_add_daemon`
+    # at WAITING, `test_play_processes_all_entries` at CREATED.  Note what those
+    # states say — the processes were *moving*, just not finished.  A calcjob has
+    # to be adopted by a worker, uploaded, run, retrieved and parsed inside that
+    # budget.
+    #
+    # Patched in the shipped fixture plugin rather than overridden in
+    # tests/conftest.py, because the plugin is what every AiiDA plugin package
+    # in this repo tests against and they all build under the same load.  Both
+    # copies get it; `aiida.manage.tests.pytest_fixtures` is the deprecated one,
+    # and the note above its own hunk says why this repo still has to patch it.
+    #
+    # 60 rather than more because `test_process_kill` calls the fixture six
+    # times in one test — see the pytest-timeout note in `pytestFlags`.
+    substituteInPlace src/aiida/tools/pytest_fixtures/daemon.py \
+      --replace-fail 'timeout: int = 20,' 'timeout: int = 60,'
+
+    substituteInPlace src/aiida/manage/tests/pytest_fixtures.py \
+      --replace-fail 'timeout: int = 20,' 'timeout: int = 60,'
+
+    # `test_process_kill_failing_ebm_kill` passes its own `timeout=kill_timeout`
+    # and so is untouched by the default above.  It timed out at CREATED, ten
+    # seconds being all it allows for a worker to pick the job up at all.  The
+    # constant is shared by four kill tests in the file and scales each of them
+    # whole — the submitted job's own `sleep` option is `kill_timeout + 10` — so
+    # replacing every occurrence keeps their shape.  The other three passed on
+    # that run by luck rather than by margin.
+    substituteInPlace tests/cmdline/commands/test_process.py \
+      --replace-fail 'kill_timeout = 10' 'kill_timeout = 40'
+
+    # `test_rpc_round_trip` sleeps half a second for the subscriber to register,
+    # then allows the future five seconds to resolve.  Four sibling tests in the
+    # file use the same constant against the same broker, and the same reasoning
+    # covers all five, so this replacement is uniform too.
+    substituteInPlace tests/brokers/test_zeromq_communicator.py \
+      --replace-fail 'future.result(timeout=5.0)' 'future.result(timeout=30.0)'
   '';
 
   # The locked nixpkgs sits above eight of upstream's upper bounds.  These are
@@ -1174,6 +1301,26 @@ buildPythonPackage rec {
     # $out.  Clearing the ini value is cleaner than installing both plugins
     # purely to satisfy flags whose output is thrown away.
     "--override-ini=addopts="
+
+    # pytest-timeout's ini value is 240 seconds, another budget written for an
+    # unloaded runner, and it has to stay clear of the per-wait budgets raised
+    # in `postPatch` or it wins the race to report the failure.
+    # `test_process_kill` is the binding case: six `submit_and_await` calls at
+    # the 60 seconds set there, plus its own four 20-second waits, is 446
+    # seconds of worst case.  A test killed by pytest-timeout reports
+    # `Failed: Timeout >240.0s` where the fixture would have named the process
+    # and the state it was stuck in.
+    #
+    # That test was already close to the line before any of this: 6 x 20 plus
+    # the same 80 is 206 seconds against a 240-second cap, which is a 34-second
+    # margin on a suite whose budgets assume an idle machine.
+    #
+    # Overridden here rather than patched into pyproject.toml so that it sits
+    # beside the addopts override, which is the other thing this suite takes
+    # from that ini section.  900 clears the 360 and still marks a genuine hang:
+    # the whole suite finishes in about ten minutes across 128 workers, so one
+    # test alone reaching fifteen is unambiguous.
+    "--override-ini=timeout=900"
 
     # Restores what clearing addopts above took away.  It is dormant while
     # xdist is active — pytest-benchmark disables itself then, and says so —

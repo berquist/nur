@@ -82,7 +82,6 @@ in
     dbstep
     digichem-core
     metallogen
-    molcat
     xyzrender
     ;
   # graphrc is deliberately absent from that list.  It is a top-level attribute
@@ -102,6 +101,13 @@ in
   # module, the way pip spells it.  See the callPackage site in
   # overlays/default.nix for how the two are kept from resolving to each other.
   inherit (pkgs') chemfiles;
+
+  # enumlib, likewise not a Python package: the Fortran `enum.x` / `makestr.x`
+  # that pymatgen's EnumlibAdaptor shells out to.  Top-level for the same reason
+  # chemfiles is — it is an executable, not a module — and re-exported so that
+  # ci.nix builds it and a consumer can put it on PATH beside a pymatgen that
+  # needs it.  See pkgs/enumlib.
+  inherit (pkgs') enumlib;
 
   # Python packages, reached through the extended python313Packages so that
   # these derivations are identical to what python313.withPackages returns.
@@ -143,7 +149,31 @@ in
     sella
     molara
 
+    atomate2
     custodian
+    emmet-core
     fireworks
+    jobflow
+    jobflow-remote
+    lobsterpy
+    maggma
+    matcalc
+    matgl
+    matminer
+    mp-api
+    optimade
+    phono3py
+    pubchempy
+    pymatgen
+    pymatgen-analysis-alloys
+    pymatgen-analysis-defects
+    pymatgen-analysis-diffusion
+    pymatgen-core
+    pymatgen-io-validation
+    qtoolkit
+    quacc
+    redun
+    shakenbreak
+    vise
     ;
 }

@@ -217,6 +217,18 @@ aiida-pollution-scan:
 check-no-daemon:
     ./scripts/no-daemon-check.sh
 
+# The one-off counterpart to the suite above, for the questions that come up
+# while writing a derivation: what a version string came out as, whether an
+# attribute exists, what a list of makeWrapperArgs actually contains.  A bare
+# attribute path is resolved against default.nix; anything else — anything with
+# a space or a paren in it — is handed to nix as written, so `<nixpkgs>` and
+# `builtins` are both reachable.  Prints the value on stdout and the NIX_PATH
+# it chose on stderr, so it pipes.
+
+# Evaluate one expression without a daemon, e.g. `just eval vise.version`.
+eval expr:
+    ./scripts/sandbox-eval.sh {{ quote(expr) }}
+
 # Neither the network nor a daemon, so this works from inside the Claude Code
 # sandbox, where nix-prefetch-url cannot.  Prints the rev, the commit date the
 # `X.Y.Z-unstable-YYYY-MM-DD` version scheme needs, and the hash.
