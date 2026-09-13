@@ -1,0 +1,28 @@
+--- a/fireworks/core/rocket.py
++++ b/fireworks/core/rocket.py
+@@ -48,8 +48,23 @@
+     if launchpad:
+         launchpad.ping_launch(launch_id)
+     else:
+-        with open("FW_ping.json", "w") as f:
+-            f.write(f'{{"ping_time": "{datetime.datetime.now(datetime.timezone.utc).isoformat()}"}}')
++        # Write through a temporary file and rename it into place.  `open(...,
++        # "w")` truncates first, so between that call and the write the file is
++        # present and empty -- and something does read it in exactly that
++        # window.  `LaunchPad.recover_offline` loads FW_ping.json;
++        # `stop_backgrounds` only sets the stop event and never joins this
++        # thread; and `stop_event.wait()` returns as soon as the event is set,
++        # after which `ping_launch` calls this function once more before
++        # re-checking the loop condition.  So the final ping is still being
++        # written while the caller that comes after `launch_rocket` returns is
++        # reading it.  The reader gets a JSONDecodeError, which
++        # `recover_offline` swallows and reports as a launch that could not be
++        # recovered.  `os.replace` is atomic, so a reader sees either the
++        # previous ping or this one, never a half-written file.
++        ping_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
++        with open("FW_ping.json.tmp", "w") as f:
++            f.write(f'{{"ping_time": "{ping_time}"}}')
++        os.replace("FW_ping.json.tmp", "FW_ping.json")
+ 
+ 
+ def ping_launch(launchpad: LaunchPad, launch_id: int, stop_event: Event, master_thread: Thread) -> None:

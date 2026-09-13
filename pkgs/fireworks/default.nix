@@ -49,6 +49,36 @@ buildPythonPackage (finalAttrs: {
 
   build-system = [ setuptools ];
 
+  # `LaunchPadOfflineTest::test__recover_completed` fails perhaps one run in
+  # several with `assert 1 is None` — fireworks' way of saying a launch could
+  # not be recovered — and the cause is a race on `FW_ping.json` rather than
+  # anything about recovery.  The real error is in the captured stderr, because
+  # `recover_offline` catches everything:
+  #
+  #   File "fireworks/core/launchpad.py", line 1996, in recover_offline
+  #       ping_dict = loadfn(ping_loc)
+  #   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+  #
+  # Char 0 of an empty file, and the file exists — `os.path.exists` guards that
+  # read.  Only one thing writes it, `do_ping` in rocket.py, with a plain
+  # `open(..., "w")` that truncates before it writes.  Four facts close the
+  # loop: `PING_TIME_SECS` is 3600 so no ping is due during a job that takes
+  # milliseconds; `stop_event.wait()` returns immediately when the event is
+  # set; `ping_launch` calls `do_ping` unconditionally after that wait, before
+  # re-checking its loop condition, so there is exactly one write and it
+  # happens at shutdown; and `stop_backgrounds` only *sets* the event — nothing
+  # joins the ping thread — so `launch_rocket` returns while that write is in
+  # flight.  The test reads the file in between.
+  #
+  # **Not only a test problem, which is why this is a patch and not an
+  # `--only-rerun` entry.** `recover_offline` is the production offline-mode
+  # path and reads the same file through the same window; a consumer that hits
+  # it gets a silently failed recovery, since the JSONDecodeError is swallowed
+  # and reported as a launch that could not be recovered.  Worth sending
+  # upstream — the patch is four lines and changes no behaviour anyone relies
+  # on.  See ../../docs/TODO.md.
+  patches = [ ./atomic-ping-write.patch ];
+
   # monty 2026.7.16 made zopen's `mode` a required positional argument and
   # rejects an implicit text/binary mode outright.  2025.3.3 still defaults it
   # to "r", behind a FutureWarning whose own deadline was 2025-06-01.  FireWorks

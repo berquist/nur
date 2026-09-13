@@ -310,6 +310,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `maggma` the one package here where a `::` entry in `disabledTestPaths` silently does nothing? | `pkgs/maggma/default.nix` (the note above `disabledTests`) |
 | Which of `maggma`'s test modules need a live MongoDB, and what coverage does dropping them cost? | `pkgs/maggma/default.nix` (`disabledTestPaths`) |
 | Why does `mongomock-ng` export `NO_LOCAL_MONGO`, and how is it a third mongomock? | `pkgs/mongomock-ng/default.nix` (`preCheck`, and the note above `src`) |
+| Why does `fireworks` patch `do_ping`, and what does an empty `FW_ping.json` have to do with recovery? | `pkgs/fireworks/default.nix` (the note above `patches`), `pkgs/fireworks/atomic-ping-write.patch` |
 | Why must `fireworks` never gain `pytest-xdist`, when nothing in the derivation asks for `-n`? | `pkgs/fireworks/default.nix` (the note above `nativeCheckInputs`) |
 | Why are two `WFLockTest` tests deselected when they only ever skip themselves? | `pkgs/fireworks/default.nix` (`disabledTestPaths`) |
 | Why does `fireworks` pass `-rs`, and which six tests still skip? | `pkgs/fireworks/default.nix` (`pytestFlags`) |

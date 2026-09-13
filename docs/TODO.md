@@ -3,6 +3,44 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
+## Send fireworks' atomic `FW_ping.json` write upstream
+
+**Want:** `pkgs/fireworks/atomic-ping-write.patch` offered to
+[materialsproject/fireworks](https://github.com/materialsproject/fireworks), so we can drop it.
+Like the `ase-db-backends` item below, this one needs no further diagnosis: the patch is written,
+applies to the packaged revision, and the failing test is the reproducer.
+
+**The bug.** `do_ping` in `fireworks/core/rocket.py` writes the offline ping file in place:
+
+```python
+with open("FW_ping.json", "w") as f:
+    f.write(f'{{"ping_time": "{datetime.datetime.now(datetime.timezone.utc).isoformat()}"}}')
+```
+
+`open(..., "w")` truncates before it writes, so the file is present and empty for as long as that
+takes. `LaunchPad.recover_offline` reads it, guarded only by `os.path.exists`, and there is
+nothing stopping the two from overlapping:
+
+- `PING_TIME_SECS` is 3600, so no ping falls due during a short job;
+- `stop_event.wait()` returns as soon as the event is set, and `ping_launch` then calls `do_ping`
+  once more *before* re-checking its loop condition — so there is exactly one write, at shutdown;
+- `stop_backgrounds` only sets the event. Nothing joins the ping thread, so `launch_rocket`
+  returns while that write is in flight.
+
+**What it costs.** `LaunchPadOfflineTest::test__recover_completed` fails intermittently with
+`assert 1 is None`, which is unhelpful until you read the captured stderr and find a
+`JSONDecodeError` at char 0 that `recover_offline` swallowed. More importantly it is not confined
+to tests: any consumer recovering an offline launch can hit the same window and be told the launch
+could not be recovered.
+
+**Worth raising at the same time**, since both are in the same six lines and neither is fixed by
+the patch:
+
+1. `ping_launch` pings once after the stop event is set. The loop condition says it should not.
+2. `recover_offline`'s blanket `except` turns a malformed ping file into "unrecoverable" with no
+   indication of why. A narrower catch, or a warning naming the file, would have made this a
+   five-minute diagnosis instead of an hour's.
+
 ## Bundle a matgl foundation potential, and turn eight skips into tests
 
 **Want:** one pretrained matgl model available offline, so `pkgs/quacc` can take the `mlip` extra
