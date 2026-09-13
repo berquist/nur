@@ -357,6 +357,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `tensorpotential` not a top-level attribute when every other tool here is? | `overlays/default.nix` (the `tensorpotential` binding), `ci.nix` (the note above `isBuildable`) |
 | Why does `tensorpotential` spell `redistributable` out instead of letting it default? | `pkgs/tensorpotential/default.nix` (`meta.license`) |
 | Why does dropping `tensorflow[and-cuda]` not cost GPU support? | `pkgs/tensorpotential/default.nix` (`postPatch`) |
+| Why is `fairchem-core` null on nixos-26.05 rather than `meta.broken`? | `overlays/default.nix` (the `fairchem-core` binding in the materials overlay), `docs/TODO.md` |
 | Why can `matcalc` take an unfree extra and stay free and cacheable? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |
 | Why does `matplotlib-label-lines` need `pytest-mpl` when the image comparison is switched off? | `pkgs/matplotlib-label-lines/default.nix` (`nativeCheckInputs`) |
 | Why must `labellines/test.py` be named in `enabledTestPaths` rather than found? | `pkgs/matplotlib-label-lines/default.nix` (`enabledTestPaths`), `pkgs/pgtest/default.nix` |

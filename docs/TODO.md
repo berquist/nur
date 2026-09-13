@@ -395,13 +395,23 @@ extra is not a build input of the package that declares it.  Nothing builds thos
                                              only an extra — two levels down,
                                              and parmed and dpdata-plugin-test
                                              sit under it for its check phase
-    fairchem-core     matcalc[fairchem], quacc[mlip]
-                                             and clusterscope, ase-db-backends beneath it
-    fairchem-data-oc  quacc[fairchem]
-    fairchem-data-omat  quacc[fairchem]
-    fairchem-data-omol  quacc[fairchem]
     maml              matcalc[maml]
     rootstock         quacc[mlip]
+
+**Five of these came off the list** when `pkgs/quacc` took the `fairchem` extra as a check
+input: `fairchem-core`, the three `fairchem-data-*` distributions, and `clusterscope` and
+`ase-db-backends` beneath the first. That is worth reading as a worked example of both halves of
+this item. It is the only way any of them has ever been built here — and it immediately found
+something, because `fairchem-core` needs `e3nn`, which `nixos-26.05` does not have. `just ci-eval`
+aborted on that leg, which is the failure mode this whole entry is about, arriving through the one
+package that had just started reaching them. `overlays/default.nix` nulls fairchem-core where
+`e3nn` is missing; see the note there.
+
+Note also what *kind* of failure it was. `e3nn` is an undefaulted argument, so the callPackage
+`abort`s rather than producing a `meta.broken` package — and `abort` is not catchable, by
+`builtins.tryEval` or by anything else. Whichever option below is chosen has to cope with that:
+an internal package that cannot be *evaluated* on a channel is not the same as one that cannot be
+built there, and only the second is what `meta.broken` describes.
 
 **This is not hypothetical.** `pkgs/sevenn` was committed in caeb7af saying "Not build-verified
 — the sandbox has no nix-daemon", and stayed that way.  The first time it was ever built, months

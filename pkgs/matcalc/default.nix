@@ -16,7 +16,7 @@
 
   # optional-dependencies
   deepmd-kit,
-  fairchem-core,
+  fairchem-core ? null, # needs e3nn, not in nixos-26.05
   mace-torch ? null, # not in nixos-26.05
   maml,
   matgl,
@@ -79,7 +79,10 @@ buildPythonPackage (finalAttrs: {
   ];
 
   # Upstream's extras whose dependencies are packaged.  `mace` only where
-  # `mace-torch` is (unstable, not 26.05); `phonon3` only where phonopy is 4.x,
+  # `mace-torch` is (unstable, not 26.05); `fairchem` only where `e3nn` is,
+  # which is the same two channels — ../../overlays/default.nix nulls
+  # fairchem-core where it is not, and the note there says why that has to be
+  # a null rather than a `meta.broken`; `phonon3` only where phonopy is 4.x,
   # since ../phono3py needs `phonopy >= 4.4` and 26.05 has 3.5.1.  Still
   # missing: `mattersim` / `orb` / `petmad`, which need NVIDIA's
   # `nvalchemi-toolkit-ops` the way torch-sim does — and with `fairchem` here
@@ -99,11 +102,13 @@ buildPythonPackage (finalAttrs: {
     phonon = [ seekpath ];
     benchmark = [ matminer ];
     deepmd = [ deepmd-kit ];
-    fairchem = [ fairchem-core ];
     grace = [ tensorpotential ];
     maml = [ maml ];
     matgl = [ matgl ];
     sevennet = [ sevenn ];
+  }
+  // lib.optionalAttrs (fairchem-core != null) {
+    fairchem = [ fairchem-core ];
   }
   // lib.optionalAttrs (mace-torch != null) {
     mace = [ mace-torch ];

@@ -622,7 +622,29 @@ in
         # to its own latest — see the note at its `src`.
         ase-db-backends = pself.callPackage ../pkgs/ase-db-backends { };
         clusterscope = pself.callPackage ../pkgs/clusterscope { };
-        fairchem-core = pself.callPackage ../pkgs/fairchem-core { };
+
+        # **fairchem-core is null on nixos-26.05, and the whole reason is
+        # `e3nn`**, the equivariant-neural-network library its models are built
+        # on.  Every other one of its thirty-odd arguments resolves on that
+        # channel; `e3nn` was checked against it one name at a time, and it is
+        # the only gap.
+        #
+        # Null rather than `meta.broken`, and the difference is *when* the
+        # failure lands.  `e3nn` is an undefaulted argument of the derivation,
+        # so this `callPackage` does not produce a broken package on 26.05 —
+        # it `abort`s, which `meta.broken` cannot catch because there is no
+        # package left to mark.  `just ci-eval` walks `default.nix` forcing
+        # `drvPath` on every attribute, so the abort takes down the whole
+        # evaluation, and it does so from whichever top-level package happens
+        # to reach fairchem-core.  That was ../pkgs/quacc, which took the
+        # `fairchem` extra as a check input and thereby dragged an internal
+        # package into `ci-eval`'s reach for the first time.
+        #
+        # Gating here rather than at each consumer keeps the channel test in
+        # one place.  ../pkgs/quacc and ../pkgs/matcalc take `fairchem-core`
+        # defaulted and drop the extra when it is null, the way ../pkgs/matcalc
+        # already handles `mace-torch`.
+        fairchem-core = if pself ? e3nn then pself.callPackage ../pkgs/fairchem-core { } else null;
 
         # The three sibling distributions `quacc[fairchem]` names beside
         # fairchem-core, out of the same thirteen-package monorepo and each
@@ -641,9 +663,18 @@ in
         # postopus almost always finds one, while nixpkgs has no packmol at all,
         # so this is null unless the consumer has composed `overlays.qchem`.
         # Two tests are deselected when it is; see the derivation.
-        fairchem-data-oc = pself.callPackage ../pkgs/fairchem-data-oc {
-          packmol = final.packmol or final.qchem.packmol or null;
-        };
+        #
+        # `fairchem-data-oc` follows fairchem-core's fate for the same reason
+        # the note above gives — it takes it as an undeclared but module-scope
+        # dependency, so it is no more buildable than its base is.  The other
+        # two need neither fairchem-core nor e3nn and are left alone.
+        fairchem-data-oc =
+          if pself ? e3nn then
+            pself.callPackage ../pkgs/fairchem-data-oc {
+              packmol = final.packmol or final.qchem.packmol or null;
+            }
+          else
+            null;
         fairchem-data-omat = pself.callPackage ../pkgs/fairchem-data-omat { };
         fairchem-data-omol = pself.callPackage ../pkgs/fairchem-data-omol { };
 

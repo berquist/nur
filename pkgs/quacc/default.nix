@@ -25,8 +25,10 @@
   dask,
   dask-jobqueue,
   distributed,
-  fairchem-core,
-  fairchem-data-oc,
+  # Both null on nixos-26.05, which has no `e3nn`; see the note at the
+  # `fairchem-core` binding in ../../overlays/default.nix.
+  fairchem-core ? null,
+  fairchem-data-oc ? null,
   fairchem-data-omat,
   fairchem-data-omol,
   jobflow,
@@ -101,9 +103,16 @@ buildPythonPackage (finalAttrs: {
   # the package side and showed up as two silently skipped modules.
   #
   # Unlike every other entry here this one is not free to quacc's own build any
-  # more — `nativeCheckInputs` below takes `defects`, `phonons`, `sella` and
-  # `tblite`.  The four are exactly the extras whose tests run offline; see the
-  # note there.
+  # more — `nativeCheckInputs` below takes six of these extras, which are the
+  # six whose tests run offline; see the note there.
+  #
+  # `fairchem` is built conditionally, and `mlip` drops one member the same
+  # way, because fairchem-core is null on nixos-26.05: that channel has no
+  # `e3nn`.  ../../overlays/default.nix has the account, and ../matcalc does
+  # the same for `mace` and `phonon3`.  It has to be `optionalAttrs` here
+  # rather than a null left in the list, because `nativeCheckInputs` below
+  # takes this extra — a null is harmless sitting in `passthru`, and is not
+  # harmless as the only thing standing between `ci-eval` and an abort.
   optional-dependencies = {
     defects = [
       pymatgen-analysis-defects
@@ -114,21 +123,15 @@ buildPythonPackage (finalAttrs: {
       dask-jobqueue
       distributed
     ];
-    fairchem = [
-      fairchem-core
-      fairchem-data-oc
-      fairchem-data-omat
-      fairchem-data-omol
-    ];
     jobflow = [
       jobflow
       jobflow-remote
     ];
     mlip = [
-      fairchem-core
       rootstock
       matcalc
     ]
+    ++ lib.optional (fairchem-core != null) fairchem-core
     ++ matcalc.optional-dependencies.matgl;
     mp = [ atomate2 ];
     parsl = [ parsl ];
@@ -146,6 +149,14 @@ buildPythonPackage (finalAttrs: {
     redun = [ redun ];
     sella = [ sella ];
     tblite = [ tblite ];
+  }
+  // lib.optionalAttrs (fairchem-core != null) {
+    fairchem = [
+      fairchem-core
+      fairchem-data-oc
+      fairchem-data-omat
+      fairchem-data-omol
+    ];
   };
 
   dependencies = [
@@ -357,7 +368,7 @@ buildPythonPackage (finalAttrs: {
     quantum-espresso
   ]
   ++ finalAttrs.passthru.optional-dependencies.defects
-  ++ finalAttrs.passthru.optional-dependencies.fairchem
+  ++ (finalAttrs.passthru.optional-dependencies.fairchem or [ ])
   ++ finalAttrs.passthru.optional-dependencies.mp
   ++ finalAttrs.passthru.optional-dependencies.phonons
   ++ finalAttrs.passthru.optional-dependencies.sella
