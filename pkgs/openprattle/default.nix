@@ -40,6 +40,21 @@ buildPythonPackage rec {
   # on PATH.  openbabel supplies that executable.
   dependencies = [ openbabel-bindings ];
 
+  # `openbabel` is upstream's spelling of what `openbabel-bindings` provides,
+  # and nixpkgs installs that package without a `.dist-info` — it is built from
+  # CMake rather than as a wheel — so `pythonRuntimeDepsCheckHook` reports
+  # "openbabel not installed" and fails the build, with the module sitting right
+  # there in site-packages.
+  #
+  # The same defect as nixpkgs' rdkit, and handled the other way round: that one
+  # is repaired once in ../../overlays/default.nix, because ten packages here
+  # declare it.  openbabel is a much larger C++ build, nothing else here declares
+  # it as a *dependency* (emmet-core, quacc and dpdata take it as a check input,
+  # which this hook does not inspect), and rebuilding it would cost every
+  # consumer a cache miss to add one METADATA file.  Dropping the declaration is
+  # the shape ../ccreg uses, and the trade is written out at the rdkit binding.
+  pythonRemoveDeps = [ "openbabel" ];
+
   # The fallback path resolves `obabel` off PATH at call time, which is empty
   # for a program launched from a systemd unit or another package's closure.
   postInstall = ''
@@ -51,6 +66,17 @@ buildPythonPackage rec {
     pytestCheckHook
     openbabel
   ];
+
+  # test/test_prog.py is the CLI's own suite and runs `oprattle` as a
+  # subprocess — nineteen tests, every one of them dying with
+  # `FileNotFoundError: [Errno 2] No such file or directory: 'oprattle'` until
+  # the script is on PATH.  The check phase runs after the install one, so
+  # $out/bin exists and holds the wrapped script; putting it on PATH exercises
+  # the wrapper as well as the program, which is the thing `postInstall` above
+  # exists for.  Same fix as ../aiida-pseudo and ../aiida-gromacs.
+  preCheck = ''
+    export PATH="$out/bin:$PATH"
+  '';
 
   # test/test_formats.py is marked `formats` and upstream's conftest skips the
   # whole marker unless `--formats` is passed.  That is left alone deliberately:

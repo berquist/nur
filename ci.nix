@@ -15,12 +15,22 @@
 
 with builtins;
 let
-  # Keep in sync with the same predicate in ./overlay.nix.
+  # Keep in sync with the same predicate in ./overlay.nix — with one deliberate
+  # exception, named below.
   #
   # python313Packages is the whole 3.13 set, exposed so that nix-update can
   # reach the dependencies ./default.nix does not re-export.  It carries
   # dontRecurseIntoAttrs, so flattenPkgs below would skip it anyway; naming it
   # here says so on purpose rather than by accident.
+  #
+  # `internalPackages` is reserved in ./overlay.nix and **deliberately absent
+  # here**.  It is the bounded, hand-written set of packages this repository
+  # defines and does not re-export, and it carries recurseForDerivations, so
+  # leaving it out of this predicate is what makes flattenPkgs descend into it
+  # and buildPkgs contain its members.  That is the whole point of the
+  # attribute: without it, a package reachable only through an
+  # `optional-dependencies` entry is built by nothing at all.  See the note at
+  # it in ./default.nix.
   isReserved =
     n:
     n == "lib"

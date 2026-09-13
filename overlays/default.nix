@@ -354,6 +354,13 @@ in
         # delete this.
         pyrr = pself.callPackage ../pkgs/pyrr { };
 
+        # The ONIOM layer-bookkeeping library from the crest group: a Fortran
+        # library with a C API, packaged through its Python binding, which
+        # builds and bundles the library the way upstream's own `pip install .`
+        # does.  Nothing here depends on it — see its header — so it stops at
+        # this set rather than becoming a top-level attribute.
+        lwoniom = pself.callPackage ../pkgs/lwoniom { };
+
         # The Python binding, for moltui's `trexio` extra.  Emphatically **not**
         # re-exported to the top level, and this is the one case in this file
         # where that would do real damage rather than merely being untidy:
@@ -677,6 +684,42 @@ in
             null;
         fairchem-data-omat = pself.callPackage ../pkgs/fairchem-data-omat { };
         fairchem-data-omol = pself.callPackage ../pkgs/fairchem-data-omol { };
+
+        # NVIDIA's Warp primitives for atomistic simulation — the package that
+        # ../docs/TODO.md and ../AGENTS.md both recorded as an unsurveyed wall
+        # blocking `torch-sim`, `orb-models`, `mattersim`, `pet-mad` and `upet`.
+        # It is Apache-2.0, pure Python, and wants `numpy` and `warp-lang`,
+        # which nixpkgs has.  See the header of ../pkgs/nvalchemi-toolkit-ops.
+        #
+        # Internal, and with no dependant here yet: `orb-models` is the first
+        # that would want it, and matcalc's `orb` extra is what that would open.
+        #
+        # Guarded on `warp-lang` the way `fairchem-core` above is guarded on
+        # `e3nn`, and for exactly the same reason: an undefaulted argument that
+        # a channel lacks makes this `callPackage` *abort* rather than produce a
+        # `meta.broken` package, and an abort is not catchable.  warp-lang is a
+        # recent nixpkgs addition, so the older legs of the matrix are the ones
+        # to expect this on.
+        nvalchemi-toolkit-ops =
+          if pself ? warp-lang then pself.callPackage ../pkgs/nvalchemi-toolkit-ops { } else null;
+
+        # nvalchemi-toolkit-ops' two check inputs that nixpkgs lacks, and what
+        # each of them buys.  torch-pme is the reference its electrostatics
+        # suite validates against; vesin is the one its neighbour-list
+        # consistency checks compare with, and it is torch-pme's own check input
+        # besides.  Both internal, like clusterscope is to fairchem-core.
+        torch-pme = pself.callPackage ../pkgs/torch-pme { };
+        vesin = pself.callPackage ../pkgs/vesin { };
+
+        # The two gaps in the fairchem monorepo's remaining distributions:
+        # p-tqdm is `fairchem-applications-fastcsp`'s and yellowbrick is
+        # `fairchem-applications-ocx`'s.  Neither distribution is packaged and
+        # nothing here asks for either, so these two are the survey done rather
+        # than a dependency met — see "Deferred packaging" in ../AGENTS.md.
+        # Internal, and general-purpose enough that a later dependant would find
+        # them ready.
+        p-tqdm = pself.callPackage ../pkgs/p-tqdm { };
+        yellowbrick = pself.callPackage ../pkgs/yellowbrick { };
 
         # py-lmdb, pinned *down* to 1.7.3, which is the one place in this
         # repository where a version bound turned out to mean exactly what it
