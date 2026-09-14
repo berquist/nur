@@ -1,0 +1,92 @@
+--- a/test/conftest.py
++++ b/test/conftest.py
+@@ -266,3 +266,89 @@
+ 
+     if torch.cuda.is_available():
+         torch.cuda.empty_cache()
++
++
++# ==============================================================================
++# CUDA Gating
++# ==============================================================================
++#
++# Added downstream.  About a thousand tests in this suite ask for a CUDA device,
++# and only some of them check for one first: test/neighbors/conftest.py marks
++# items `gpu` by name but only under its own directory, and
++# test/test_segment_ops_jax.py skips itself when JAX has no GPU.  Everything
++# else fails on a CPU-only machine -- "Invalid device identifier: cuda:0" from
++# warp, "Torch not compiled with CUDA enabled" from torch, or a JAX FFI handler
++# that was never registered for the Host platform.
++#
++# pytest_runtest_setup rather than a collection-time marker, deliberately: it
++# runs per test rather than racing the -m filter for hook order, and it reports
++# a skip with a reason instead of a silent deselection.
++
++_CUDA_ONLY_DIRECTORIES = ("bindings/jax",)
++
++# Tests that need *two distinct devices* rather than a CUDA-capable one, and so
++# are unrunnable on a single-device machine whichever device that is.  They pair
++# a module-level device constant against a hard-coded "cpu" and assert that the
++# mismatch is rejected; with one device the two sides agree and the expected
++# ValueError never arrives -- "DID NOT RAISE".  Naming them is necessary because
++# nothing about them reads as CUDA: not the test name, not a parameter, not the
++# path.  Keyed on "<module basename>::<test name>" so a name this specific
++# cannot match somewhere else by accident.
++_MULTI_DEVICE_TESTS = frozenset(
++    {
++        "test_warp_dispatch.py::test_device_mismatch",
++    }
++)
++
++_WARP_HAS_CUDA: bool | None = None
++
++
++def _warp_has_cuda() -> bool:
++    """Whether warp can see a CUDA device.  Asked once per session."""
++    global _WARP_HAS_CUDA
++    if _WARP_HAS_CUDA is None:
++        import warp as wp
++
++        _WARP_HAS_CUDA = bool(wp.is_cuda_available())
++    return _WARP_HAS_CUDA
++
++
++def _item_needs_cuda(item: pytest.Item) -> bool:
++    """Whether a test asks for a CUDA device by name, by parameter or by path."""
++    name = item.name.lower()
++    if "cuda" in name or "gpu" in name:
++        return True
++
++    # Catches parametrisations whose values are objects rather than strings --
++    # `parametrize("device", [torch.device("cpu"), torch.device("cuda:0")])`
++    # gets index-based ids, so the device never appears in the test name.
++    callspec = getattr(item, "callspec", None)
++    if callspec is not None and any(
++        "cuda" in str(value).lower() for value in callspec.params.values()
++    ):
++        return True
++
++    # Every JAX binding goes through warp's JAX FFI, whose handlers are
++    # registered for the CUDA platform alone; test/test_segment_ops_jax.py says
++    # so itself, with "JAX segment-op bindings require a CUDA-capable JAX
++    # device".  The other JAX modules do not check, and fail instead.
++    item_path = _item_path(item)
++    return any(directory in item_path for directory in _CUDA_ONLY_DIRECTORIES)
++
++
++def _item_needs_two_devices(item: pytest.Item) -> bool:
++    """Whether a test needs two distinct devices to mean anything."""
++    module = os.path.basename(_item_path(item))
++    return f"{module}::{item.name}" in _MULTI_DEVICE_TESTS
++
++
++def pytest_runtest_setup(item: pytest.Item) -> None:
++    """Skip a test that the machine cannot run for want of a device."""
++    if _warp_has_cuda():
++        return
++
++    if _item_needs_cuda(item):
++        pytest.skip("requires a CUDA-capable device")
++
++    if _item_needs_two_devices(item):
++        pytest.skip("requires two distinct devices")

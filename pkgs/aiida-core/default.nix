@@ -817,10 +817,30 @@ buildPythonPackage rec {
 
             monkeypatch.chdir(tmp_path)"
 
+    # `test_restart_after_daemon_reset`'s own budget, and a seventh wall-clock
+    # patch belonging with the six documented further down — it is up here
+    # because it predates them, not because it is a different kind of thing.
+    #
+    # The test restarts the daemon under a running calcjob and then waits for
+    # that job to reach FINISHED.  What it is waiting through is everything
+    # `submit_and_await`'s 60 seconds covers — adopt, upload, run, retrieve,
+    # parse — *plus* a freshly restarted daemon re-adopting a process that was
+    # already WAITING, so it gets twice that rather than the same.
+    #
+    # It was 60 and that was not enough: on nixos-26.05 it timed out still at
+    # ProcessState.WAITING, having already got past the `restart_daemon(wait=True)`
+    # that the `daemon.timeout` bump below fixed.  Same test, next layer.
+    #
+    # Not an `--only-rerun` entry, for the reason the wall-clock block gives:
+    # a retry hides a real timeout as readily as a spurious one, and nothing
+    # here weakens the assertion — the test still waits for FINISHED and still
+    # asserts `is_finished_ok`.  Only the patience changes.  The worst case is
+    # 60 (await) + 30 (restart) + 120 (this) = 210s, well inside the 900-second
+    # pytest-timeout cap set in `pytestFlags`.
     substituteInPlace tests/engine/processes/calcjobs/test_calc_job.py \
       --replace-fail \
         "    timeout = 10" \
-        "    timeout = 60"
+        "    timeout = 120"
 
     substituteInPlace tests/manage/test_profile_access.py \
       --replace-fail \
@@ -935,7 +955,10 @@ buildPythonPackage rec {
                         raise"
 
     # Six fixed wall-clock budgets, every one of them upstream's, and every one
-    # calibrated for a CI runner whose only job is this suite.  This build runs
+    # calibrated for a CI runner whose only job is this suite.  (A seventh,
+    # `test_restart_after_daemon_reset`'s own `timeout`, is patched further up
+    # with the rest of that file's hunks and carries its own note; it belongs to
+    # this argument rather than to the ones it sits among.)  This build runs
     # it at `--numprocesses=$NIX_BUILD_CORES` — 128 on the machine below — and
     # `just check` in particular has LLVM compiling alongside it.  On the run
     # that prompted this, nine tests failed or errored and every single one was

@@ -15,7 +15,7 @@
   scikit-learn,
 
   # optional-dependencies
-  deepmd-kit,
+  deepmd-kit ? null, # needs scikit-build-core >= 1, and nixos-26.05 has 0.11.6
   fairchem-core ? null, # needs e3nn, not in nixos-26.05
   mace-torch ? null, # not in nixos-26.05
   maml,
@@ -23,8 +23,8 @@
   matminer,
   phono3py,
   seekpath,
-  sevenn,
-  tensorpotential,
+  sevenn ? null, # needs e3nn and matscipy, neither in nixos-26.05
+  tensorpotential ? null, # needs matscipy, not in nixos-26.05
 
   # tests
   pytestCheckHook,
@@ -98,14 +98,34 @@ buildPythonPackage (finalAttrs: {
   # reaches matcalc through this list alone — `nativeCheckInputs` below takes
   # only the `matgl` entry, so nothing about matcalc's own build touches it, and
   # matcalc stays buildable and cacheable as it was.
+  #
+  # `sevennet`, `grace` and `deepmd` join `fairchem` and `mace` in being
+  # conditional, all of them because the overlay nulls the backend on
+  # nixos-26.05 — but not all for the same reason, and the differences are the
+  # interesting part.  ../sevenn declares `e3nn` and `matscipy` and
+  # ../tensorpotential declares `matscipy`, names 26.05 does not have at all.
+  # ../deepmd-kit is nulled over a *version*: `scikit-build-core>=1` against
+  # that channel's 0.11.6.
+  #
+  # `deepmd` was left unconditional when the other two were made conditional,
+  # on the reasoning that deepmd-kit wants `e3nn` for an extra of its own rather
+  # than as a dependency and so survives 26.05.  That was true about e3nn and
+  # wrong about the channel: it fails there for an unrelated reason, one that
+  # evaluation cannot see and only a build reports.
   optional-dependencies = {
     phonon = [ seekpath ];
     benchmark = [ matminer ];
-    deepmd = [ deepmd-kit ];
-    grace = [ tensorpotential ];
     maml = [ maml ];
     matgl = [ matgl ];
+  }
+  // lib.optionalAttrs (deepmd-kit != null) {
+    deepmd = [ deepmd-kit ];
+  }
+  // lib.optionalAttrs (sevenn != null) {
     sevennet = [ sevenn ];
+  }
+  // lib.optionalAttrs (tensorpotential != null) {
+    grace = [ tensorpotential ];
   }
   // lib.optionalAttrs (fairchem-core != null) {
     fairchem = [ fairchem-core ];

@@ -19,6 +19,7 @@
   profilehooks,
   psutil,
   pytest-benchmark,
+  pytest-xdist,
   rsync,
   tqdm,
 }:
@@ -73,6 +74,19 @@ buildPythonPackage rec {
   # openssh is needed only by test_inaccessible_remote, which points a backup at
   # a random hostname and expects the ssh probe to fail; with no ssh binary at
   # all it fails the wrong way, with FileNotFoundError.
+  #
+  # pytest-xdist because this suite is slow for its size: it writes and packs
+  # real objects on disk, and tests/test_concurrency.py spawns worker processes
+  # of its own.  nixpkgs' hook passes --numprocesses=$NIX_BUILD_CORES when the
+  # plugin is present.
+  #
+  # One interaction to know about rather than be surprised by: pytest-benchmark
+  # disables itself when xdist is active — "Benchmarks are automatically
+  # disabled because xdist plugin is active" — so tests/test_benchmark.py still
+  # runs, with the `benchmark` fixture as a plain pass-through. That is no loss
+  # here. A timing measured inside a Nix build on a machine of unknown load was
+  # never worth anything; what those tests are good for is exercising the write
+  # and pack paths, and that is exactly what survives.
   nativeCheckInputs = [
     pytestCheckHook
     h5py
@@ -82,6 +96,7 @@ buildPythonPackage rec {
     profilehooks
     psutil
     pytest-benchmark
+    pytest-xdist
     rsync
     tqdm
   ];

@@ -1,0 +1,46 @@
+Drop the single-channel EXR assertion from the imageio reader test
+
+`read_image_Imageio` is exercised with three files.  The two
+`CMS_Test_Pattern.exr` cases and the `Colour_Logo.png` case are fine;
+the `Single_Channel.exr` one cannot hold under any EXR backend that can
+be installed here, and being the third of four it was taking the PNG
+case down with it.
+
+imageio's priority list for `.exr` is `["EXR-FI", "pyav", "opencv"]`, and
+all three are exhausted:
+
+* `EXR-FI` is FreeImage, which imageio downloads as a binary on first use
+  -- a build cannot -- and which imageio will happily load from a system
+  copy via `IMAGEIO_FREEIMAGE_LIB`.  There is no system copy to point it
+  at: nixpkgs *removed* freeimage, with the message "freeimage was
+  removed due to numerous vulnerabilities".  This is the backend upstream
+  develops against and the one whose 2D result the assertion describes,
+  and it is permanently unavailable rather than merely absent.
+
+* `pyav` is selected when installed, and then ffmpeg's EXR decoder gives
+  up inside `avcodec_send_packet()` with `PatchWelcomeError: Not yet
+  implemented in FFmpeg`.  Installing it makes things worse, not better,
+  because the priority list is consulted once at plugin selection and
+  this failure comes later, at read time, with no fall-through.
+
+* `opencv` works, and is what this package uses.  But imageio's OpenCV
+  plugin declares `flags: int = cv2.IMREAD_COLOR` as its read default,
+  and IMREAD_COLOR always yields three channels.  Nothing in colour's
+  API reaches that argument without `read_image_Imageio` becoming
+  backend-specific, which would be a worse change than this one.
+
+No coverage is lost.  `TestReadImage::test_read_image` reads the same
+`Single_Channel.exr` and makes the same `(256, 256)` assertion, through
+OpenImageIO, and passes.
+--- a/colour/io/tests/test_image.py
++++ b/colour/io/tests/test_image.py
+@@ -473,9 +473,6 @@
+         assert image.shape == (1267, 1274, 3)
+         assert image.dtype is np.dtype("float16")
+ 
+-        image = read_image_Imageio(os.path.join(ROOT_RESOURCES, "Single_Channel.exr"))
+-        assert image.shape == (256, 256)
+-
+         image = read_image_Imageio(
+             os.path.join(ROOT_RESOURCES, "Colour_Logo.png"), "uint8"
+         )

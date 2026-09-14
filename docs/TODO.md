@@ -3,6 +3,170 @@
 Standing work items that outlive a single session. Worklogs in `.claude/worklog/` record what
 happened; this records what has not happened yet. One heading per item, newest first.
 
+## yellowbrick against a 2026 scikit-learn
+
+**Done, and recorded because the reasoning is reusable:** the eleven datasets are bundled.
+`yellowbrick/datasets/manifest.json` carries a URL *and a SHA-256 signature* per archive —
+upstream verifies its own downloads with them — so every `fetchurl` hash was derived offline by
+re-encoding that hex as SRI base64, with no clone, no network and no failed build to read the
+answer off.  `scripts/offline-src-hash.sh` cannot answer for a `fetchurl`, and here it did not
+have to.  `BaseDataset.__init__` downloads only `if not dataset_exists(...)` and `get_data_home`
+reads `$YELLOWBRICK_DATA`, so unzipping them into a directory and exporting that variable is the
+whole of the wiring.  Thirty-three `disabledTestPaths` entries became two.
+
+Two details of the wiring are worth keeping.  The data goes in
+`yellowbrick/datasets/fixtures` — the in-package default — rather than behind `$YELLOWBRICK_DATA`,
+because `tests/test_datasets/test_path.py` asserts what the default is, and setting the variable
+buys the same data at the cost of a legitimate test.  And **both** halves of upstream's download
+layout are needed: `download_data` leaves `<data_home>/<name>.zip` beside the extracted
+directory, and `test_loaders.py` checks that archive's SHA-256 against the manifest, so
+extracting alone left eleven tests failing with "dataset archive does not match signature".
+
+**What is left is not packaging, it is an upstream port.**  With the datasets in place the suite
+collects 1137 tests and 307 fail — a v1.5 tree from 2022 meeting dependencies from 2026:
+
+| Count | Cause |
+|---|---|
+| **243** | `yellowbrick/utils/types.py` decides what an estimator is with `getattr(estimator, "_estimator_type", None) == "classifier"`.  **scikit-learn 1.6 removed `_estimator_type`** in favour of `__sklearn_tags__()`, so `is_classifier`, `is_regressor` and `is_clusterer` answer `False` for everything, and every visualizer that gates on them raises `YellowbrickTypeError: This estimator is not a classifier` |
+| 11 | the dataset archive check above — **fixed** |
+| 7 | NumPy 2 refusing to stack a generator |
+| 6 | `'TestClusterBase' object has no attribute 'fail'` — six tests calling a `TestCase` method on a class that is not one |
+| 9 | alpha-selection tests that can no longer instantiate their sklearn estimator |
+| 4 each | `Axes.stem(use_line_collection=)` gone from matplotlib 3.9; a removed `LogisticRegression` keyword; `DID NOT WARN` |
+| 3 | liblinear's multiclass support dropped in sklearn 1.7 |
+| 2 each | `np.matrix` unsupported; `CountVectorizer.get_feature_names` renamed; `exceptions must be derived from Warning` |
+
+Also fixed here, and worth noting only because they were two lines each: `matplotlib.cm.get_cmap`
+(39 failures, gone in 3.9) and `numpy.in1d` (3 failures, gone in 2.0).
+
+**The estimator-type family is the one to think about before touching.**  Routing the three
+predicates through `sklearn.base.is_classifier` / `is_regressor` fixes the instance case and
+nothing else.  yellowbrick's tests require all four of: a *class*, an instance, a `Pipeline`, and
+a visualizer that merely *wraps* an estimator — and assert the class is **not** a classifier while
+its instance is.  sklearn's own predicates cover one of those four.  A faithful patch needs a
+mixin check for classes, sklearn's tags for pipelines, a recursion into `ModelVisualizer.estimator`
+for visualizers, and the existing `_estimator_type` read kept as a fallback, because yellowbrick's
+own `contrib` wrappers still set that attribute by hand.  That is a pull request, not a
+`substituteInPlace`.
+
+**Whether any of it is worth doing is a separate question.**  Nothing in this repository depends
+on yellowbrick; it exists to unblock `fairchem-applications-ocx`, which is itself unpackaged and
+wanted by nothing here.  Thirty modules are excluded and 606 tests run.
+
+## Allow Python 3.14
+
+**Want:** `default.nix`'s `py = pkgs'.python313Packages` to become `python3Packages` again, so
+this repository follows the channel's default interpreter instead of pinning one behind it.
+
+**One package blocks it, and the other three follow it.**  `rg -l 'pythonAtLeast "3.14"' pkgs/`
+returns exactly four, and they are the QCArchive family: `qcportal`, and `qcfractal`,
+`qcfractalcompute` and `qcarchivetesting`, which each carry their own marking because
+`meta.broken` does not propagate to dependants.  Everything else in the repository — 137
+packages — has no 3.14 gate at all and has simply never been evaluated against it.
+
+**The mechanism is written out at `pkgs/qcportal/default.nix`'s `meta`** and is worth reading
+before planning anything, because it is not a deprecation that a patch can paper over.
+qcportal 0.65 is pydantic v1 throughout; `qcelemental`'s
+`_use_real_if_possible()` returns `False` for `sys.version_info >= (3, 14)` and replaces every
+QCSchema v1 name with a placeholder class; one of those names is `Array`, which
+`dataset_models.py` subscripts as `index: Array[str]`; the placeholder has an ordinary metaclass,
+so pydantic v1 dies with `TypeError: type 'Array' is not subscriptable`.  Upstream's pydantic v2
+migration is unreleased.  `just repro-gh` reproduces it in one command.
+
+**So this is a waiting game with a preparation half, and the preparation is the useful part.**
+Nobody knows what *else* would break, because the pin has meant nothing here is ever built on
+3.14.  Two things worth doing before the blocker lifts:
+
+1. **Measure.**  Evaluate `default.nix` against a 3.14 package set and see how many of the 137
+   ungated packages even evaluate — nixpkgs' own 3.14 set is missing packages that the 3.13 one
+   has, which is the `e3nn` failure mode again and is an evaluation error rather than a build
+   one.  This costs nothing and can be done from the sandbox.
+2. **Decide what "allow" means.**  There are two different goals here and they need different
+   work: *following* the channel default (one line in `default.nix`, everything moves at once,
+   QCArchive disappears from the repository on unstable until upstream releases), versus
+   *supporting* 3.14 alongside 3.13 (both sets exposed, `python314Packages` beside
+   `python313Packages`, and a second copy of every list in `AGENTS.md`'s "three edits" section).
+   The first is what the comment in `default.nix` assumes; the second is what a consumer on
+   unstable actually wants today.
+
+**Do not drop the pin before qcportal is fixed.**  The note at `default.nix` says why: the whole
+QCArchive half of this repository, both NixOS modules included, would ship nothing on unstable,
+and `nix flake check` would take every VM test down with it the moment `flake.lock` moved past
+the switch.
+
+## Fill in gpulite's hash, and build vesin
+
+**Want:** `pkgs/vesin` building.  It is written and wired, and **one hash in it is
+`lib.fakeHash`** — `gpulite`'s — because it cannot be computed without the network or a clone.
+`nix-build -A internalPackages.vesin` fails immediately at that fetch and prints the real hash;
+paste it in.  Alternatively clone `metatensor/gpu-lite` (a *full* clone, not `--depth 1` — the
+pin is a commit, not a tag) and `just hash-src` answers offline.
+
+**Why there is a second fetch at all.**  vesin's `vesin/CMakeLists.txt` pulls gpulite in with
+`FetchContent` and links it unconditionally; there is no option to build without it.  The
+derivation hands CMake the source through `FETCHCONTENT_SOURCE_DIR_GPULITE`, which is
+FetchContent's own override for exactly this, and sets `FETCHCONTENT_FULLY_DISCONNECTED=ON` so
+that a future dependency added upstream fails at configure time rather than attempting a clone.
+Same shape as `pkgs/enumlib`'s symlib.
+
+**What it unblocks, and it is why this is worth the trouble.**  `pkgs/torch-pme` goes from ten
+test modules to eighteen — `tests/helpers.py` imports vesin at module scope, and upstream's
+`python_files = ["*.py"]` makes that file collectable, so without vesin the run died at
+collection rather than losing eight modules.  `pkgs/nvalchemi-toolkit-ops` stops skipping about
+sixty tests marked "`vesin` required for consistency checks", which are the only ones in that
+suite comparing its neighbour lists against an independent implementation.
+
+**Not done:** `vesin-torch`, the second distribution in the same repository.  Nothing here needs
+it — `torch-pme`'s `tests/helpers.py` uses the plain numpy `NeighborList`, and so does
+`test_torch.py`, which merely passes torch tensors through it.  `tests/requirements.txt` asks for
+`vesin[torch]`, and that turns out to overstate what the suite imports.
+
+## Send nvalchemi's stray torchpme import upstream, and decide about torch-pme
+
+**Want:** `pkgs/nvalchemi-toolkit-ops/torchpme-import-guard.patch` offered to
+[NVIDIA/nvalchemi-toolkit-ops](https://github.com/NVIDIA/nvalchemi-toolkit-ops), so we can drop
+it.  Like the fireworks and ase-db-backends items below, this needs no further diagnosis: the
+patch is written, applies at v0.4.1, and the build that motivated it is the reproducer.
+
+**The bug is one import in the wrong place.**
+`test/interactions/electrostatics/bindings/torch/test_ewald.py` guards torch-pme properly —
+
+```python
+try:
+    from torchpme import EwaldCalculator
+    from torchpme.potentials import CoulombPotential
+
+    HAS_TORCHPME = True
+except ModuleNotFoundError:
+    HAS_TORCHPME = False
+    EwaldCalculator = None
+    CoulombPotential = None
+```
+
+— and every class that needs it carries `@pytest.mark.skipif(not HAS_TORCHPME, ...)`.  Twenty
+lines above that block sits a third import, outside the try:
+
+```python
+from torchpme.lib.kvectors import _generate_kvectors as _generate_kvectors_torchpme
+```
+
+**What it costs is the whole suite, not the module.**  pytest treats a collection error as fatal
+to the run: the first build here reported `8129 collected / 2417 deselected / 5712 selected` and
+then `Interrupted: 1 error during collection`, so nothing ran at all.  The module holds 225 tests
+and exactly **14** reference torchpme — all 14 in classes that already skip themselves, and the
+symbol has exactly one call site, in a helper only those tests reach.  Setting it to `None` is
+what upstream already does for the other two names.
+
+**The second question is settled: `torch-pme` is packaged.**  `pkgs/torch-pme`, internal —
+BSD-3-Clause, setuptools, and `torch >= 2.3` is its entire dependency list.  So the four modules
+that skip against `HAS_TORCHPME` (`bindings/torch/test_ewald.py`, `bindings/torch/test_slab.py`,
+`bindings/jax/test_ewald.py`, `bindings/jax/test_pme.py`) have their reference, and what they
+check is the correctness half of the electrostatics suite rather than the plumbing.
+
+The patch stays anyway.  It is upstream's bug either way, and it is what keeps the module
+collectible on any path where torch-pme is absent — a collection error costs the whole run, not
+the module.
+
 ## Send fireworks' atomic `FW_ping.json` write upstream
 
 **Want:** `pkgs/fireworks/atomic-ping-write.patch` offered to
@@ -374,8 +538,22 @@ argued from the shapes rather than measured.
 
 ## Build the internal packages that nothing else builds
 
-**Want:** `just ci-matrix` to fail when an internal package breaks, instead of the breakage
-sitting unnoticed until someone builds it by hand.
+**Done in shape, unverified in fact.** `default.nix` now exposes `internalPackages` — option 1
+below, the hand-written set carrying `recurseIntoAttrs` — and `ci.nix` picks it up because
+`isReserved` there deliberately does *not* name it. `buildPkgs` went from 61 entries to 128, and
+`sevenn`, `deepmd-kit`, `dpdata`, `dargs`, `maml`, `rootstock`, `parmed` and
+`nvalchemi-toolkit-ops` are all in it for the first time. `tensorpotential` is kept out, for the
+unfree reason option 3 below gives.
+
+**What has not happened is a build.** This was written in the sandbox, so `just ci-eval` and the
+no-daemon suite are all that has run. Expect the first `just ci-matrix` to be long and to fail:
+these are torch-sized closures, several have never been built on any channel, and the one time
+`sevenn` *was* built it failed outright. That is the entry working as intended, not a regression
+— but it means the first run needs `--keep-going` and a reading of every leaf, not a bisection
+from the first failure.
+
+The rest of this entry is the reasoning that produced the change, kept because the trade-offs in
+it are still the ones to weigh if the shape needs revisiting.
 
 `ci.nix` walks `default.nix` and skips `python313Packages` — deliberately, and the note there
 explains why: it is the whole 3.13 set, so descending would try to build all of nixpkgs.  The
@@ -445,6 +623,14 @@ Every one of these was written off in `AGENTS.md` as "13-distribution monorepo, 
 pretrained model weights", which counted the distributions instead of reading their dependency
 lists.  Reading them:
 
+**Update, 2026-09-13: the Gap column is now empty for everything that had one.**  `p-tqdm` and
+`yellowbrick` are packaged (`pkgs/p-tqdm`, `pkgs/yellowbrick`, both internal), which were the
+last two names in this table that nixpkgs lacked.  So nothing in the set is *blocked* any more —
+what remains is the work of writing nine derivations for distributions no package here depends
+on.  `yellowbrick` was the awkward one and is worth knowing about before using it: v1.5 is from
+2022, so it needed the two NumPy 2 aliases repaired, and 341 of its 862 tests compare renderings
+against PNGs made with matplotlib 3.4.2 and are skipped by patch.  The other 521 run.
+
 | Distribution | Core dependencies | Gap |
 |---|---|---|
 | `fairchem-data-omol` | `ase` | **done** — plus numpy/scipy/pymatgen, undeclared |
@@ -454,8 +640,8 @@ lists.  Reading them:
 | `fairchem-data-omc` | + `atomate2` | none — atomate2 is packaged |
 | `fairchem-demo-ocpapi` | dataclasses-json, inquirer, responses, tenacity, tqdm | none |
 | `fairchem-applications-cattsunami` | `fairchem-core`, `fairchem-data-oc` | none, now |
-| `fairchem-applications-fastcsp` | + `p_tqdm`, `rdkit` | `p-tqdm` |
-| `fairchem-applications-ocx` | + matminer, plotly, statsmodels, seaborn, `yellowbrick` | `yellowbrick` |
+| `fairchem-applications-fastcsp` | + `p_tqdm`, `rdkit` | none — `pkgs/p-tqdm` |
+| `fairchem-applications-ocx` | + matminer, plotly, statsmodels, seaborn, `yellowbrick` | none — `pkgs/yellowbrick` |
 | `fairchem-applications-AdsorbML` | declares none | read `setup.py` first |
 | `fairchem-lammps` | `fairchem.core` + LAMMPS | not surveyed |
 | `fairchem-core-numpy126` | a numpy-1.26 variant of core | skip — pointless here |
@@ -533,20 +719,48 @@ artifacts to cachix.  The work is then:
 
 `nvalchemi-toolkit-ops` is a separate question and does not depend on this one; see below.
 
-## Package nvalchemi-toolkit-ops (tabled)
+## Build `nvalchemi-toolkit-ops`, then take the packages it was blocking
 
-**Want:** a survey, then a decision.  This is the single package blocking `torch-sim`,
-`orb-models`, `mattersim` and `pet-mad`, and 9 of the failures in a full `pkgs/fairchem-core`
-test run (`RuntimeError: Requires ``nvalchemiops`` to be installed`).  It is a core dependency of
-those four, not an extra.
+**Want:** `pkgs/nvalchemi-toolkit-ops` build-verified, and then `orb-models` and `torch-sim`
+surveyed against their own dependency lists rather than against this one.
 
-**Not started, and nothing has been read.** It has been recorded as a wall for weeks on the
-strength of its name and its appearance in dependency lists — which is exactly the reasoning that
-turned out to be wrong for `deepmd-kit`, for `fairchem-core`, and for the fairchem data packages
-above.  It needs a clone and a read of its `pyproject.toml` before anyone says again that it
-cannot be done.
+**The wall was not a wall.** This entry used to say "a survey, then a decision", and record
+nvalchemi as the single package blocking `torch-sim`, `orb-models`, `mattersim` and `pet-mad`,
+"on the strength of its name and its appearance in dependency lists".  Reading
+`pyproject.toml` took two minutes and settled it:
 
-Ask for the clone; it is not in `wc/`.
+    license        Apache-2.0
+    build-system   hatchling
+    dependencies   warp-lang >= 1.13.0, numpy
+
+`warp-lang` is in nixpkgs at 1.15.0, free, unbroken, on Linux.  There is no compiled extension in
+the distribution at all — Warp kernels are ordinary Python functions that warp JIT-compiles at
+*run* time, and nixpkgs builds warp-lang with `standaloneSupport = true`, its LLVM CPU backend,
+which it exercises in its own sandbox as `warp-lang.passthru.tests.cpu`.  So this is a pure
+Python package with two dependencies, and it is packaged: `pkgs/nvalchemi-toolkit-ops`, internal,
+reachable as `python313Packages.nvalchemi-toolkit-ops` and built by `internalPackages`.
+
+**What remains, in order:**
+
+1. *Build it.* It was written in the Claude Code sandbox, which has no nix-daemon, so nothing
+   about its check phase has been run — `pkgs/sevenn` is the standing warning about what that is
+   worth.  Three things are guesses until a build says otherwise: that warp's JIT works under
+   `preBuild`'s `HOME` with no GPU, that `-m "not gpu"` is enough to keep the 20 GPU-marked tests
+   out, and that jax and torch are the right two check inputs for a suite that imports one or the
+   other at module scope in most of its modules.
+2. *`orb-models`.* It asks for `nvalchemi-toolkit-ops[torch]>=0.4.1,<0.5`, which is exactly the
+   version packaged, so its gaps are now its *other* core dependencies — unread.  `wc/orb-models`
+   is cloned.  This is matcalc's `orb` extra.
+3. *`torch-sim`.* Never read either; not in `wc/`.  `mattersim` and `pet-mad` both reach nvalchemi
+   through `torch-sim-atomistic` rather than directly, so they wait on this one.
+4. *`upet`* stays blocked, and not on nvalchemi: it pins `nvalchemi-toolkit-ops>=0.3.0,<0.4.0`
+   (so 0.3.1, not the packaged 0.4.1) and also wants `metatrain` and `metatomic-ase`, neither of
+   which nixpkgs has.
+
+**The lesson is the one this file keeps re-learning**, and it is now four for four: `deepmd-kit`,
+`fairchem-core`, the `fairchem-data-*` set and this.  Every package written off on reputation
+turned out to need one or two ordinary things.  The cost of checking is a clone and a
+`nix-instantiate --eval`.
 
 
 ## Send `ase-db-backends`' `close()` fix upstream

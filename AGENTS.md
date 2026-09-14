@@ -38,9 +38,12 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   default `python3` rather than the 3.13 pin.
 - **harmonwig** — likewise a standalone CLI.
 - the **chemtools family** — `wignernj`, `strainjedi`, `sella`, `molara`, `moltui`, and the
-  `chemfiles` C++ library with its Python binding, plus two dependencies that stay internal:
-  `pyrr` (which nixpkgs *removed*, so there is no attribute to fall back to) and the `trexio`
-  Python binding. These share no closure with each other or with anything above; they are one
+  `chemfiles` C++ library with its Python binding, plus three packages that stay internal:
+  `pyrr` (which nixpkgs *removed*, so there is no attribute to fall back to), the `trexio`
+  Python binding, and `lwoniom` — a Fortran ONIOM bookkeeping library from the crest group,
+  packaged through its Python binding because that is the form upstream installs, and here
+  because it is small and adjacent rather than because anything needs it.
+  These share no closure with each other or with anything above; they are one
   overlay rather than several because each would otherwise be an overlay attribute holding a
   single `callPackage`. `moltui` is a top-level attribute rather than a package-set member, like
   dotdrop and harmonwig — see the table below. Two names in here collide with something else:
@@ -67,6 +70,10 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   see "Deferred packaging"), `pymatgen-io-aims` (`atomate2[aims]`'s, the FHI-aims I/O that
   upstream pymatgen *shed* in the 2026 split) with `pyfhiaims` under it, and `monty`, a
   backport that exists only because `pymatgen-core` needs a version no channel here ships yet.
+  Two more are here for a dependant that does not exist yet: `nvalchemi-toolkit-ops`, which
+  `orb-models` and `torch-sim` need and which was written off for months as an NVIDIA wall
+  before anyone read its two-line dependency list, and `torch-pme` beneath it, the reference its
+  electrostatics suite validates against.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
   upstream split it and the two layouts cannot coexist, `monty` on the legs that are behind,
   `torchtnt`, which is simply broken against setuptools 83, and `py-lmdb`, pinned *down* to 1.7.3
@@ -150,6 +157,9 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 |---|---|
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
 | How do I evaluate one expression from inside the sandbox, without running the whole suite? | `scripts/sandbox-eval.sh` (the header comment), `just eval` |
+| How do I find *every* attribute that will not evaluate on a channel, rather than one per CI round? | `scripts/channel-gaps.sh` (the header comment), `just channel-gaps` |
+| Why does that script force each attribute in its own process instead of reading `functionArgs`? | `scripts/channel-gaps.sh` (the header comment), `scripts/channel-gaps.nix` |
+| Why does it skip `drvPath` on broken and unfree packages, and still force `meta.broken`? | `scripts/channel-gaps.nix` (the note above `force`) |
 | Why does a green check here mean nothing if `<nixpkgs>` came from the flake registry? | `scripts/locked-nixpkgs.sh` (the header comment) |
 | Where does a `fetchFromGitHub` hash come from with no network and no daemon? | `scripts/offline-src-hash.sh` (the header comment), `just hash-src` |
 | When is a repository's `export-subst` actually fatal to an offline hash, and when is it not? | `scripts/offline-src-hash.sh` (the header comment, and the `export-subst` branch) |
@@ -174,6 +184,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `repeated_keys` disabled? Why does the whitespace hook skip `*.patch`? | `statix.toml`, `flake.nix` |
 | Why does `qcfractalcompute` carry a patch? Why is `parsl` built from the sdist? | the respective `pkgs/*/default.nix` |
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
+| How would version updates be automated, and why is `nixpkgs-update` the wrong tool for it? | `docs/version-updates.md` |
 | Why does `verdi` come from a `withPackages` env instead of `lib.getExe cfg.package`? | `nixos-modules/aiida.nix` (`pythonEnv`) |
 | Why does the AiiDA module ensure the *database* when the QCFractal one deliberately does not? | `nixos-modules/aiida.nix` (`services.postgresql`) |
 | Why does `database.createLocally` default to whether the storage backend is PostgreSQL? | `nixos-modules/aiida.nix` (the `createLocally` default, and the `useSqlite` assertion) |
@@ -359,6 +370,14 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `tensorpotential` spell `redistributable` out instead of letting it default? | `pkgs/tensorpotential/default.nix` (`meta.license`) |
 | Why does dropping `tensorflow[and-cuda]` not cost GPU support? | `pkgs/tensorpotential/default.nix` (`postPatch`) |
 | Why is `fairchem-core` null on nixos-26.05 rather than `meta.broken`? | `overlays/default.nix` (the `fairchem-core` binding in the materials overlay), `docs/TODO.md` |
+| Why are `sevenn` and `tensorpotential` nulled on nixos-26.05 too, and on which names? | `overlays/default.nix` (the `sevenn` and `tensorpotential` bindings in the materials overlay) |
+| Why is `nvalchemi-toolkit-ops` gated on warp-lang's *version* and not just its presence? | `overlays/default.nix` (the `nvalchemi-toolkit-ops` binding in the materials overlay) |
+| Why is `deepmd-kit` gated on a *build backend's* version, and why is `minimum-version` not relaxed? | `overlays/default.nix` (the `deepmd-kit` binding in the materials overlay) |
+| Why does `deepmd-kit` carry two independent gates, one for e3nn and one for scikit-build-core? | `pkgs/deepmd-kit/default.nix` (the note above `optional-dependencies`) |
+| Which version floors has nixos-26.05 actually tripped, and why can no eval-time check find them? | `scripts/channel-gaps.sh` (the header comment) |
+| Why does `test_restart_after_daemon_reset` get 120 seconds, and why is it not an `--only-rerun` entry? | `pkgs/aiida-core/default.nix` (the note above its `timeout` hunk in `postPatch`) |
+| Why is `deepmd-kit` defaulted-to-null on `e3nn` instead of being nulled like the other three? | `pkgs/deepmd-kit/default.nix` (the note above `optional-dependencies`) |
+| Why does `matcalc` gate five of its ten extras, and why is `deepmd` not one of them? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |
 | Why can `matcalc` take an unfree extra and stay free and cacheable? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |
 | Why does `matplotlib-label-lines` need `pytest-mpl` when the image comparison is switched off? | `pkgs/matplotlib-label-lines/default.nix` (`nativeCheckInputs`) |
 | Why must `labellines/test.py` be named in `enabledTestPaths` rather than found? | `pkgs/matplotlib-label-lines/default.nix` (`enabledTestPaths`), `pkgs/pgtest/default.nix` |
@@ -415,6 +434,22 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `ase-db-backends` list `ase` as both a dependency and a check input? | `pkgs/ase-db-backends/default.nix` (`nativeCheckInputs`) |
 | Which `ase-db-backends` tests skip themselves, and which actually run? | `pkgs/ase-db-backends/default.nix` (`enabledTestPaths`) |
 | Why does `ase-db-backends` patch `close()`, and what did reopening-to-close break? | `pkgs/ase-db-backends/close-must-not-reopen.patch`, `docs/TODO.md` |
+| Why is nixpkgs' `openimageio` rebuilt here, when its Python binding is already enabled? | `overlays/default.nix` (the `openimageio` binding in the `cheminformatics` extension) |
+| Why does that rebuild live in a Python package set, and what does `toPythonModule` buy? | `overlays/default.nix` (the same binding) |
+| Why does `colour-science` need `xxhash`, when upstream calls it optional? | `pkgs/colour-science/default.nix` (`nativeCheckInputs`) |
+| Why does `colour-science` take `opencv4` for EXR, when imageio lists two backends ahead of it? | `pkgs/colour-science/default.nix` (the `opencv4` paragraph above `nativeCheckInputs`) |
+| Why must `av` stay *out* of colour-science, rather than sit beside opencv4? | `pkgs/colour-science/default.nix` (the same paragraph) |
+| Why does `colour-science` export `OPENCV_IO_ENABLE_OPENEXR`? | `pkgs/colour-science/default.nix` (`preCheck`) |
+| Why can no EXR backend satisfy `test_read_image_Imageio`'s single-channel case, and what covers it instead? | `pkgs/colour-science/imageio-single-channel-exr.patch` (the header) |
+| Why does `rootstock` set `dontBypassUvDynamicVersioning`, when it already sets the variable that hook sets? | `pkgs/rootstock/default.nix` (the note above it) |
+| Why is `test_device_mismatch` handled by nvalchemi's CUDA gate rather than by `disabledTests`? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the note above `disabledTests`), `pkgs/nvalchemi-toolkit-ops/cuda-gating.patch` (`_MULTI_DEVICE_TESTS`) |
+| Why did 73 `nvalchemi-toolkit-ops` tests start failing the moment `torch-pme` began to build? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the third note above `patches`), `pkgs/nvalchemi-toolkit-ops/torchpme-prefactor-moved.patch` |
+| Why is dropping torch-pme's `prefactor` argument exact rather than approximate? | `pkgs/nvalchemi-toolkit-ops/torchpme-prefactor-moved.patch` (the header) |
+| Which three shapes of `cuda:0` does the nvalchemi conftest gate not reach, and why is one of them a *torch* device? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the last four notes in `postPatch`) |
+| Why does `nvalchemi-toolkit-ops` give `np.eye(3)` a dtype, and which two tests were failing without it? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the last note in `postPatch`) |
+| Which `colour-science` failures were never going to skip themselves, and what did the old note get wrong? | `pkgs/colour-science/default.nix` (the note above `nativeCheckInputs`) |
+| Why does `torch-pme` patch a tolerance rather than deselect the test, and why not just seed the RNG? | `pkgs/torch-pme/default.nix` (the note above `patches`), `pkgs/torch-pme/combined-potential-tolerance.patch` |
+| Why did `rootstock` start 404ing on a `rev` that still resolves in its clone? | `pkgs/rootstock/default.nix` (the note above `src`) |
 
 ### The sdist-has-no-tests trap
 
@@ -481,9 +516,23 @@ overlays itself, so `legacyPackages` must use it as-is. The separate `pkgs'` in 
 overlaid set, and is what the eval and VM tests need.
 
 **Reserved keys** (`lib`, `overlays`, `nixosModules`, `homeModules`, `darwinModules`,
-`flakeModules`, `python313Packages`) are attrs in `default.nix` that must not be lifted into a
-nixpkgs overlay. The `isReserved` predicate is duplicated in both `overlay.nix` and `ci.nix` —
-adding a new reserved key means editing both.
+`flakeModules`, `python313Packages`, `internalPackages`) are attrs in `default.nix` that must not
+be lifted into a nixpkgs overlay. The `isReserved` predicate is duplicated in both `overlay.nix`
+and `ci.nix` — adding a new reserved key means editing both, **except `internalPackages`, which
+is reserved in `overlay.nix` alone**. Being skipped by `ci.nix` is what the predicate there is
+for, and skipping that one would defeat its whole purpose; both files carry the reasoning at
+their own copy.
+
+`internalPackages` is the answer to "who builds a package that only an extra reaches". Sixty-odd
+packages here are internal — one dependant each, so that dependant builds them — but a package
+named only by an `optional-dependencies` entry has no such dependant, because an extra is not a
+build input. `sevenn`, `deepmd-kit`, `dpdata`, `maml`, `rootstock` and `nvalchemi-toolkit-ops`
+were built by nothing at all until this attribute existed. It carries `recurseIntoAttrs`, which
+is exactly what `python313Packages` below must not, and it deliberately omits `tensorpotential`
+(unfree, and `just ci-eval` forces `drvPath` over everything it can reach), the guarded backports
+`monty` and `pycifrw` (nixpkgs' own derivations on a new enough channel), and `graphrc` /
+`node-graph-widget-js` (top-level attributes of their overlays, not Python-set members). See the
+note at the attribute itself.
 
 `python313Packages` is the one that is ours rather than the NUR template's, and the one where
 getting it wrong does real damage: it is the whole overlaid 3.13 set, exposed so that the
@@ -730,11 +779,11 @@ the survey had not already read. The cost of checking is one `nix-instantiate --
 
 | Not packaged | Blocker |
 |---|---|
-| `torch-sim` | `nvalchemi-toolkit-ops` (NVIDIA) is a **core** dependency, not in nixpkgs — and never surveyed, so "blocked" here means "unread". Queued in `docs/TODO.md` |
-| `orb-models`, `mattersim`, `pet-mad` | same NVIDIA wall as `torch-sim` — `orb-models` lists `nvalchemi-toolkit-ops` as a core dep, `mattersim` lists `torch-sim-atomistic` (→ nvalchemi), `pet-mad` lists `nvalchemi-toolkit-ops` + `warp-lang`. These are the matcalc `orb` / `mattersim` / `petmad` extras |
-| `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first: pyproject declares **no** `dependencies`, the real ones are in `devtools/conda-envs/`. Needs seven packages nixpkgs lacks: `openff-units`, `openff-utilities`, `openff-nagl`, `openff-nagl-models`, `openff-forcefields`, `openff-amber-ff-ports`, `openmmforcefields`. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
+| `torch-sim` | `nvalchemi-toolkit-ops` — **no longer a blocker.** It is packaged (`pkgs/nvalchemi-toolkit-ops`, internal): Apache-2.0, hatchling, and its only dependencies are `numpy` and `warp-lang`, which nixpkgs has at 1.15.0. What is left is torch-sim's *own* dependency list, which has never been read; it is not in `wc/`. See `docs/TODO.md` |
+| `orb-models`, `mattersim`, `pet-mad` | the "NVIDIA wall" these were written off for was `nvalchemi-toolkit-ops`, and it was never surveyed — see the row above. `orb-models` asks for `nvalchemi-toolkit-ops[torch]>=0.4.1,<0.5`, which is exactly the version packaged, so its remaining gaps are its other core dependencies alone; `mattersim` and `pet-mad` reach it through `torch-sim-atomistic`, so they wait on that. These are the matcalc `orb` / `mattersim` / `petmad` extras |
+| `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first, and re-checked against clones in `wc/` on 2026-09-12: `openff-toolkit`, `openff-interchange`, `openff-nagl`, `openff-forcefields`, `openff-qcsubmit` and `openff-utilities` still declare **no** `dependencies` at all, and `openff-toolkit`'s `devtools/conda-envs/conda.yaml` names the conda meta-package `openff-toolkit-examples` rather than a list. Still seven packages nixpkgs lacks — but **the bottom two of the seven are leaves and packageable today**: `openff-utilities` declares nothing, and `openff-units` declares `numpy`, `openff-utilities>=0.1.3` and `pint>=0.24,<0.26`, which nixpkgs satisfies at pint 0.25.3. `openmm`, `rdkit`, `qcelemental`, `qcengine` and `nglview` are all in nixpkgs; `openeye-toolkits` is not, and is proprietary, which is what the `conda_oe.yaml` / `test_env_no_openeye.yaml` split is about. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
 | `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
-| `fairchem-applications-*`, `fairchem-demo-ocpapi`, `fairchem-lammps` | **not blocked — queued**, and nothing downstream here asks for them. The remaining nine distributions of the monorepo; `fastcsp` wants `p-tqdm` and `ocx` wants `yellowbrick`, and those two packages are the only gaps in the set. See `docs/TODO.md` |
+| `fairchem-applications-*`, `fairchem-demo-ocpapi`, `fairchem-lammps` | **not blocked, and no longer gated either**, though nothing downstream here asks for them. The remaining nine distributions of the monorepo. The two packages that stood between them and buildable — `p-tqdm` for `fastcsp`, `yellowbrick` for `ocx` — are packaged (`pkgs/p-tqdm`, `pkgs/yellowbrick`, both internal), so what is left is the distributions themselves, each a `sourceRoot` copy of `pkgs/fairchem-core` at its own tag. See `docs/TODO.md` |
 | `PsiDataViz` | uv workspace, never released, includes a React/TS frontend; only `packages/psidata` is plausible |
 | ~~`crest`~~ | **Not a gap, and never was.** NixOS-QChem has it as `qchem.crest`, and `pkgs/aqme` has been reaching it through `final.crest or final.qchem.crest or null` all along. This row said "not in nixpkgs, feasible, just different work" and was reasoning from nixpkgs alone — check `package_list.json` in the nixos-qchem checkout before writing another row like it. See "Reusing NixOS-QChem" above |
 

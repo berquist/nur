@@ -246,6 +246,19 @@ eval expr:
 hash-src clone rev="HEAD":
     ./scripts/offline-src-hash.sh {{ clone }} {{ rev }}
 
+# `ci-eval` stops at the first attribute that will not evaluate, because a
+# `callPackage` missing an undefaulted argument *aborts* rather than throwing,
+# and an abort takes the whole evaluation with it.  This forces each attribute
+# in its own process, so one channel's gaps are reported together instead of one
+# per CI round.  With no argument it checks every channel in the matrix above;
+# with a nixpkgs path — the one a failed run left in the store — it needs
+# neither the network nor a daemon.  See the script's header, which also says
+# what this deliberately does not catch.
+
+# Every attribute that will not evaluate on a channel, e.g. `just channel-gaps nixos-26.05`.
+channel-gaps *channels:
+    ./scripts/channel-gaps.sh {{ channels }}
+
 # ---------------------------------------------------------------------------
 # Building
 # ---------------------------------------------------------------------------

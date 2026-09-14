@@ -241,7 +241,65 @@ in
         basis-set-exchange = pself.callPackage ../pkgs/basis-set-exchange {
           wignernj = pself.wignernj or null;
         };
-        colour-science = pself.callPackage ../pkgs/colour-science { };
+
+        # nixpkgs builds OpenImageIO's Python binding already — `enablePython`
+        # defaults to true — but against `python3Packages.pybind11`, and
+        # `python3` is 3.14 on the channels here.  The module therefore installs
+        # to `lib/python3.14/site-packages` and is invisible to every 3.13 set,
+        # which is the *only* reason ../pkgs/colour-science could not import it:
+        # there was nothing wrong with the derivation, it was aimed at the wrong
+        # interpreter.  Adding nixpkgs' attribute to a check input would have
+        # changed nothing.
+        #
+        # Handing it `pself` retargets it at whichever interpreter this
+        # extension is being applied to, which is what makes it correct in every
+        # `pythonX.pkgs` rather than in one.  pybind11 is the whole mechanism:
+        # cmake finds its interpreter through `CMAKE_PREFIX_PATH`, so changing
+        # which pybind11 goes in changes which Python the binding is built and
+        # installed for.  `Python3_EXECUTABLE` is pinned as well so that a
+        # second interpreter arriving through some other build input cannot win
+        # the search silently.
+        #
+        # This lives in the Python set rather than at the top level because its
+        # Python version is the whole point of it — a top-level attribute would
+        # have exactly the ambiguity being fixed.  It is not re-exported; only
+        # colour-science's check phase consumes it, and the module is in the
+        # `out` output rather than the default `bin` one.
+        #
+        # `toPythonModule` is what makes it *legal* here, not a formality:
+        # nixpkgs wraps every member of a Python package set in a guard that
+        # throws "should use `buildPythonPackage` or `toPythonModule`" on
+        # anything without a `pythonModule` passthru.  The guard is lazy enough
+        # that `pself.openimageio.out` slipped past it while a plain
+        # `python313Packages.openimageio` did not — the worst of both, since the
+        # build would have worked and the attribute path would still have
+        # thrown.
+        openimageio = pself.toPythonModule (
+          (final.openimageio.override { python3Packages = pself; }).overrideAttrs (old: {
+            cmakeFlags = (old.cmakeFlags or [ ]) ++ [
+              (final.lib.cmakeFeature "Python3_EXECUTABLE" pself.python.interpreter)
+            ];
+
+            # A binding installed under the wrong interpreter's site-packages is
+            # silent: the build goes green and the dependant's tests raise
+            # ImportError, which is precisely the failure this attribute exists
+            # to fix.  Assert the path instead, so a cmake that stops honouring
+            # `Python3_EXECUTABLE` fails here rather than three packages away.
+            postInstall = (old.postInstall or "") + ''
+              site="$out/${pself.python.sitePackages}"
+              if [ -z "$(find "$site" -maxdepth 1 -name 'OpenImageIO*' 2>/dev/null)" ]; then
+                echo "openimageio: no OpenImageIO module under ${pself.python.sitePackages}" >&2
+                echo "openimageio: what was installed under lib/ instead:" >&2
+                find "$out/lib" -maxdepth 3 -name 'OpenImageIO*' >&2 || true
+                exit 1
+              fi
+            '';
+          })
+        );
+
+        colour-science = pself.callPackage ../pkgs/colour-science {
+          openimageio = pself.openimageio.out;
+        };
         configurables = pself.callPackage ../pkgs/configurables { };
         griddataformats = pself.callPackage ../pkgs/griddataformats { };
         lwreg = pself.callPackage ../pkgs/lwreg { };
@@ -363,6 +421,13 @@ in
         # name.  Not re-exported; see the header of ../pkgs/pyrr for when to
         # delete this.
         pyrr = pself.callPackage ../pkgs/pyrr { };
+
+        # The ONIOM layer-bookkeeping library from the crest group: a Fortran
+        # library with a C API, packaged through its Python binding, which
+        # builds and bundles the library the way upstream's own `pip install .`
+        # does.  Nothing here depends on it — see its header — so it stops at
+        # this set rather than becoming a top-level attribute.
+        lwoniom = pself.callPackage ../pkgs/lwoniom { };
 
         # The Python binding, for moltui's `trexio` extra.  Emphatically **not**
         # re-exported to the top level, and this is the one case in this file
@@ -576,7 +641,13 @@ in
         # rootstock is quacc[mlip]'s alone; sevenn is matcalc[sevennet]'s;
         # maml is matcalc[maml]'s.
         rootstock = pself.callPackage ../pkgs/rootstock { };
-        sevenn = pself.callPackage ../pkgs/sevenn { };
+
+        # sevenn is gated the way `fairchem-core` below is, and for the same
+        # reason — an undefaulted argument a channel lacks makes the
+        # `callPackage` *abort*, which no `meta.broken` can catch — but on two
+        # names rather than one.  It declares both `e3nn` and `matscipy` as
+        # real `dependencies`, and nixos-26.05 has neither.
+        sevenn = if pself ? e3nn && pself ? matscipy then pself.callPackage ../pkgs/sevenn { } else null;
 
         # GRACE, matcalc's `grace` backend — and the one unfree package in this
         # repository.  Deliberately **not** re-exported to the top level, unlike
@@ -586,7 +657,13 @@ in
         # there is an evaluation error rather than a skip.  Reachable as
         # `python313Packages.tensorpotential`, which is the same arrangement the
         # twenty-odd internal dependencies here already use.
-        tensorpotential = pself.callPackage ../pkgs/tensorpotential { };
+        #
+        # Gated on `matscipy` for the reason `sevenn` above is: a real
+        # dependency, absent from nixos-26.05, and undefaulted, so the failure
+        # is an abort during evaluation rather than a package to mark broken.
+        # Being kept out of ../default.nix is no protection — ../pkgs/matcalc
+        # names it in an extra, which is enough to force it.
+        tensorpotential = if pself ? matscipy then pself.callPackage ../pkgs/tensorpotential { } else null;
         maml = pself.callPackage ../pkgs/maml { };
         mendeleev = pself.callPackage ../pkgs/mendeleev { };
 
@@ -596,7 +673,30 @@ in
         # matcalc's `deepmd` extra, and internal for the same reason ../maml
         # and ../sevenn are: matcalc is its only dependant.
         dargs = pself.callPackage ../pkgs/dargs { };
-        deepmd-kit = pself.callPackage ../pkgs/deepmd-kit { };
+
+        # Gated on a *build backend's* version, which is a third shape again.
+        # `sevenn` and `tensorpotential` above are gated on a name the channel
+        # does not have, `nvalchemi-toolkit-ops` below on a name whose version
+        # is too low — and this one is too low in the thing that reads
+        # `pyproject.toml` rather than in anything the package imports.
+        # deepmd-kit asks for `scikit-build-core>=1` in `[build-system]` and
+        # sets `minimum-version = "1.0"` under `[tool.scikit-build]`;
+        # nixos-26.05 has 0.11.6, and scikit-build-core refuses itself with
+        # "scikit-build-core version 0.11.6 is too old" before the backend is
+        # even asked what the build requires.
+        #
+        # Not relaxed.  `minimum-version` is scikit-build-core's
+        # compatibility-policy knob rather than a floor to argue with — lowering
+        # it selects older defaults that upstream has not built against — and
+        # the `>=1` beside it is a hard requirement.  Overriding
+        # scikit-build-core itself on 26.05 would be a ../pkgs/monty-style
+        # backport of a build backend that most of nixpkgs' Python tree uses,
+        # which is a great deal of rebuild and risk for one internal package.
+        deepmd-kit =
+          if final.lib.versionAtLeast pself.scikit-build-core.version "1" then
+            pself.callPackage ../pkgs/deepmd-kit { }
+          else
+            null;
 
         # dpdata is deepmd-kit's too — its `dpa-adapt` extra, and its `test`
         # one.  It is a format converter with a CLI of its own, so it is closer
@@ -687,6 +787,54 @@ in
             null;
         fairchem-data-omat = pself.callPackage ../pkgs/fairchem-data-omat { };
         fairchem-data-omol = pself.callPackage ../pkgs/fairchem-data-omol { };
+
+        # NVIDIA's Warp primitives for atomistic simulation — the package that
+        # ../docs/TODO.md and ../AGENTS.md both recorded as an unsurveyed wall
+        # blocking `torch-sim`, `orb-models`, `mattersim`, `pet-mad` and `upet`.
+        # It is Apache-2.0, pure Python, and wants `numpy` and `warp-lang`,
+        # which nixpkgs has.  See the header of ../pkgs/nvalchemi-toolkit-ops.
+        #
+        # Internal, and with no dependant here yet: `orb-models` is the first
+        # that would want it, and matcalc's `orb` extra is what that would open.
+        #
+        # Guarded on `warp-lang` the way `fairchem-core` above is guarded on
+        # `e3nn`, and for exactly the same reason: an undefaulted argument that
+        # a channel lacks makes this `callPackage` *abort* rather than produce a
+        # `meta.broken` package, and an abort is not catchable.  warp-lang is a
+        # recent nixpkgs addition, so the older legs of the matrix are the ones
+        # to expect this on.
+        #
+        # **The presence test alone was not enough**, and the way it failed is
+        # worth keeping.  nixos-26.05 *has* warp-lang, at 1.11.0, against a
+        # `warp-lang >= 1.13.0` floor — so the attribute existed, the
+        # `callPackage` resolved, evaluation succeeded, and the build got as far
+        # as `pythonRuntimeDepsCheckHook` before reporting "warp-lang>=1.13.0 not
+        # satisfied by version 1.11.0".  A missing name is an abort at eval
+        # time; a name that is merely too old costs a whole build first.  Any
+        # gate written here wants the floor as well as the name.
+        nvalchemi-toolkit-ops =
+          if pself ? warp-lang && final.lib.versionAtLeast pself.warp-lang.version "1.13.0" then
+            pself.callPackage ../pkgs/nvalchemi-toolkit-ops { }
+          else
+            null;
+
+        # nvalchemi-toolkit-ops' two check inputs that nixpkgs lacks, and what
+        # each of them buys.  torch-pme is the reference its electrostatics
+        # suite validates against; vesin is the one its neighbour-list
+        # consistency checks compare with, and it is torch-pme's own check input
+        # besides.  Both internal, like clusterscope is to fairchem-core.
+        torch-pme = pself.callPackage ../pkgs/torch-pme { };
+        vesin = pself.callPackage ../pkgs/vesin { };
+
+        # The two gaps in the fairchem monorepo's remaining distributions:
+        # p-tqdm is `fairchem-applications-fastcsp`'s and yellowbrick is
+        # `fairchem-applications-ocx`'s.  Neither distribution is packaged and
+        # nothing here asks for either, so these two are the survey done rather
+        # than a dependency met — see "Deferred packaging" in ../AGENTS.md.
+        # Internal, and general-purpose enough that a later dependant would find
+        # them ready.
+        p-tqdm = pself.callPackage ../pkgs/p-tqdm { };
+        yellowbrick = pself.callPackage ../pkgs/yellowbrick { };
 
         # py-lmdb, pinned *down* to 1.7.3, which is the one place in this
         # repository where a version bound turned out to mean exactly what it
