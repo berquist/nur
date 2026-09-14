@@ -231,7 +231,65 @@ in
         basis-set-exchange = pself.callPackage ../pkgs/basis-set-exchange {
           wignernj = pself.wignernj or null;
         };
-        colour-science = pself.callPackage ../pkgs/colour-science { };
+
+        # nixpkgs builds OpenImageIO's Python binding already — `enablePython`
+        # defaults to true — but against `python3Packages.pybind11`, and
+        # `python3` is 3.14 on the channels here.  The module therefore installs
+        # to `lib/python3.14/site-packages` and is invisible to every 3.13 set,
+        # which is the *only* reason ../pkgs/colour-science could not import it:
+        # there was nothing wrong with the derivation, it was aimed at the wrong
+        # interpreter.  Adding nixpkgs' attribute to a check input would have
+        # changed nothing.
+        #
+        # Handing it `pself` retargets it at whichever interpreter this
+        # extension is being applied to, which is what makes it correct in every
+        # `pythonX.pkgs` rather than in one.  pybind11 is the whole mechanism:
+        # cmake finds its interpreter through `CMAKE_PREFIX_PATH`, so changing
+        # which pybind11 goes in changes which Python the binding is built and
+        # installed for.  `Python3_EXECUTABLE` is pinned as well so that a
+        # second interpreter arriving through some other build input cannot win
+        # the search silently.
+        #
+        # This lives in the Python set rather than at the top level because its
+        # Python version is the whole point of it — a top-level attribute would
+        # have exactly the ambiguity being fixed.  It is not re-exported; only
+        # colour-science's check phase consumes it, and the module is in the
+        # `out` output rather than the default `bin` one.
+        #
+        # `toPythonModule` is what makes it *legal* here, not a formality:
+        # nixpkgs wraps every member of a Python package set in a guard that
+        # throws "should use `buildPythonPackage` or `toPythonModule`" on
+        # anything without a `pythonModule` passthru.  The guard is lazy enough
+        # that `pself.openimageio.out` slipped past it while a plain
+        # `python313Packages.openimageio` did not — the worst of both, since the
+        # build would have worked and the attribute path would still have
+        # thrown.
+        openimageio = pself.toPythonModule (
+          (final.openimageio.override { python3Packages = pself; }).overrideAttrs (old: {
+            cmakeFlags = (old.cmakeFlags or [ ]) ++ [
+              (final.lib.cmakeFeature "Python3_EXECUTABLE" pself.python.interpreter)
+            ];
+
+            # A binding installed under the wrong interpreter's site-packages is
+            # silent: the build goes green and the dependant's tests raise
+            # ImportError, which is precisely the failure this attribute exists
+            # to fix.  Assert the path instead, so a cmake that stops honouring
+            # `Python3_EXECUTABLE` fails here rather than three packages away.
+            postInstall = (old.postInstall or "") + ''
+              site="$out/${pself.python.sitePackages}"
+              if [ -z "$(find "$site" -maxdepth 1 -name 'OpenImageIO*' 2>/dev/null)" ]; then
+                echo "openimageio: no OpenImageIO module under ${pself.python.sitePackages}" >&2
+                echo "openimageio: what was installed under lib/ instead:" >&2
+                find "$out/lib" -maxdepth 3 -name 'OpenImageIO*' >&2 || true
+                exit 1
+              fi
+            '';
+          })
+        );
+
+        colour-science = pself.callPackage ../pkgs/colour-science {
+          openimageio = pself.openimageio.out;
+        };
         configurables = pself.callPackage ../pkgs/configurables { };
         griddataformats = pself.callPackage ../pkgs/griddataformats { };
         lwreg = pself.callPackage ../pkgs/lwreg { };

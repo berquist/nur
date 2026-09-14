@@ -22,15 +22,21 @@
 # to be resolved together.  Carried for `quacc[mlip]`.
 buildPythonPackage (finalAttrs: {
   pname = "rootstock";
-  version = "1.6.4-unstable-2026-09-04";
+  version = "1.6.4-unstable-2026-09-11";
   pyproject = true;
   __structuredAttrs = true;
 
+  # The project moved from `Quantum-Accelerators` to `Garden-AI`, and GitHub
+  # does not redirect codeload for it: the old owner's archive URL answers 404,
+  # which is what broke this build rather than anything in the source.  A
+  # renamed owner is a `rev` that still resolves in a local clone while being
+  # unfetchable, so the 404 is the only symptom — check the owner before
+  # suspecting a force-push.
   src = fetchFromGitHub {
-    owner = "Quantum-Accelerators";
+    owner = "Garden-AI";
     repo = "rootstock";
-    rev = "627d55b980e6ef11f37c181f70e382ad4130c60d";
-    hash = "sha256-na54QLInbGZ6h7AycURcrlk52xOlpPQcxe0qftryDGs=";
+    rev = "9700aa4089492c0eb401ce065c8fe5c35bc6a91b";
+    hash = "sha256-ACTcBw/vfSJcBxPzrYEv/gtecGBSmWLalI5vl2us/m8=";
   };
 
   # `uv-dynamic-versioning` reads the version from git, which fetchFromGitHub
@@ -65,7 +71,7 @@ buildPythonPackage (finalAttrs: {
 
   meta = {
     description = "MLIP calculators with isolated Python environments";
-    homepage = "https://github.com/Quantum-Accelerators/rootstock";
+    homepage = "https://github.com/Garden-AI/rootstock";
     license = lib.licenses.bsd3;
     maintainers = with lib.maintainers; [ berquist ];
   };

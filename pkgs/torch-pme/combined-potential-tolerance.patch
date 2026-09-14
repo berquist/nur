@@ -1,0 +1,30 @@
+diff --git a/tests/test_potentials.py b/tests/test_potentials.py
+index 26c4c40..fa8315c 100644
+--- a/tests/test_potentials.py
++++ b/tests/test_potentials.py
+@@ -494,8 +494,23 @@ def test_combined_potential(smearing):
+     combined_self = combined.self_contribution()
+     combined_bg = combined.background_correction()
+ 
+-    # Test agreement between generic and specialized implementations
+-    atol = 3e-16
++    # Test agreement between generic and specialized implementations.
++    #
++    # The tolerance is scaled to the magnitude of the two terms being summed
++    # rather than left at a few ulp of 1.0.  `CombinedPotential.from_dist`
++    # reaches `torch.inner`, whose accumulation order is not the explicit
++    # `w[0] * a + w[1] * b` written here, and `weights` is an unseeded
++    # `torch.randn` — so on a draw where the two terms nearly cancel, the
++    # difference is a couple of ulp of the *operands* while `rtol * |result|`
++    # has collapsed with the result.  A fixed `atol = 3e-16` then fails on an
++    # error that is correct rounding.
++    scale = float(
++        torch.max(
++            torch.abs(weights[0] * ipl_1_from_dist)
++            + torch.abs(weights[1] * ipl_2_from_dist)
++        )
++    )
++    atol = 8 * machine_epsilon * scale
+     rtol = 2 * machine_epsilon
+     assert_close(
+         weights[0] * ipl_1_from_dist + weights[1] * ipl_2_from_dist,

@@ -423,6 +423,13 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `ase-db-backends` list `ase` as both a dependency and a check input? | `pkgs/ase-db-backends/default.nix` (`nativeCheckInputs`) |
 | Which `ase-db-backends` tests skip themselves, and which actually run? | `pkgs/ase-db-backends/default.nix` (`enabledTestPaths`) |
 | Why does `ase-db-backends` patch `close()`, and what did reopening-to-close break? | `pkgs/ase-db-backends/close-must-not-reopen.patch`, `docs/TODO.md` |
+| Why is nixpkgs' `openimageio` rebuilt here, when its Python binding is already enabled? | `overlays/default.nix` (the `openimageio` binding in the `cheminformatics` extension) |
+| Why does that rebuild live in a Python package set, and what does `toPythonModule` buy? | `overlays/default.nix` (the same binding) |
+| Why does `colour-science` need `xxhash`, when upstream calls it optional? | `pkgs/colour-science/default.nix` (`nativeCheckInputs`) |
+| Why does `colour-science` take `av`, and what is wrong with imageio's first EXR backend? | `pkgs/colour-science/default.nix` (`nativeCheckInputs`) |
+| Which `colour-science` failures were never going to skip themselves, and what did the old note get wrong? | `pkgs/colour-science/default.nix` (the note above `nativeCheckInputs`) |
+| Why does `torch-pme` patch a tolerance rather than deselect the test, and why not just seed the RNG? | `pkgs/torch-pme/default.nix` (the note above `patches`), `pkgs/torch-pme/combined-potential-tolerance.patch` |
+| Why did `rootstock` start 404ing on a `rev` that still resolves in its clone? | `pkgs/rootstock/default.nix` (the note above `src`) |
 
 ### The sdist-has-no-tests trap
 

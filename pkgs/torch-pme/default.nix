@@ -49,6 +49,25 @@ buildPythonPackage (finalAttrs: {
   # pin it.
   env.SETUPTOOLS_SCM_PRETEND_VERSION = finalAttrs.version;
 
+  # `test_combined_potential` compares `CombinedPotential.from_dist` — which is
+  # `torch.inner` over a stacked pair — against the explicit
+  # `w[0] * a + w[1] * b` written in the test, at `atol = 3e-16` and
+  # `rtol = 2 * eps`.  Two things make that unhittable rather than strict.  The
+  # two accumulations round differently, and `weights` is an *unseeded*
+  # `torch.randn`, so whether the two terms happen to cancel is redrawn on every
+  # run: this passed for a long time and then failed at one index of 200 with an
+  # absolute difference of 4.2e-16, on a result that cancellation had reduced to
+  # 0.081 while the operands were of order 10.  `rtol * |result|` cannot cover
+  # that, and a scalar `atol` tied to 1.0 never could.
+  #
+  # The patch scales `atol` to the magnitude of the terms being summed, which is
+  # what the rounding is actually a few ulp of.  Because the scale is computed
+  # from the same draw, this holds for every draw rather than for the lucky
+  # ones — seeding the RNG would paper over one failure and leave the next.
+  # Upstream's other five assertions in the same test already sit at 3e-8 and
+  # are untouched.
+  patches = [ ./combined-potential-tolerance.patch ];
+
   # Upstream's whole `dependencies` list.  Its two extras are left out: the
   # `examples` one wants chemiscope and vesin, and `metatensor` wants
   # metatensor-torch and metatomic-torch, none of which nixpkgs carries.
