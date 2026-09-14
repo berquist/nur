@@ -142,6 +142,13 @@ in
         ANILIST_USERNAME = "myusername";
         MAL_USERNAME = "myusername";
         WATCH_INTERVAL = "24h";
+        # MAL has no built-in request pacing on the update calls this makes
+        # (unlike AniList favorites and Jikan, which do), so a large first
+        # sync can get some requests redirected to a page that hangs rather
+        # than erroring. Lower from the 30s default so those fail fast
+        # instead of eating up to 30s per retry -- it does not stop MAL from
+        # rate limiting, just shortens how long a bad run takes.
+        HTTP_TIMEOUT = "10s";
       };
       description = ''
         Non-secret environment variables passed to the service, e.g.
