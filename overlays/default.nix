@@ -162,6 +162,16 @@ in
     harmonwig = final.python3.pkgs.callPackage ../pkgs/harmonwig { };
   };
 
+  # anilist-mal-sync is a standalone CLI like dotdrop/harmonwig above —
+  # nothing here imports it as a library — but it is Go rather than Python,
+  # so it takes `final.callPackage` directly instead of going through a
+  # python*Packages set, the same shape as chemfiles/enumlib further down.
+  # Its own overlay so a consumer can take `overlays.anilist-mal-sync`
+  # without the rest of this repo's closure.
+  anilist-mal-sync = final: _prev: {
+    anilist-mal-sync = final.callPackage ../pkgs/anilist-mal-sync { };
+  };
+
   # Standalone computational chemistry and cheminformatics libraries and CLIs:
   # DBSTEP, morfeus, aqme, QMzyme, ccreg, digichem — plus the dozen-odd
   # dependencies of those that nixpkgs does not carry.  Unrelated to both

@@ -7,4 +7,5 @@
   qcfractal-server = ./qcfractal-server.nix;
   qcfractal-compute = ./qcfractal-compute.nix;
   aiida = ./aiida.nix;
+  anilist-mal-sync = ./anilist-mal-sync.nix;
 }

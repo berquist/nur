@@ -72,6 +72,13 @@ in
   # pin were wanted — nixpkgs rejects a non-module in a Python package set.
   inherit (pkgs') dotdrop harmonwig moltui;
 
+  # anilist-mal-sync: a Go CLI, not Python at all, reached through the
+  # overlay for the same reason as the three above — see
+  # overlays/default.nix's anilist-mal-sync entry. Also what lets
+  # nixos-modules/anilist-mal-sync.nix resolve it via
+  # `lib.mkPackageOption pkgs "anilist-mal-sync"`.
+  inherit (pkgs') anilist-mal-sync;
+
   # The cheminformatics packages that need cclib.  Same arrangement as
   # harmonwig above and for the same reason — see overlays/default.nix's
   # cheminformatics-cclib — so on the bare NUR path all four carry meta.broken
