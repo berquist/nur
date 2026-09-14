@@ -12,10 +12,24 @@
 # stateDir is enough to keep everything persistent with no path options to
 # thread through by hand.
 #
-# The one thing this module cannot do for you: `login` is an interactive
-# OAuth2 flow (a local HTTP server on oauthPort that a browser must hit), and
-# only after it succeeds does `watch` run headless against the token it
-# writes. See the anilist-mal-sync-login script below.
+# The one thing this module cannot do for you: authenticating with each
+# service is an interactive OAuth2 flow (a local HTTP server on oauthPort
+# that a browser must hit). But it does not need a separate step first --
+# `watch` (what the service below runs) calls the same OAuth constructors as
+# `login` itself, just with initWithToken=true (see NewApp in upstream's
+# app.go), so a fresh systemd unit with no token yet prints
+# "Open the following URL in your browser: ..." straight to its own stdout
+# -- i.e. `journalctl -u anilist-mal-sync -f` -- and blocks there (once for
+# MyAnimeList, then once for AniList) until that URL is opened and the
+# consent screen is completed. Tunnel oauthPort to wherever you'll run a
+# browser (`ssh -L <oauthPort>:localhost:<oauthPort> <this host>`) *before*
+# the unit starts, watch the journal for the two URLs, and the first `--once`
+# sync runs right after the second one completes.
+#
+# anilist-mal-sync-login below exists for the *second* time you need this:
+# forcing a fresh login for one service without waiting for the running
+# service to notice an expired or revoked token. It needs the service
+# stopped first, since both would otherwise fight over oauthPort.
 {
   config,
   lib,
@@ -57,11 +71,19 @@ let
         set +a
       ''}
 
-      echo 'Stop anilist-mal-sync.service first if it is running -- the OAuth' >&2
-      echo "callback needs port ${toString cfg.oauthPort} free." >&2
-      echo 'If this host is remote, open a tunnel from your workstation first:' >&2
+      echo 'Not needed for first-time setup -- anilist-mal-sync.service does' >&2
+      echo 'this itself on its first start; watch its journal instead:' >&2
+      echo '  journalctl -u anilist-mal-sync -f' >&2
+      echo 'Use this only to force a fresh login without waiting for the' >&2
+      echo 'running service to notice a stale token.' >&2
+      echo >&2
+      echo "Stop anilist-mal-sync.service first -- the OAuth callback needs" >&2
+      echo "port ${toString cfg.oauthPort} free, and the service is likely" >&2
+      echo "already holding it." >&2
+      echo 'If this host is remote, open a tunnel from wherever the browser' >&2
+      echo 'will run first:' >&2
       echo "  ssh -L ${toString cfg.oauthPort}:localhost:${toString cfg.oauthPort} <this host>" >&2
-      echo 'then open the URL printed below in a browser there.' >&2
+      echo 'then open the URL printed below there.' >&2
       echo >&2
 
       exec ${lib.getExe cfg.package} login "$@"
@@ -134,9 +156,12 @@ in
       type = lib.types.port;
       default = 18080;
       description = ''
-        Port the interactive `login` command briefly listens on for the
-        OAuth callback. The long-running `watch` daemon never listens on
-        this -- it is only used by anilist-mal-sync-login.
+        Port the OAuth callback briefly listens on. Reached not just by
+        anilist-mal-sync-login but by the service itself: `watch` opens this
+        same listener the first time it runs with no token yet (or whenever
+        one has expired or been revoked), and blocks until the browser
+        round-trip against it completes -- see the note at the top of this
+        file.
       '';
     };
 
@@ -146,9 +171,11 @@ in
       description = ''
         Open {option}`services.anilist-mal-sync.oauthPort` in the firewall.
 
-        Left false by default: the intended way to reach it during `login`
-        is an SSH tunnel (`ssh -L <port>:localhost:<port>`) from the
-        workstation doing the browser round-trip, not a public listener.
+        Left false by default: the intended way to reach it, whether the
+        service is doing its own first-run login or anilist-mal-sync-login
+        is forcing a fresh one, is an SSH tunnel
+        (`ssh -L <port>:localhost:<port>`) from wherever the browser runs,
+        not a public listener.
       '';
     };
   };
