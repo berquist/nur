@@ -367,6 +367,9 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `tensorpotential` spell `redistributable` out instead of letting it default? | `pkgs/tensorpotential/default.nix` (`meta.license`) |
 | Why does dropping `tensorflow[and-cuda]` not cost GPU support? | `pkgs/tensorpotential/default.nix` (`postPatch`) |
 | Why is `fairchem-core` null on nixos-26.05 rather than `meta.broken`? | `overlays/default.nix` (the `fairchem-core` binding in the materials overlay), `docs/TODO.md` |
+| Why are `sevenn` and `tensorpotential` nulled on nixos-26.05 too, and on which names? | `overlays/default.nix` (the `sevenn` and `tensorpotential` bindings in the materials overlay) |
+| Why is `deepmd-kit` defaulted-to-null on `e3nn` instead of being nulled like the other three? | `pkgs/deepmd-kit/default.nix` (the note above `optional-dependencies`) |
+| Why does `matcalc` gate five of its ten extras, and why is `deepmd` not one of them? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |
 | Why can `matcalc` take an unfree extra and stay free and cacheable? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |
 | Why does `matplotlib-label-lines` need `pytest-mpl` when the image comparison is switched off? | `pkgs/matplotlib-label-lines/default.nix` (`nativeCheckInputs`) |
 | Why must `labellines/test.py` be named in `enabledTestPaths` rather than found? | `pkgs/matplotlib-label-lines/default.nix` (`enabledTestPaths`), `pkgs/pgtest/default.nix` |

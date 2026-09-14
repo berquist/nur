@@ -23,8 +23,8 @@
   matminer,
   phono3py,
   seekpath,
-  sevenn,
-  tensorpotential,
+  sevenn ? null, # needs e3nn and matscipy, neither in nixos-26.05
+  tensorpotential ? null, # needs matscipy, not in nixos-26.05
 
   # tests
   pytestCheckHook,
@@ -98,14 +98,25 @@ buildPythonPackage (finalAttrs: {
   # reaches matcalc through this list alone — `nativeCheckInputs` below takes
   # only the `matgl` entry, so nothing about matcalc's own build touches it, and
   # matcalc stays buildable and cacheable as it was.
+  #
+  # `sevennet` and `grace` join `fairchem` and `mace` in being conditional, and
+  # for the same reason rather than a new one: ../sevenn declares `e3nn` and
+  # `matscipy`, ../tensorpotential declares `matscipy`, nixos-26.05 has neither
+  # name, and the overlay nulls both there.  `deepmd` stays unconditional —
+  # ../deepmd-kit wants e3nn for one extra of its own rather than as a
+  # dependency, so it survives that channel and this extra with it.
   optional-dependencies = {
     phonon = [ seekpath ];
     benchmark = [ matminer ];
     deepmd = [ deepmd-kit ];
-    grace = [ tensorpotential ];
     maml = [ maml ];
     matgl = [ matgl ];
+  }
+  // lib.optionalAttrs (sevenn != null) {
     sevennet = [ sevenn ];
+  }
+  // lib.optionalAttrs (tensorpotential != null) {
+    grace = [ tensorpotential ];
   }
   // lib.optionalAttrs (fairchem-core != null) {
     fairchem = [ fairchem-core ];

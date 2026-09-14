@@ -31,7 +31,7 @@
 
   # optional-dependencies
   dpdata,
-  e3nn,
+  e3nn ? null, # not in nixos-26.05
   rdkit,
   scikit-learn,
 }:
@@ -182,7 +182,18 @@ buildPythonPackage (finalAttrs: {
   #
   # Costs this build nothing — `doCheck = false` below, so nothing here is a
   # check input.
-  optional-dependencies = {
+  #
+  # The extra goes away entirely where `e3nn` does, rather than shipping the
+  # other three without it.  nixos-26.05 has no e3nn, and a `dpa-adapt` missing
+  # the equivariant library the adapter is built on would resolve and then not
+  # work, which is worse than not being offered.
+  #
+  # Defaulted to null rather than gated in ../../overlays/default.nix the way
+  # `fairchem-core` and `sevenn` are, and the difference is that e3nn is not a
+  # dependency here: it appears in this one extra and nowhere else, so
+  # deepmd-kit itself builds and `matcalc[deepmd]` keeps working on a channel
+  # without it.  Nulling the package would give up all of that for one extra.
+  optional-dependencies = lib.optionalAttrs (e3nn != null) {
     dpa-adapt = [
       dpdata
       e3nn

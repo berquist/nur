@@ -631,7 +631,13 @@ in
         # rootstock is quacc[mlip]'s alone; sevenn is matcalc[sevennet]'s;
         # maml is matcalc[maml]'s.
         rootstock = pself.callPackage ../pkgs/rootstock { };
-        sevenn = pself.callPackage ../pkgs/sevenn { };
+
+        # sevenn is gated the way `fairchem-core` below is, and for the same
+        # reason — an undefaulted argument a channel lacks makes the
+        # `callPackage` *abort*, which no `meta.broken` can catch — but on two
+        # names rather than one.  It declares both `e3nn` and `matscipy` as
+        # real `dependencies`, and nixos-26.05 has neither.
+        sevenn = if pself ? e3nn && pself ? matscipy then pself.callPackage ../pkgs/sevenn { } else null;
 
         # GRACE, matcalc's `grace` backend — and the one unfree package in this
         # repository.  Deliberately **not** re-exported to the top level, unlike
@@ -641,7 +647,13 @@ in
         # there is an evaluation error rather than a skip.  Reachable as
         # `python313Packages.tensorpotential`, which is the same arrangement the
         # twenty-odd internal dependencies here already use.
-        tensorpotential = pself.callPackage ../pkgs/tensorpotential { };
+        #
+        # Gated on `matscipy` for the reason `sevenn` above is: a real
+        # dependency, absent from nixos-26.05, and undefaulted, so the failure
+        # is an abort during evaluation rather than a package to mark broken.
+        # Being kept out of ../default.nix is no protection — ../pkgs/matcalc
+        # names it in an extra, which is enough to force it.
+        tensorpotential = if pself ? matscipy then pself.callPackage ../pkgs/tensorpotential { } else null;
         maml = pself.callPackage ../pkgs/maml { };
         mendeleev = pself.callPackage ../pkgs/mendeleev { };
 
