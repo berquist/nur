@@ -426,7 +426,13 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is nixpkgs' `openimageio` rebuilt here, when its Python binding is already enabled? | `overlays/default.nix` (the `openimageio` binding in the `cheminformatics` extension) |
 | Why does that rebuild live in a Python package set, and what does `toPythonModule` buy? | `overlays/default.nix` (the same binding) |
 | Why does `colour-science` need `xxhash`, when upstream calls it optional? | `pkgs/colour-science/default.nix` (`nativeCheckInputs`) |
-| Why does `colour-science` take `av`, and what is wrong with imageio's first EXR backend? | `pkgs/colour-science/default.nix` (`nativeCheckInputs`) |
+| Why does `colour-science` take `opencv4` for EXR, when imageio lists two backends ahead of it? | `pkgs/colour-science/default.nix` (the `opencv4` paragraph above `nativeCheckInputs`) |
+| Why must `av` stay *out* of colour-science, rather than sit beside opencv4? | `pkgs/colour-science/default.nix` (the same paragraph) |
+| Why does `colour-science` export `OPENCV_IO_ENABLE_OPENEXR`? | `pkgs/colour-science/default.nix` (`preCheck`) |
+| Why did 73 `nvalchemi-toolkit-ops` tests start failing the moment `torch-pme` began to build? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the third note above `patches`), `pkgs/nvalchemi-toolkit-ops/torchpme-prefactor-moved.patch` |
+| Why is dropping torch-pme's `prefactor` argument exact rather than approximate? | `pkgs/nvalchemi-toolkit-ops/torchpme-prefactor-moved.patch` (the header) |
+| Which three shapes of `cuda:0` does the nvalchemi conftest gate not reach, and why is one of them a *torch* device? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the last four notes in `postPatch`) |
+| Why does `nvalchemi-toolkit-ops` give `np.eye(3)` a dtype, and which two tests were failing without it? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the last note in `postPatch`) |
 | Which `colour-science` failures were never going to skip themselves, and what did the old note get wrong? | `pkgs/colour-science/default.nix` (the note above `nativeCheckInputs`) |
 | Why does `torch-pme` patch a tolerance rather than deselect the test, and why not just seed the RNG? | `pkgs/torch-pme/default.nix` (the note above `patches`), `pkgs/torch-pme/combined-potential-tolerance.patch` |
 | Why did `rootstock` start 404ing on a `rev` that still resolves in its clone? | `pkgs/rootstock/default.nix` (the note above `src`) |

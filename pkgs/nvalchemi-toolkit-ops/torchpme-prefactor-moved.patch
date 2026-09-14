@@ -1,0 +1,51 @@
+torchpme moved `prefactor` from the calculators to the potentials
+
+torch-pme 0.4.0 (2026-01-20) changed where the electrostatic prefactor
+is declared.  Its changelog says so outright:
+
+    * ``prefactor`` is now a parameter of the ``Potential`` classes
+      instead of the ``Calculator`` classes.
+
+This suite was written against torch-pme 0.3.x and still hands
+`prefactor=1.0` to `PMECalculator.__init__`, which raises a TypeError on
+anything from 0.4.0 on -- 73 of the torch binding's PME comparison tests
+at v0.4.1, every one of them a correctness check against the reference
+implementation rather than something cosmetic.
+
+Dropping the argument is exact rather than approximate: `CoulombPotential`
+(and `Potential`, which it defers to) already declares
+`prefactor: float = 1.0`, so a potential built without it carries the same
+prefactor this was asking the calculator for.  There is nothing to move
+onto the potential.
+
+The jax call site is included for symmetry.  It does not fail today
+because that comparison skips for its own reasons, but it is the same
+call against the same API and would fail the moment it stops skipping.
+--- a/test/interactions/electrostatics/bindings/jax/test_pme.py
++++ b/test/interactions/electrostatics/bindings/jax/test_pme.py
+@@ -204,7 +204,6 @@
+         mesh_spacing=mesh_spacing,
+         interpolation_nodes=spline_order,
+         full_neighbor_list=True,
+-        prefactor=1.0,
+     ).to(device=device, dtype=dtype)
+ 
+     reciprocal_potential = calculator._compute_kspace(
+--- a/test/interactions/electrostatics/bindings/torch/test_pme.py
++++ b/test/interactions/electrostatics/bindings/torch/test_pme.py
+@@ -463,7 +463,6 @@
+         mesh_spacing=mesh_spacing,
+         interpolation_nodes=spline_order,
+         full_neighbor_list=True,
+-        prefactor=1.0,
+     ).to(device=device, dtype=dtype)
+ 
+     # Ensure cell is 2D for torchpme
+@@ -4206,7 +4205,6 @@
+         mesh_spacing=mesh_spacing,
+         interpolation_nodes=4,
+         full_neighbor_list=True,
+-        prefactor=1.0,
+     ).to(device=device, dtype=VIRIAL_DTYPE)
+     charges_col = charges.unsqueeze(1)
+     cell_2d = cell.squeeze(0) if cell.dim() == 3 else cell

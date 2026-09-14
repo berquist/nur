@@ -12,10 +12,10 @@
   # tests
   pytestCheckHook,
   pytest-xdist,
-  av,
   imageio,
   matplotlib,
   networkx,
+  opencv4,
   openimageio,
   pandas,
   scipy,
@@ -75,13 +75,25 @@ buildPythonPackage {
   # matching upstream's `optional` extra, but a consumer who wants digests that
   # survive a restart wants xxhash installed as well.
   #
-  # `av` is imageio's EXR backend.  imageio's own priority list for `.exr` is
-  # `["EXR-FI", "pyav", "opencv"]`, and the first of those downloads a
-  # FreeImage binary on first use, which no build here can do — so
-  # `read_image_Imageio` had no backend at all and `TestReadImageImageio` died
-  # on `Could not find a backend`.  If pyav turns out not to decode this file,
-  # the remaining option is `opencv4` with `OPENCV_IO_ENABLE_OPENEXR=1`, which
-  # is both a larger closure and an env var OpenCV added deliberately.
+  # opencv4 is imageio's EXR backend, and it is the *third* candidate rather
+  # than the first two for reasons worth writing down, because the obvious two
+  # both fail.  imageio's priority list for `.exr` is
+  # `["EXR-FI", "pyav", "opencv"]`.  `EXR-FI` downloads a FreeImage binary on
+  # first use, which no build here can do.  `pyav` was tried and gets further —
+  # imageio selects it, so `Could not find a backend` is gone — and then
+  # ffmpeg's EXR decoder gives up inside `avcodec_send_packet()` with
+  # `av.error.PatchWelcomeError: Not yet implemented in FFmpeg`.
+  #
+  # **So `av` must not be installed at all, not merely joined by opencv4.**
+  # That priority list is consulted once, when the plugin is chosen; the pyav
+  # failure happens later, at `read()`, with no fall-through to the next
+  # candidate.  Leaving av in the closure would keep pyav winning the choice
+  # and keep it failing the read.
+  #
+  # nixpkgs' opencv4 takes `enableEXR ? !isDarwin` and passes `WITH_OPENEXR=ON`,
+  # so the codec is compiled in.  OpenCV then gates it behind an environment
+  # variable at run time — a deliberate hardening, added because the EXR
+  # decoder had been a source of CVEs — which is what `preCheck` sets.
   #
   # openimageio is the *retargeted* one from ../../overlays/default.nix, not
   # nixpkgs' attribute: nixpkgs builds its binding against python3, which is
@@ -91,16 +103,23 @@ buildPythonPackage {
   nativeCheckInputs = [
     pytestCheckHook
     pytest-xdist
-    av
     imageio
     matplotlib
     networkx
+    opencv4
     openimageio
     pandas
     scipy
     tqdm
     xxhash
   ];
+
+  # OpenCV compiles the OpenEXR codec in but refuses to use it unless this is
+  # set; without it `imread` returns None and imageio reports a read failure
+  # rather than a missing codec, which is a confusing way to learn this.
+  preCheck = ''
+    export OPENCV_IO_ENABLE_OPENEXR=1
+  '';
 
   # `TestDownloadUrl::test_download_url` fetches a real URL and fails on name
   # resolution.  Nothing local can stand in for it, and what it covers is

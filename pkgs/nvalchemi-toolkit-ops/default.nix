@@ -80,9 +80,18 @@ buildPythonPackage (finalAttrs: {
   # above, and **one** was a real defect — see `disabledTests`.  This patch is
   # what answers the 1087; the suite assumes a CUDA device in four different
   # ways and checks for one in two of them.  See the patch's own header.
+  #
+  # The third patch is the one torch-pme's arrival exposed.  This suite could
+  # not run at all while ../torch-pme failed to build, because it is a check
+  # input; with it building, 73 PME comparison tests ran for the first time and
+  # every one of them died on a keyword argument.  torch-pme 0.4.0 moved
+  # `prefactor` off the calculators and onto the potentials, and these tests
+  # were written against 0.3.x.  See the patch's own header for why removing the
+  # argument is exact rather than approximate.
   patches = [
     ./torchpme-import-guard.patch
     ./cuda-gating.patch
+    ./torchpme-prefactor-moved.patch
   ];
 
   # Five modules pick a CUDA device in the test body rather than through a
@@ -121,6 +130,51 @@ buildPythonPackage (finalAttrs: {
       --replace-fail \
         'dtype=np.float64, device="cuda:0"' \
         'dtype=np.float64, device="cuda:0" if wp.is_cuda_available() else "cpu"'
+
+    # Three more shapes of the same literal, all found once torch-pme let the
+    # suite run to the end.  None of them is reachable from the conftest gate or
+    # from the four substitutions above.
+    #
+    # `DEVICE` at module scope in two modules.  Same rewrite as the rest, and
+    # simpler, because at column zero there is no indentation to anchor on and
+    # no `wp_device` to collide with.  Both modules already `import warp as wp`.
+    substituteInPlace \
+      test/test_warp_dispatch.py \
+      test/dynamics/test_integrator_shared.py \
+      --replace-fail \
+        'DEVICE = "cuda:0"' \
+        'DEVICE = "cuda:0" if wp.is_cuda_available() else "cpu"'
+
+    # `wp.get_device` with the literal passed straight in, twice.
+    substituteInPlace test/interactions/electrostatics/test_multipole_kernels.py \
+      --replace-fail \
+        'wp.get_device("cuda:0")' \
+        'wp.get_device("cuda:0" if wp.is_cuda_available() else "cpu")'
+
+    # test/interactions/test_lj.py again, and this one is a *torch* device
+    # rather than a warp one, which is why the substitution above does not
+    # reach it: six tests build their warp arrays on the `device` fixture and
+    # then hard-code `.cuda()` for the torch tensors they hand to `cell_list`.
+    # All six already take that fixture, and warp's device strings -- "cuda:0"
+    # and "cpu" -- are valid torch device strings too, so routing the torch
+    # side through the same value is both the smaller change and the more
+    # correct one: `wp.from_torch` further down requires the two to agree, and
+    # hard-coding one of them is what stopped them agreeing.
+    substituteInPlace test/interactions/test_lj.py \
+      --replace-fail '.cuda()' '.to(device)' \
+      --replace-fail 'dtype=torch.bool, device="cuda")' 'dtype=torch.bool, device=device)'
+
+    # A genuine defect in upstream's own reference helper rather than a device
+    # problem.  `brute_force_neighbors` falls back to `np.eye(3)` when a test
+    # passes no cell, which is float64 whatever `positions` is, and vesin 0.6.1
+    # rejects a float32 `points` against a float64 `box`.  Only the `no_pbc`
+    # float32 parametrisations reach it -- one test in test_naive.py and one in
+    # test_naive_dual_cutoff.py.  `positions` is already a numpy array by this
+    # line, so its `.dtype` is the one to copy.
+    substituteInPlace test/neighbors/test_utils.py \
+      --replace-fail \
+        'cell = np.eye(3)' \
+        'cell = np.eye(3, dtype=positions.dtype)'
   '';
 
   build-system = [ hatchling ];
