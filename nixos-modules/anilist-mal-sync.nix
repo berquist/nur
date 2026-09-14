@@ -159,6 +159,22 @@ in
       '';
     };
 
+    syncTarget = lib.mkOption {
+      type = lib.types.enum [
+        "anime"
+        "manga"
+        "all"
+      ];
+      default = "anime";
+      description = ''
+        Which lists `watch` syncs, matching the CLI's --manga/--all flags
+        (there is no environment-variable form of these, so this option
+        appends the flag rather than going through {option}`environment`):
+        "anime" (upstream's own default -- anime only), "manga" (manga
+        only, upstream's --manga), or "all" (both, upstream's --all).
+      '';
+    };
+
     oauthPort = lib.mkOption {
       type = lib.types.port;
       default = 18080;
@@ -248,7 +264,15 @@ in
         Restart = "on-failure";
         RestartSec = "15s";
 
-        ExecStart = "${lib.getExe cfg.package} watch --once";
+        ExecStart = lib.concatStringsSep " " (
+          [
+            (lib.getExe cfg.package)
+            "watch"
+            "--once"
+          ]
+          ++ lib.optional (cfg.syncTarget == "manga") "--manga"
+          ++ lib.optional (cfg.syncTarget == "all") "--all"
+        );
 
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
 
