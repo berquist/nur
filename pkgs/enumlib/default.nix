@@ -196,6 +196,22 @@ stdenv.mkDerivation (finalAttrs: {
     runHook postCheck
   '';
 
+  # Read by ../../scripts/update-universe.nix.  The second fetch is a separate
+  # repository on its own release cadence, not a piece of this one, so a bump
+  # here leaves it alone — which makes this an ordinary `branch` package with a
+  # pinned dependency beside it, not the manual case docs/version-updates.md
+  # once called it.  `source` and `version` are here so the report can say when
+  # symlib itself has moved.
+  passthru.updatePolicy.secondary = [
+    {
+      name = "symlib";
+      mode = "pinned";
+      source = "github:msg-byu/symlib";
+      version = "v2.0.2";
+      reason = "a submodule fetched separately because a submodule hash cannot be computed offline";
+    }
+  ];
+
   meta = {
     description = "Generator of derivative superstructures of a parent lattice";
     homepage = "https://github.com/msg-byu/enumlib";

@@ -76,6 +76,15 @@ buildPythonPackage (finalAttrs: {
     "lobsterpy.quality.analyze"
   ];
 
+  # Read by ../../scripts/update-universe.nix, which otherwise infers `stable`
+  # and would move this to whatever the newest release is — undoing the whole
+  # point of the note above `src`, since every release after 0.6.1 is on the far
+  # side of the `cohp` deletion.
+  passthru.updatePolicy = {
+    mode = "pinned";
+    reason = "v0.6.1 is the one release carrying both cohp and coxx; see the note above src";
+  };
+
   meta = {
     description = "Automated analysis of LOBSTER bonding outputs";
     homepage = "https://github.com/JaGeo/LobsterPy";

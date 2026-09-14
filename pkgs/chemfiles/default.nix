@@ -132,6 +132,26 @@ stdenv.mkDerivation (finalAttrs: {
     runHook postCheck
   '';
 
+  # Read by ../../scripts/update-universe.nix.  This derivation has a second
+  # fetch, and docs/version-updates.md used to write that off as permanently
+  # manual.  It is not: `testsDataRev` is pinned by upstream's own
+  # tests/CMakeLists.txt, so after a version bump the driver reads the new value
+  # out of the new source, rewrites the binding, and lets
+  # ../../scripts/refresh-hashes.sh recover the hash from the build's mismatch.
+  # That is the whole of what the note above `testsDataRev` asks a human to do.
+  passthru.updatePolicy.secondary = [
+    {
+      name = "testsData";
+      mode = "derived";
+      revFrom = {
+        file = "tests/CMakeLists.txt";
+        pattern = "TESTS_DATA_GIT +([0-9a-f]+)";
+        binding = "testsDataRev";
+      };
+      reason = "the test data rev is whatever tests/CMakeLists.txt names at the new version";
+    }
+  ];
+
   meta = {
     description = "Library for reading and writing chemistry trajectory files";
     homepage = "https://chemfiles.org";

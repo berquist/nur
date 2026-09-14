@@ -309,6 +309,50 @@ repro-gh channel=default_channel:
         -E 'with import <nixpkgs> { overlays = [ (import ./overlays).qcfractal ]; }; python3Packages.qcportal'
 
 # ---------------------------------------------------------------------------
+# Version updates
+#
+# The whole updater runs from here, and .github/workflows/update.yml calls
+# these recipes rather than spelling the commands out — the same arrangement
+# the ci-* recipes above have, and for the same reason.  Nothing about the
+# updater exists only in CI.
+#
+# scripts/update-universe.nix holds the policy; scripts/update-packages.sh is
+# the driver; scripts/forge-pr.sh does the delivery on either GitHub or
+# Forgejo.  See docs/version-updates.md.
+#
+# `update-scan` and `update-policy` need neither a token nor a forge, and
+# `update-policy` needs no nix-daemon either.  Everything else builds.
+# ---------------------------------------------------------------------------
+
+# What would move, with nothing built and nothing written.
+update-scan *pkgs:
+    ./scripts/update-packages.sh --scan {{ pkgs }}
+
+# Bump named packages: rewrite, fix hashes, build. Leaves the tree dirty.
+update +pkgs:
+    ./scripts/update-packages.sh {{ pkgs }}
+
+# The same over every actionable package. Hours of builds; see the scan first.
+update-all:
+    ./scripts/update-packages.sh
+
+# Bump named packages and open one pull request each.
+update-pr +pkgs:
+    ./scripts/update-packages.sh --deliver=pr {{ pkgs }}
+
+# What the scheduled workflow runs: up to `limit` bumps, one PR each.
+update-batch limit="5":
+    ./scripts/update-packages.sh --deliver=pr --limit={{ limit }}
+
+# The resolved policy table as JSON. No daemon needed.
+update-policy:
+    ./scripts/update-packages.sh --policy
+
+# Move flake.lock, gate on the evaluation checks, leave it in the tree.
+update-flake-inputs *inputs:
+    ./scripts/update-flake-inputs.sh {{ inputs }}
+
+# ---------------------------------------------------------------------------
 # Formatting and linting.  These are also wired up as prek hooks by the flake;
 # `just hooks` runs the same set the way a commit would.
 # ---------------------------------------------------------------------------

@@ -1,0 +1,185 @@
+# Version updates.
+#
+# Three jobs, and only one of them writes to the repository on a schedule.
+#
+#   flake-inputs  moves flake.lock weekly and opens one pull request.  Cheap,
+#                 complete, and the thing that proves the delivery path works.
+#   scan          reports which packages have moved upstream.  Builds nothing,
+#                 writes nothing, needs no token.  This answers a question the
+#                 repository has never had an answer to.
+#   packages      rewrites, builds and opens one pull request per package.
+#                 workflow_dispatch only, on purpose — see below.
+#
+# Every step delegates to a `just` recipe, exactly as build.yml does with the
+# ci-* recipes, so `just update-scan` locally is what the runner runs.  Keep the
+# logic in the Justfile and in scripts/, not here.
+#
+# ## Why `packages` is not on the schedule
+#
+# The build gate is the point of this job: a bump that has not built has not
+# been checked, and the check phases here are large enough that building
+# aiida-core after a bump runs its whole suite.  That is also what makes a full
+# pass hours of work, and a hosted runner caps a job at six hours.  So the
+# scheduled run reports and the dispatched run acts, with an explicit `limit`,
+# until somebody has measured what a batch actually costs.
+#
+# ## The token
+#
+# UPDATE_BOT_TOKEN rather than the automatic GITHUB_TOKEN, because **a pull
+# request opened with GITHUB_TOKEN does not trigger `pull_request` workflows** —
+# build.yml would never run on an updater PR, which would defeat the review the
+# pull request exists for.  A fine-grained PAT with contents and pull-request
+# write is what the secret should hold.  scripts/forge-pr.sh says what else to
+# check on the first live run.
+#
+# ## Forgejo
+#
+# `uses:` is written as a full URL.  Forgejo resolves a bare `actions/checkout`
+# against its own configured action host rather than GitHub, so the full form is
+# what lets this file be copied to .forgejo/workflows/ unchanged.  Forgejo reads
+# that directory first and falls back to .github/workflows/, so both forges can
+# be live at once during the move.  The only other change needed there is
+# FORGE=forgejo and FORGE_HOST in the env blocks below.
+
+name: "Propose version updates"
+
+on:
+  schedule:
+    # Mondays, early. Offset from build.yml's 02:51 so the two do not contend.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Attributes to bump, space separated. Empty means every actionable one."
+        required: false
+        default: ""
+      limit:
+        description: "Stop after this many bumps."
+        required: false
+        default: "5"
+      deliver:
+        description: "none leaves the rewrites in the runner's tree; pr opens one per package."
+        required: false
+        default: "none"
+        type: choice
+        options:
+          - none
+          - pr
+
+concurrency:
+  group: update-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  flake-inputs:
+    name: "Flake inputs"
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install nix
+        uses: https://github.com/cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      # --gate=eval rather than the whole of `nix flake check`: the VM tests
+      # need KVM and a hosted runner has none. See the script's header.
+      - name: Update and propose
+        env:
+          FORGE: github
+          FORGE_TOKEN: ${{ secrets.UPDATE_BOT_TOKEN }}
+          FORGE_REPO: ${{ github.repository }}
+          FORGE_BASE: ${{ github.event.repository.default_branch }}
+        run: nix develop --command just update-flake-inputs --gate=eval --deliver=pr
+
+  scan:
+    name: "Scan for newer versions"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install nix
+        uses: https://github.com/cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      # GITHUB_TOKEN because nix-update asks the forge for tags and branches
+      # once per package, and 146 unauthenticated calls is more than twice the
+      # anonymous hourly limit — the scan would come back with most of the
+      # repository looking like it had not moved.
+      - name: Scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          nix develop --command just update-scan --json=update-report.json \
+            | tee update-report.txt
+      # The report is the deliverable of this job, so it goes somewhere a human
+      # will actually see it rather than into the log.  Deliberately not
+      # upload-artifact: that would be a fourth third-party action to pin, and
+      # the summary is where someone reading a scheduled run is already looking.
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            printf '## Packages with a newer upstream\n\n```\n'
+            cat update-report.txt
+            printf '```\n'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  packages:
+    name: "Bump packages"
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # A batch of real builds. The six-hour ceiling is the runner's, not ours;
+    # this stops short of it so the report still gets written.
+    timeout-minutes: 330
+    steps:
+      - name: Checkout repository
+        uses: https://github.com/actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install nix
+        uses: https://github.com/cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      # Reads from the same cache build.yml writes to, so a bump whose closure
+      # is already built does not rebuild the world underneath it.
+      - name: Setup cachix
+        uses: https://github.com/cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: nur-berquist
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      # The three dispatch inputs come in through env rather than being
+      # interpolated into the command line: `${{ inputs.packages }}` in a `run:`
+      # is a shell-injection hole, and the fact that only collaborators can
+      # dispatch this is not a reason to leave one.  PACKAGES is deliberately
+      # unquoted on use, because "space separated" is what it means.
+      - name: Bump
+        env:
+          FORGE: github
+          FORGE_TOKEN: ${{ secrets.UPDATE_BOT_TOKEN }}
+          FORGE_REPO: ${{ github.repository }}
+          FORGE_BASE: ${{ github.event.repository.default_branch }}
+          # See the scan job: this is nix-update's forge API budget, not ours.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DELIVER: ${{ inputs.deliver }}
+          LIMIT: ${{ inputs.limit }}
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          # shellcheck disable=SC2086  # PACKAGES is a space-separated list
+          nix develop --command just update \
+            --deliver="$DELIVER" \
+            --limit="$LIMIT" \
+            --json=update-report.json \
+            $PACKAGES
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            printf '## Bump results\n\n```json\n'
+            cat update-report.json 2>/dev/null || printf 'no report was written\n'
+            printf '```\n'
+          } >>"$GITHUB_STEP_SUMMARY"

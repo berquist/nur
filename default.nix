@@ -116,19 +116,46 @@ in
   # needs it.  See pkgs/enumlib.
   inherit (pkgs') enumlib;
 
-  # The packages this repository defines and deliberately does *not* re-export
-  # at the top level, collected so that something builds them.
+  # node-graph-widget-js, likewise not a Python package: the npm build whose
+  # bundle pkgs/node-graph-widget copies in before hatchling runs.  It is a
+  # top-level attribute of overlays.aiida and was simply never re-exported here,
+  # so until now nothing built it in its own right.  See the binding in
+  # overlays/default.nix and `preBuild` in pkgs/node-graph-widget.
+  inherit (pkgs') node-graph-widget-js;
+
+  # The two packages this repository defines that **cannot** be top-level
+  # attributes, collected so that something still builds them.
   #
-  # Sixty-odd of the packages here are dependencies of one dependant each —
-  # kiwipy, plumpy, mdanalysis, clusterscope and the rest — and stay internal on
-  # purpose: being top-level is what makes ci.nix build a package in its own
-  # right, and a package with exactly one dependant is built by that dependant
-  # anyway.  That reasoning has a hole in it, and this attribute is the patch.
-  # A package reachable *only* through an `optional-dependencies` entry has no
-  # such dependant: an extra is not a build input of the package that declares
-  # it, so nothing builds sevenn, deepmd-kit, dpdata, maml, rootstock or
-  # nvalchemi-toolkit-ops at all.  `pkgs/sevenn` sat green-by-omission for
-  # months that way and failed the first time anyone built it.
+  # Everything else here is exposed at the top level, which is the rule: being
+  # top-level is what makes ci.nix build a package in its own right, and a
+  # package that nothing builds is a package nobody finds out is broken.  This
+  # attribute used to hold seventy of them on the reasoning that a package with
+  # exactly one dependant is built by that dependant anyway — which has a hole
+  # in it, because a package reachable only through an `optional-dependencies`
+  # entry has no such dependant, and `pkgs/sevenn` sat green-by-omission for
+  # months that way.  The rule is now simply that everything is exposed, and
+  # this attribute is what is left over.
+  #
+  # What is left over is exactly the name collisions.  Both of these are Python
+  # bindings whose distribution name is already taken at the top level by a
+  # *different* derivation, so promoting either would silently replace it —
+  # here, and in any consumer of ./overlay.nix:
+  #
+  #   - `chemfiles`, where the top-level name is the C++ library.  See the
+  #     `inherit (pkgs') chemfiles` note above, and the callPackage site in
+  #     ./overlays/default.nix.
+  #   - `trexio`, where the top-level name is *nixpkgs'* C library.  See the
+  #     `trexio` binding in ./overlays/default.nix and the split in
+  #     ./tests/chemtools/default.nix, which asserts this.
+  #
+  # Three packages are outside the rule for reasons that are not collisions and
+  # are documented where they live: `tensorpotential` is unfree, and `just
+  # ci-eval` forces drvPath over everything it can reach, so an unfree
+  # derivation in any traversal is an evaluation error rather than a skipped
+  # package (see ci.nix); `monty` and `pycifrw` are guarded backports, so on a
+  # new enough channel the attribute is nixpkgs' own derivation and building it
+  # here would be CI populating a cache with packages it does not own.  All
+  # three stay reachable as `python313Packages.<name>`.
   #
   # recurseIntoAttrs is the whole mechanism.  Both `nix-env -f . -qa '*'` (what
   # `just ci-eval` runs) and ci.nix's flattenPkgs descend into an attrset only
@@ -141,181 +168,167 @@ in
   # `internalPackages` key into a consumer's nixpkgs would be as wrong as
   # lifting python313Packages; having ci.nix skip it would defeat the point of
   # the attribute.  Both files say so at their own predicate.
-  #
-  # Three kinds of package are kept out, each for a reason that would otherwise
-  # cost more than it buys:
-  #
-  #   - `tensorpotential`, because it is unfree.  `just ci-eval` walks this
-  #     attrset forcing drvPath, and an unfree derivation there is an evaluation
-  #     error rather than a skipped package — see the note in ci.nix.  Keeping
-  #     it out of every traversal is the same arrangement that keeps it out of
-  #     the top level.
-  #   - `monty` and `pycifrw`, which are guarded backports rather than packages
-  #     of ours: on a channel that is new enough they are nixpkgs' own
-  #     derivations, and building those here would be CI populating a cache with
-  #     packages it does not own.  pymatgen-core and aiida-core build them where
-  #     they are ours.
-  #   - `graphrc` and `node-graph-widget-js`, which are top-level attributes of
-  #     their overlays rather than members of a Python set — graphrc because
-  #     cclib forces it to be, and so it is `meta.broken` on this path anyway.
-  #
-  # A null member is filtered rather than passed through: `fairchem-core`,
-  # `fairchem-data-oc` and `nvalchemi-toolkit-ops` are null on channels missing
-  # e3nn or warp-lang, and nothing downstream of here should have to know that.
-  internalPackages = pkgs'.lib.recurseIntoAttrs (
-    pkgs'.lib.filterAttrs (_: v: v != null) {
-      # The Python chemfiles binding.  Spelled out rather than inherited
-      # because the name is taken at the top level by the C++ library, which is
-      # a different derivation — see the `inherit (pkgs') chemfiles` note above.
-      inherit (py) chemfiles;
-
-      inherit (py)
-        # cheminformatics
-        basis-set-exchange
-        colour-science
-        configurables
-        griddataformats
-        lwreg
-        mda-xdrlib
-        mdanalysis
-        mrcfile
-        openprattle
-        xyzgraph
-
-        # chemtools
-        lwoniom
-        pyrr
-        trexio
-
-        # materials
-        ase-db-backends
-        clusterscope
-        cmcrameri
-        dargs
-        deepmd-kit
-        doped
-        dpdata
-        dpdata-plugin-test
-        fairchem-core
-        fairchem-data-oc
-        fairchem-data-omat
-        fairchem-data-omol
-        hiphive
-        maml
-        matplotlib-label-lines
-        mendeleev
-        mongomock-ng
-        mongomock-persistence
-        mp-pyrho
-        nvalchemi-toolkit-ops
-        p-tqdm
-        parmed
-        pydefect
-        pyfhiaims
-        pymatgen-io-aims
-        rootstock
-        sevenn
-        torch-pme
-        trainstation
-        vesin
-        yellowbrick
-
-        # aiida
-        aiida-diff
-        aiida-export-migration-tests
-        aiida-gaussian-datatypes
-        aiida-optimize
-        aiida-pseudo
-        aiida-testing
-        archive-path
-        cp2k-input-tools
-        cp2k-output-tools
-        disk-objectstore
-        firecrest-streamer
-        graphene-file-upload
-        kiwipy
-        node-graph
-        node-graph-widget
-        pgsu
-        pgtest
-        plumpy
-        postopus
-        profilehooks
-        pyfirecrest
-        pytray
-        qe-tools
-        sisl
-        starlette-graphene3
-        upf-to-json
-        ;
-    }
-  );
+  internalPackages = pkgs'.lib.recurseIntoAttrs {
+    inherit (py) chemfiles trexio;
+  };
 
   # Python packages, reached through the extended python313Packages so that
   # these derivations are identical to what python313.withPackages returns.
+  #
+  # **Every Python package this repository defines is here**, the dependencies
+  # carried for a single dependant included, because being a top-level attribute
+  # is what makes ci.nix build a package in its own right.  The exceptions are
+  # named at internalPackages above, and there are five: two name collisions
+  # that live there, and `tensorpotential`, `monty` and `pycifrw`, which are
+  # reachable as `python313Packages.<name>` for reasons given at that note.
+  #
+  # Grouped by family, alphabetical within each group.
   inherit (py)
+    # QCArchive
     parsl
     qcportal
     qcfractal
     qcfractalcompute
     qcarchivetesting
 
-    aiida-core
+    # AiiDA
     aiida-ase
+    aiida-core
     aiida-cp2k
+    aiida-diff
+    aiida-export-migration-tests
+    aiida-firecrest
     aiida-gaussian
+    aiida-gaussian-datatypes
     aiida-gromacs
     aiida-lammps
     aiida-nwchem
     aiida-octopus
+    aiida-optimize
     aiida-orca
-    aiida-psi4
-    aiida-quantumespresso
-    aiida-firecrest
     aiida-phonopy
+    aiida-pseudo
+    aiida-psi4
     aiida-pythonjob
+    aiida-quantumespresso
     aiida-restapi
     aiida-shell
     aiida-siesta
     aiida-submission-controller
+    aiida-testing
     aiida-wannier90
     aiida-wannier90-workflows
     aiida-workgraph
+    archive-path
+    cp2k-input-tools
+    cp2k-output-tools
+    disk-objectstore
+    firecrest-streamer
+    graphene-file-upload
+    kiwipy
+    node-graph
+    node-graph-widget
+    pgsu
+    pgtest
+    plumpy
+    postopus
+    profilehooks
+    pyfirecrest
+    pytray
+    qe-tools
+    sisl
+    starlette-graphene3
+    upf-to-json
 
-    morfeus-ml
-    qmzyme
+    # cheminformatics
+    basis-set-exchange
+    colour-science
+    configurables
     dough
+    griddataformats
+    lwreg
+    mda-xdrlib
+    mdanalysis
+    morfeus-ml
+    mrcfile
+    openprattle
+    qmzyme
+    xyzgraph
 
-    wignernj
-    strainjedi
-    sella
+    # chemtools
+    lwoniom
     molara
+    pyrr
+    sella
+    strainjedi
+    wignernj
 
+    # materials
+    ase-db-backends
     atomate2
+    clusterscope
+    cmcrameri
     custodian
+    dargs
+    deepmd-kit
+    doped
+    dpdata
+    dpdata-plugin-test
     emmet-core
+    fairchem-data-omat
+    fairchem-data-omol
     fireworks
+    hiphive
     jobflow
     jobflow-remote
     lobsterpy
     maggma
+    maml
     matcalc
     matgl
     matminer
+    matplotlib-label-lines
+    mendeleev
+    mongomock-ng
+    mongomock-persistence
     mp-api
+    mp-pyrho
     optimade
+    p-tqdm
+    parmed
     phono3py
     pubchempy
+    pydefect
+    pyfhiaims
     pymatgen
     pymatgen-analysis-alloys
     pymatgen-analysis-defects
     pymatgen-analysis-diffusion
     pymatgen-core
+    pymatgen-io-aims
     pymatgen-io-validation
     qtoolkit
     quacc
     redun
+    rootstock
+    sevenn
     shakenbreak
+    torch-pme
+    trainstation
+    vesin
     vise
+    yellowbrick
+    ;
+}
+# The three that are null rather than a derivation on a channel missing e3nn or
+# warp-lang.  Filtered rather than passed through, so that nothing downstream of
+# here — ./overlay.nix, ./ci.nix, a consumer — has to know that a top-level
+# attribute might not be a package.  See the `fairchem-core` binding in
+# ./overlays/default.nix.
+// pkgs'.lib.filterAttrs (_: v: v != null) {
+  inherit (py)
+    fairchem-core
+    fairchem-data-oc
+    nvalchemi-toolkit-ops
     ;
 }

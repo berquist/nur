@@ -38,9 +38,11 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   default `python3` rather than the 3.13 pin.
 - **harmonwig** — likewise a standalone CLI.
 - the **chemtools family** — `wignernj`, `strainjedi`, `sella`, `molara`, `moltui`, and the
-  `chemfiles` C++ library with its Python binding, plus three packages that stay internal:
-  `pyrr` (which nixpkgs *removed*, so there is no attribute to fall back to), the `trexio`
-  Python binding, and `lwoniom` — a Fortran ONIOM bookkeeping library from the crest group,
+  `chemfiles` C++ library with its Python binding, plus three packages carried for a dependant
+  rather than for their own sake: `pyrr` (which nixpkgs *removed*, so there is no attribute to
+  fall back to), the `trexio` Python binding — one of the two packages that cannot be a top-level
+  attribute, its name being nixpkgs' C library — and `lwoniom`, a Fortran ONIOM bookkeeping
+  library from the crest group,
   packaged through its Python binding because that is the form upstream installs, and here
   because it is small and adjacent rather than because anything needs it.
   These share no closure with each other or with anything above; they are one
@@ -55,7 +57,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   `atomate2`, `matcalc`, `quacc`, `matminer`, `redun`, `phono3py`, `mp-api`, `vise`, `shakenbreak`,
   and both halves of upstream
   pymatgen's 2026 split, `pymatgen-core` and `pymatgen`. Plus a dozen carried for a dependant
-  alone and not re-exported: `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
+  alone — exposed like everything else, but there for one consumer each:
+  `mongomock-persistence` (fireworks'), `mongomock-ng` (maggma's),
   `mp-pyrho` (`pymatgen-analysis-defects`'), `mendeleev` (`lobsterpy[featurizer]`'s), `rootstock`
   (`quacc[mlip]`'s), `sevenn` (`matcalc[sevennet]`'s), `maml` (`matcalc[maml]`'s), `deepmd-kit`
   (`matcalc[deepmd]`'s) with `dargs` and `dpdata` under it — and `parmed` and
@@ -184,7 +187,17 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `repeated_keys` disabled? Why does the whitespace hook skip `*.patch`? | `statix.toml`, `flake.nix` |
 | Why does `qcfractalcompute` carry a patch? Why is `parsl` built from the sdist? | the respective `pkgs/*/default.nix` |
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
-| How would version updates be automated, and why is `nixpkgs-update` the wrong tool for it? | `docs/version-updates.md` |
+| How are version updates automated, and why is `nixpkgs-update` the wrong tool for it? | `docs/version-updates.md` |
+| Where does a package's update mode come from, and how do I declare one that is pinned? | `scripts/update-universe.nix`, `pkgs/lobsterpy/default.nix` (`passthru.updatePolicy`) |
+| Why does `missing` being non-empty abort the updater rather than warn? | `scripts/update-universe.nix` (the header), `flake.nix` (the `graphrc` note in `legacyPackages`) |
+| Why is no package `manual`, when five of them were called permanently manual? | `docs/version-updates.md` (§2), `pkgs/chemfiles/default.nix` and `pkgs/trexio/default.nix` (`passthru.updatePolicy.secondary`) |
+| How does a second, stale hash get recovered without a human reading the build log? | `scripts/refresh-hashes.sh` (the header) |
+| Why does scan mode snapshot a file instead of using a `git worktree`? | `scripts/update-packages.sh` (the header) |
+| Why does the bot not use `nix-update --commit`, and who signs its commits? | `scripts/forge-pr.sh` (the header) |
+| Why has the update branch no version in its name? | `scripts/forge-pr.sh` (the branch-naming note) |
+| Why would a pull request opened by the bot get no CI, and what fixes it? | `scripts/forge-pr.sh` (the header), `.github/workflows/update.yml` (the token note) |
+| Why is the package-bump job `workflow_dispatch` only? | `.github/workflows/update.yml` (the header) |
+| Why does an `-unstable-` bump get rejected when its date goes backwards? | `scripts/update-packages.sh` (the guard above `rejected`) |
 | Why does `verdi` come from a `withPackages` env instead of `lib.getExe cfg.package`? | `nixos-modules/aiida.nix` (`pythonEnv`) |
 | Why does the AiiDA module ensure the *database* when the QCFractal one deliberately does not? | `nixos-modules/aiida.nix` (`services.postgresql`) |
 | Why does `database.createLocally` default to whether the storage backend is PostgreSQL? | `nixos-modules/aiida.nix` (the `createLocally` default, and the `useSqlite` assertion) |
@@ -309,7 +322,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `trexio` restore one test file from GitHub, and where did its sdist hash come from? | `pkgs/trexio/default.nix` (the `testSrc` note) |
 | Why must the `trexio` binding never become a top-level attribute? | `overlays/default.nix` (the `trexio` binding in `chemtools`), `tests/chemtools/default.nix` (the trexio split) |
 | Why does `xyzgraph` live in `cheminformatics` when `graphrc` and `xyzrender` need cclib? | `overlays/default.nix` (the `xyzgraph` binding) |
-| Why is `graphrc` a top-level attribute *and* not re-exported? | `overlays/default.nix` (the `graphrc` binding), `tests/cheminformatics/default.nix` (`cclibDependencies`) |
+| Why is `graphrc` a top-level attribute of its overlay, absent from `default.nix`, and yet in `legacyPackages`? | `overlays/default.nix` (the `graphrc` binding), `flake.nix` (the `graphrc` note in `legacyPackages`), `tests/cheminformatics/default.nix` (`cclibDependencies`) |
 | Why does `xyzrender` need neither `vmol` nor `shelxfile`, which nixpkgs lacks? | `pkgs/xyzrender/default.nix` (`nativeCheckInputs`) |
 | Where do `metallogen`'s tests come from, when upstream ships none? | `pkgs/metallogen/tests/test_examples.py` (the module docstring), `pkgs/metallogen/default.nix` (the note above `preCheck`) |
 | Why does `wignernj` delete its own source directory before the check phase? | `pkgs/wignernj/default.nix` (`preCheck`) |
@@ -326,7 +339,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why must `fireworks` never gain `pytest-xdist`, when nothing in the derivation asks for `-n`? | `pkgs/fireworks/default.nix` (the note above `nativeCheckInputs`) |
 | Why are two `WFLockTest` tests deselected when they only ever skip themselves? | `pkgs/fireworks/default.nix` (`disabledTestPaths`) |
 | Why does `fireworks` pass `-rs`, and which six tests still skip? | `pkgs/fireworks/default.nix` (`pytestFlags`) |
-| Why is `mongomock-persistence` carried here, and why is it not a top-level attribute? | `pkgs/mongomock-persistence/default.nix` (the `src` comment), `tests/chemtools/default.nix` (`internalDependencies`) |
+| Why is `mongomock-persistence` carried here at all? | `pkgs/mongomock-persistence/default.nix` (the `src` comment), `tests/chemtools/default.nix` (`internalDependencies`) |
 | Why does `fireworks` need `igraph`, `graphviz` and `matplotlib` to test, and why is `mainProgram` `lpad`? | `pkgs/fireworks/default.nix` (`nativeCheckInputs`, `meta.mainProgram`) |
 | Why does `metallogen` set `doCheck = false` when `MetalloGen/test.py` exists? | `pkgs/metallogen/default.nix` (the `doCheck` note) |
 | Why does the chemtools python-pin test compose *every* overlay when the cheminformatics one does not? | `tests/chemtools/default.nix` (the `fullyOverlaidPkgs` binding) |
@@ -523,16 +536,25 @@ is reserved in `overlay.nix` alone**. Being skipped by `ci.nix` is what the pred
 for, and skipping that one would defeat its whole purpose; both files carry the reasoning at
 their own copy.
 
-`internalPackages` is the answer to "who builds a package that only an extra reaches". Sixty-odd
-packages here are internal — one dependant each, so that dependant builds them — but a package
-named only by an `optional-dependencies` entry has no such dependant, because an extra is not a
-build input. `sevenn`, `deepmd-kit`, `dpdata`, `maml`, `rootstock` and `nvalchemi-toolkit-ops`
-were built by nothing at all until this attribute existed. It carries `recurseIntoAttrs`, which
-is exactly what `python313Packages` below must not, and it deliberately omits `tensorpotential`
-(unfree, and `just ci-eval` forces `drvPath` over everything it can reach), the guarded backports
-`monty` and `pycifrw` (nixpkgs' own derivations on a new enough channel), and `graphrc` /
-`node-graph-widget-js` (top-level attributes of their overlays, not Python-set members). See the
-note at the attribute itself.
+**Every package this repository defines is a top-level attribute**, with five named exceptions.
+That is the rule, and the reason for it is that being top-level is what makes `ci.nix` build a
+package in its own right: a package nothing builds is a package nobody finds out is broken.
+`pkgs/sevenn` sat green-by-omission for months because it was reachable only through an
+`optional-dependencies` entry, and an extra is not a build input of the package that declares it.
+
+`internalPackages` used to hold the seventy packages carried for one dependant each. It now holds
+**two**, and only because their names are already taken at the top level by different derivations:
+`chemfiles` (the C++ library) and `trexio` (nixpkgs' C library), both of which
+`tests/chemtools/default.nix` asserts. It still carries `recurseIntoAttrs`, which is exactly what
+`python313Packages` below must not. Three more packages are outside the rule for reasons that are
+not collisions, and stay reachable as `python313Packages.<name>`: `tensorpotential` (unfree, and
+`just ci-eval` forces `drvPath` over everything it can reach) and the guarded backports `monty`
+and `pycifrw` (nixpkgs' own derivations on a new enough channel, which CI has no business
+building as ours). See the note at the attribute itself.
+
+`scripts/update-universe.nix` is what keeps this honest: it reads `pkgs/` with `builtins.readDir`
+and fails if any directory has no attribute path. That check is what found `graphrc`, which was
+reachable from nothing at all until `flake.nix` started exposing it.
 
 `python313Packages` is the one that is ours rather than the NUR template's, and the one where
 getting it wrong does real damage: it is the whole overlaid 3.13 set, exposed so that the
@@ -556,11 +578,11 @@ new package needs:
 2. the top-level `inherit (final.python313Packages)` list in the same file,
 3. the `inherit (py)` list in `default.nix`.
 
-Steps 2 and 3 are for *public* packages only. The AiiDA and cheminformatics overlays between them
-carry twenty-odd dependencies — `kiwipy`, `plumpy`, `disk-objectstore`, `pgsu`, `aiida-pseudo`,
-`mdanalysis`, `colour-science`, `lwreg` and the rest — that stop at step 1 deliberately: they stay
-reachable through `python313Packages` and are not top-level attributes, so `ci.nix` does not build
-each of them in its own right. `tests/aiida/default.nix` spells out the public AiiDA list in
+**All three steps, for every package.** They used to be "steps 2 and 3 are for public packages
+only", and the dependencies carried for one dependant each — `kiwipy`, `plumpy`,
+`disk-objectstore`, `pgsu`, `mdanalysis`, `colour-science`, `lwreg` and the rest — stopped at step
+1. They no longer do; see the `internalPackages` note above for why, and for the five packages
+that still stop short. `tests/aiida/default.nix` spells out the public AiiDA list in
 `exportedPackages`, a fourth hand-written copy that exists so the other three cannot drift apart
 silently.
 
@@ -612,6 +634,11 @@ just vm-test aiida-daemon-local-db    # the AiiDA VM tests are prefixed "aiida-"
 just fmt / just lint / just hooks     # nixfmt, statix+deadnix, prek
 just check-no-daemon                  # the eval-only subset; no nix-daemon needed
 just eval vise.version                # one expression, likewise; see the skill
+just update-scan                      # which packages have a newer upstream; builds nothing
+just update-policy                    # the resolved update policy as JSON; no daemon either
+just update qcportal                  # bump one package: rewrite, fix hashes, build
+just update-pr qcportal               # and open a pull request for it
+just update-flake-inputs              # move flake.lock, gated on the eval checks
 ```
 
 Tooling comes from the devShell (`nix develop`, or direnv). Entering it also generates
@@ -633,7 +660,10 @@ level.
 
 **The materials-project chain.** `atomate2`, `matcalc` and `quacc` are all packaged — the chain
 is complete. Reading those targets' own `pyproject.toml` against the locked nixpkgs, this is
-where the survey stands:
+where the survey stands.  Rows saying a package is "internal" are a historical note about why it
+was added — one dependant, not wanted for its own sake — and no longer describe how it is exposed:
+every package here is a top-level attribute now bar the five named at `internalPackages` in
+`default.nix`.
 
 | Missing | Wanted by | Status |
 |---|---|---|

@@ -318,6 +318,20 @@ buildPythonPackage (finalAttrs: {
     "yellowbrick.text"
   ];
 
+  # Read by ../../scripts/update-universe.nix.  The second fetch is the dataset
+  # archives, served from a frozen `…/yellowbrick/v1.0/` prefix that has not
+  # moved across upstream releases and is not keyed on `version`.  A bump leaves
+  # it alone, so this is an ordinary `stable` package.
+  passthru.updatePolicy.secondary = [
+    {
+      name = "datasets";
+      mode = "pinned";
+      source = "https://yb-data-lake.s3.us-east-2.amazonaws.com/yellowbrick/v1.0/";
+      version = "v1.0";
+      reason = "the dataset archives are a frozen artifact, independent of the release";
+    }
+  ];
+
   meta = {
     description = "Visual analysis and diagnostic tools for scikit-learn";
     homepage = "https://github.com/DistrictDataLabs/yellowbrick";
