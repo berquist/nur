@@ -175,6 +175,16 @@ in
       '';
     };
 
+    reverseDirection = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Sync from MyAnimeList to AniList instead of the default AniList to
+        MyAnimeList -- upstream's --reverse-direction flag, which likewise
+        has no environment-variable form.
+      '';
+    };
+
     oauthPort = lib.mkOption {
       type = lib.types.port;
       default = 18080;
@@ -272,6 +282,7 @@ in
           ]
           ++ lib.optional (cfg.syncTarget == "manga") "--manga"
           ++ lib.optional (cfg.syncTarget == "all") "--all"
+          ++ lib.optional cfg.reverseDirection "--reverse-direction"
         );
 
         EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;

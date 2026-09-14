@@ -94,7 +94,7 @@ psi4_stub='(import <nixpkgs> { }).runCommand "psi4-stub" { } "mkdir -p $out/bin 
 # Every suite whose check{} helper bakes the verdict into the derivation's
 # build command, which is what makes PASS/FAIL readable without a daemon.  A
 # suite that builds something real instead (tests/dotdrop) belongs further down.
-eval_suites=(qcarchive aiida cheminformatics chemtools)
+eval_suites=(qcarchive aiida cheminformatics chemtools anilist-mal-sync-module)
 
 for suite in "${eval_suites[@]}"; do
     echo

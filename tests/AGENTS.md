@@ -14,6 +14,8 @@ tests/cheminformatics/default.nix  eval tests for the two cheminformatics overla
 tests/dotdrop/default.nix     integration tests for the dotdrop package
 tests/harmonwig/default.nix   integration tests for the harmonwig package
 tests/anilist-mal-sync/default.nix  integration tests for the anilist-mal-sync package
+tests/anilist-mal-sync-module/default.nix  evaluation tests for the anilist-mal-sync
+                               NixOS module
 ```
 
 Five properties worth preserving, each explained at the code:

@@ -16,6 +16,8 @@
 #   dotdrop/default.nix     integration tests for the dotdrop package
 #   harmonwig/default.nix   integration tests for the harmonwig package
 #   anilist-mal-sync/default.nix  integration tests for the anilist-mal-sync package
+#   anilist-mal-sync-module/default.nix  evaluation tests for the anilist-mal-sync
+#                           NixOS module
 #
 # Run everything that needs no VM:
 #   nix-build tests -A all
@@ -58,6 +60,7 @@ let
   anilist-mal-sync = import ./anilist-mal-sync {
     pkgs = pkgs.extend (import ../overlays).anilist-mal-sync;
   };
+  anilist-mal-sync-module = import ./anilist-mal-sync-module { inherit pkgs; };
   aiida = import ./aiida { inherit pkgs; };
   cheminformatics = import ./cheminformatics { inherit pkgs; };
   chemtools = import ./chemtools { inherit pkgs; };
@@ -67,6 +70,7 @@ in
     qcarchive
     dotdrop
     anilist-mal-sync
+    anilist-mal-sync-module
     aiida
     cheminformatics
     chemtools
@@ -79,6 +83,7 @@ in
       qcarchive.all
       dotdrop.all
       anilist-mal-sync.all
+      anilist-mal-sync-module.all
       aiida.all
       cheminformatics.all
       chemtools.all

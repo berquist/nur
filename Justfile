@@ -145,6 +145,10 @@ qcfractal-eval-tests:
 aiida-eval-tests:
     nix-build tests -A aiida.all --no-out-link
 
+# anilist-mal-sync module evaluation tests only — fast, no VM, stubbed package.
+anilist-mal-sync-eval-tests:
+    nix-build tests -A anilist-mal-sync-module.all --no-out-link
+
 # Cheminformatics overlay evaluation tests only — fast, no VM, nothing real
 # built. This is where the cclib split is asserted.
 cheminformatics-eval-tests:
