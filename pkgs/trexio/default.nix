@@ -145,6 +145,18 @@ buildPythonPackage {
     "pytrexio"
   ];
 
+  # Read by ../../scripts/update-universe.nix.  `testSrc` is a second fetch, but
+  # not a second thing to decide: its rev is `v${version}`, so a bump moves it
+  # already and only its hash goes stale.  ../../scripts/refresh-hashes.sh takes
+  # that from the build's own mismatch, which is why this is not manual.
+  passthru.updatePolicy.secondary = [
+    {
+      name = "testSrc";
+      mode = "derived";
+      reason = "rev interpolates version, so only the hash has to be recovered";
+    }
+  ];
+
   meta = {
     description = "File format and library for the storage of quantum chemical wave functions";
     homepage = "https://trex-coe.github.io/trexio/";

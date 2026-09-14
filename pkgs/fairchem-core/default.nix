@@ -432,6 +432,19 @@ buildPythonPackage (finalAttrs: {
     "fairchem.core.units"
   ];
 
+  # The monorepo tags thirteen distributions out of one release feed, so
+  # `nix-update` is offered `fairchem_data_omol-0.1.2` when it asks this
+  # repository for its newest tag and refuses it as unparseable.  The regex
+  # picks this distribution's own series out of that feed; the capture group is
+  # the version.  ../fairchem-data-{oc,omat,omol} each carry their own.
+  #
+  # Declaring it also makes the driver read the paginated releases API rather
+  # than `releases.atom`, which carries only the newest handful of releases —
+  # and with thirteen series sharing one feed, a series can be absent from it
+  # entirely.  This package would have passed on the feed the week it was
+  # written and failed in a quiet month; ../fairchem-data-omat failed at once.
+  passthru.updatePolicy.versionRegex = "fairchem_core-(.*)";
+
   meta = {
     description = "Machine learning models for chemistry and materials science by the FAIR Chemistry team";
     homepage = "https://github.com/facebookresearch/fairchem";

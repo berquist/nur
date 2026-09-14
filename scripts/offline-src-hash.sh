@@ -5,6 +5,11 @@
 #
 #   scripts/offline-src-hash.sh wc/aiida/aiida-shell [rev]
 #
+# Any path inside the clone will do; the argument is resolved to the repository
+# root before anything is archived.  That resolution is not a convenience --
+# see the note at it for what handing this a package subdirectory used to
+# return.
+#
 # Every packaging session here starts by pinning a `rev` that is already sitting
 # in wc/, and `nix-prefetch-url`/`nix flake prefetch` both want the network the
 # Claude Code sandbox does not have.  `git archive` reproduces exactly the tree
@@ -73,6 +78,22 @@ git -C "$clone" rev-parse --git-dir >/dev/null 2>&1 || {
     printf 'offline-src-hash.sh: not a git clone: %s\n' "$clone" >&2
     exit 1
 }
+
+# **Resolve to the repository root before doing anything else.**  `git -C` sets
+# where git looks for the repository, not what `git archive` archives: with no
+# pathspec, `git archive` takes *the current working directory* as one.  So a
+# clone argument that points inside the tree -- `wc/rootstock/rootstock`, the
+# package directory, rather than `wc/rootstock`, the clone -- silently archives
+# that subtree and hashes it.
+#
+# Silently is the whole problem.  Every other output below stays correct,
+# because `rev-parse`, `log` and `describe` are all properties of the repository
+# and do not care where inside it they were run.  Only the hash changes, and it
+# changes into a plausible-looking one: rootstock was given
+# `sha256-0bUF6LShi1LvdUKaOD+OjtNG/7GhEFprpXB0Hv5NT0s=` for its `rootstock/`
+# subdirectory and `sha256-ACTcBw/vfSJcBxPzrYEv/gtecGBSmWLalI5vl2us/m8=` for the
+# repository, with nothing to say which one had been asked for.
+clone=$(git -C "$clone" rev-parse --show-toplevel)
 
 full_rev=$(git -C "$clone" rev-parse "$rev^{commit}")
 date=$(git -C "$clone" log -1 --format=%cs "$full_rev")

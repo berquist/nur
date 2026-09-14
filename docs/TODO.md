@@ -70,8 +70,23 @@ qcportal 0.65 is pydantic v1 throughout; `qcelemental`'s
 `_use_real_if_possible()` returns `False` for `sys.version_info >= (3, 14)` and replaces every
 QCSchema v1 name with a placeholder class; one of those names is `Array`, which
 `dataset_models.py` subscripts as `index: Array[str]`; the placeholder has an ordinary metaclass,
-so pydantic v1 dies with `TypeError: type 'Array' is not subscriptable`.  Upstream's pydantic v2
-migration is unreleased.  `just repro-gh` reproduces it in one command.
+so pydantic v1 dies with `TypeError: type 'Array' is not subscriptable`.  `just repro-gh`
+reproduces it in one command.
+
+**Upstream's pydantic v2 migration has since been released, and the blocker is a version bump.**
+Read out of `wc/QCFractal` on 2026-09-13, at tag `v0.70` (2026-08-17):
+
+- `qcportal/pyproject.toml` asks for `pydantic>=2.11`, so the v1 half is gone;
+- `requires-python = ">=3.10"`, with no upper bound, so nothing declares a 3.14 gate;
+- there is **no `Array[` anywhere** in `qcportal/`, and no `qcelemental.models.v1` import — it
+  reaches `qcelemental.models._v1v2` instead, so the placeholder mechanism cannot fire;
+- its two version bounds are already satisfied by the locked nixpkgs: `qcelemental>=0.50.2,<0.70a0`
+  against 0.50.4, and `qcengine>=0.50,<0.70a0` against 0.50.0 for the other three packages.
+
+Four dependency lines also move: `dateutils` → `python-dateutil`, `pytz` dropped, `packaging`
+added, `pyjwt>=2.10` and `apsw>=3.42` floored.  Expect the bump to be the easy part and the
+0.65 → 0.70 API delta across `pkgs/qcfractal`, `pkgs/qcfractalcompute` and the two NixOS modules
+to be the work.  `just update-scan qcportal` is the first thing to run.
 
 **So this is a waiting game with a preparation half, and the preparation is the useful part.**
 Nobody knows what *else* would break, because the pin has meant nothing here is ever built on
@@ -538,12 +553,20 @@ argued from the shapes rather than measured.
 
 ## Build the internal packages that nothing else builds
 
-**Done in shape, unverified in fact.** `default.nix` now exposes `internalPackages` — option 1
+**Done in shape, unverified in fact.** `default.nix` first exposed `internalPackages` — option 1
 below, the hand-written set carrying `recurseIntoAttrs` — and `ci.nix` picks it up because
 `isReserved` there deliberately does *not* name it. `buildPkgs` went from 61 entries to 128, and
 `sevenn`, `deepmd-kit`, `dpdata`, `dargs`, `maml`, `rootstock`, `parmed` and
 `nvalchemi-toolkit-ops` are all in it for the first time. `tensorpotential` is kept out, for the
 unfree reason option 3 below gives.
+
+**Then the question was closed the other way: nothing is internal any more.** Building the
+updater needed one attribute path per package, and the cheapest way to guarantee that is for
+every package to be a top-level attribute — so 70 of the 72 `internalPackages` members were
+promoted, and `internalPackages` is down to `chemfiles` and `trexio`, whose names are taken at
+the top level by different derivations. `scripts/update-universe.nix` now fails outright if any
+`pkgs/` directory has no attribute path, which is the check that keeps this from regressing;
+it found `graphrc`, reachable from nothing at all, on its first run.
 
 **What has not happened is a build.** This was written in the sandbox, so `just ci-eval` and the
 no-daemon suite are all that has run. Expect the first `just ci-matrix` to be long and to fail:

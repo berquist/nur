@@ -80,6 +80,14 @@ buildPythonPackage rec {
     "node_graph.socket_spec"
   ];
 
+  # Read by ../../scripts/update-universe.nix.  ../aiida-workgraph and
+  # ../aiida-pythonjob both ask for `node-graph~=0.6.5`, and the `.build(...)`
+  # they call exists only at the tag — see the note above `src`.
+  passthru.updatePolicy = {
+    mode = "pinned";
+    reason = "aiida-workgraph and aiida-pythonjob need the pre-GraphTaskHandle API; see the note above src";
+  };
+
   meta = {
     description = "Library for building and running node-based workflow graphs";
     homepage = "https://github.com/scinode/node-graph";

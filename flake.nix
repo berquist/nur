@@ -426,17 +426,32 @@
           # the derivations here are identical to what python313.withPackages
           # returns.
           #
-          # Plus one attribute that is not from default.nix: `parmed-ambertools`,
-          # which needs the nixos-qchem input and so cannot come from there.  It
-          # lives here rather than in `packages` or `checks` precisely because
-          # `nix flake check` does not force legacyPackages — see the note at
-          # `parmedWithAmbertools` above for why that matters when the underlying
-          # source is `requireFile`.
+          # Plus two attributes that are not from default.nix.
+          #
+          # `parmed-ambertools` needs the nixos-qchem input and so cannot come
+          # from there.  It lives here rather than in `packages` or `checks`
+          # precisely because `nix flake check` does not force legacyPackages —
+          # see the note at `parmedWithAmbertools` above for why that matters
+          # when the underlying source is `requireFile`.
+          #
+          # `graphrc` is here for a different reason: ../default.nix deliberately
+          # declines to re-export it, because it is a top-level attribute of
+          # overlays.cheminformatics-cclib only for the reason given at that
+          # binding, and re-exporting it would have ci.nix build it in its own
+          # right.  That left it the one package in pkgs/ with **no attribute
+          # path at all**, which is a problem for anything automated — see
+          # scripts/update-universe.nix, whose coverage check is what found it.
+          # legacyPackages is the right home for the same reason parmed's is:
+          # `nix flake check` does not force it, so a null cclibPkgs costs
+          # nothing.
           # -------------------------------------------------------------------
           legacyPackages =
             nurAttrs
             // lib.optionalAttrs (parmedWithAmbertools != null) {
               parmed-ambertools = parmedWithAmbertools;
+            }
+            // lib.optionalAttrs (cclibPkgs != null) {
+              inherit (cclibPkgs) graphrc;
             };
 
           # Flake-style packages (derivations only, filtered).
@@ -526,6 +541,14 @@
               pkgs.deadnix
               pkgs.prek
               pkgs.jq
+              # The updater's three, none of which is on a bare PATH:
+              # scripts/update-packages.sh drives nix-update, scripts/forge-pr.sh
+              # talks to the forge with curl, and both reach for python3 where a
+              # sed expression would have to escape a base64 hash.  See
+              # docs/version-updates.md.
+              pkgs.nix-update
+              pkgs.curl
+              pkgs.python3
             ];
           };
 

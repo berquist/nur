@@ -145,6 +145,19 @@ buildPythonPackage (finalAttrs: {
 
   pythonImportsCheck = [ "vesin" ];
 
+  # Read by ../../scripts/update-universe.nix.  Same shape as ../enumlib's
+  # symlib: a separate repository vendored at a fixed rev, on its own cadence,
+  # so a bump here does not touch it and this package is not manual.
+  passthru.updatePolicy.secondary = [
+    {
+      name = "gpulite";
+      mode = "pinned";
+      source = "github:metatensor/gpu-lite";
+      version = "6c221167aeca7e113ea6f27e9a2e12391bdb189a";
+      reason = "vendored GPU backend, pinned to the rev upstream's build expects";
+    }
+  ];
+
   meta = {
     description = "Computing neighbor lists for atomistic systems";
     homepage = "https://github.com/Luthaf/vesin";

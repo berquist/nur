@@ -309,6 +309,71 @@ repro-gh channel=default_channel:
         -E 'with import <nixpkgs> { overlays = [ (import ./overlays).qcfractal ]; }; python3Packages.qcportal'
 
 # ---------------------------------------------------------------------------
+# Version updates
+#
+# The whole updater runs from here, and .github/workflows/update.yml calls
+# these recipes rather than spelling the commands out — the same arrangement
+# the ci-* recipes above have, and for the same reason.  Nothing about the
+# updater exists only in CI.
+#
+# scripts/update-universe.nix holds the policy; scripts/update-packages.sh is
+# the driver; scripts/forge-pr.sh does the delivery on either GitHub or
+# Forgejo.  See docs/version-updates.md.
+#
+# `update-scan` and `update-policy` need neither a token nor a forge, and
+# `update-policy` needs no nix-daemon either.  Everything else builds.
+#
+# `update-scan` always writes its report, because the scan's whole product is
+# that list and it used to exist only in scrollback.  `update-from-scan` reads
+# the report's would-update rows back, which is the pair these two make: decide
+# from the table, then act on it without retyping thirty-odd attribute names.
+# Rows the scan marked `rejected` are deliberately not carried over — see the
+# version guards in scripts/update-packages.sh for what that status means.
+# ---------------------------------------------------------------------------
+
+# Where `update-scan` leaves its machine-readable report and `update-from-scan`
+# reads it back.  Under .scratch/ because it is a working note rather than
+# content: gitignored, and rewritten whole by every scan.
+scan_report := ".scratch/update-scan.json"
+
+# What would move, with nothing built and nothing written.
+update-scan *pkgs:
+    mkdir -p .scratch
+    ./scripts/update-packages.sh --scan --json={{ scan_report }} {{ pkgs }}
+
+# Bump everything the last scan called would-update. Hours of builds.
+update-from-scan:
+    ./scripts/update-packages.sh --from={{ scan_report }}
+
+# The same, one pull request each.
+update-from-scan-pr:
+    ./scripts/update-packages.sh --from={{ scan_report }} --deliver=pr
+
+# Bump named packages: rewrite, fix hashes, build. Leaves the tree dirty.
+update +pkgs:
+    ./scripts/update-packages.sh {{ pkgs }}
+
+# The same over every actionable package. Hours of builds; see the scan first.
+update-all:
+    ./scripts/update-packages.sh
+
+# Bump named packages and open one pull request each.
+update-pr +pkgs:
+    ./scripts/update-packages.sh --deliver=pr {{ pkgs }}
+
+# What the scheduled workflow runs: up to `limit` bumps, one PR each.
+update-batch limit="5":
+    ./scripts/update-packages.sh --deliver=pr --limit={{ limit }}
+
+# The resolved policy table as JSON. No daemon needed.
+update-policy:
+    ./scripts/update-packages.sh --policy
+
+# Move flake.lock, gate on the evaluation checks, leave it in the tree.
+update-flake-inputs *inputs:
+    ./scripts/update-flake-inputs.sh {{ inputs }}
+
+# ---------------------------------------------------------------------------
 # Formatting and linting.  These are also wired up as prek hooks by the flake;
 # `just hooks` runs the same set the way a commit would.
 # ---------------------------------------------------------------------------

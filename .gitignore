@@ -20,3 +20,7 @@ result-*
 # pyproject.toml, conftest.py and uv.lock can be read while packaging.  They are
 # other people's repositories, each with its own .git — not content of this one.
 /wc/
+
+# `just update-scan`'s report, read back by `just update-from-scan`.  A working
+# note about what upstream happens to hold today, rewritten whole by every scan.
+/.scratch/update-scan.json

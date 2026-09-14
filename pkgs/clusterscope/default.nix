@@ -59,6 +59,14 @@ buildPythonPackage (finalAttrs: {
     "clusterscope.cli"
   ];
 
+  # Read by ../../scripts/update-universe.nix.  Without it this infers `stable`
+  # and moves to v0.0.32, which is the one thing the note above `src` says not
+  # to do — fairchem-core names 0.0.18 with `==`.
+  passthru.updatePolicy = {
+    mode = "pinned";
+    reason = "fairchem-core pins this exact version with ==; see the note above src";
+  };
+
   meta = {
     description = "Extract core information about an HPC cluster from its scheduler";
     homepage = "https://github.com/facebookresearch/clusterscope";

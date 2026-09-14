@@ -103,6 +103,17 @@ buildPythonPackage {
   # what catch that.
   pythonImportsCheck = [ "dpdata" ];
 
+  # Read by ../../scripts/update-universe.nix.  This is the only package here
+  # with no `src` of its own — `version` is 0.0.0 and the source is ../dpdata's,
+  # one directory down — so there is nothing for the updater to bump and
+  # nothing for it to get wrong.  Bumping dpdata moves this too, by
+  # construction; the report says so rather than leaving it looking skipped.
+  passthru.updatePolicy = {
+    mode = "follows";
+    follows = "dpdata";
+    reason = "no src of its own; built from dpdata's tests/plugin one directory down";
+  };
+
   meta = {
     description = "Entry-point plugin fixture from dpdata's own test suite";
     homepage = "https://github.com/deepmodeling/dpdata";
