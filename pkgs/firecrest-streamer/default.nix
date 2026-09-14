@@ -55,6 +55,21 @@ buildPythonPackage rec {
     "streamer.streamer_core"
   ];
 
+  # Read by ../../scripts/update-universe.nix.  `report` rather than the
+  # inferred `stable`, and this is the one package here where an *allowed* bump
+  # was the wrong answer: `version` has no `-unstable-` marker, so the updater
+  # took it for a released package and offered `0.0.21 -> 2.6.0` — the FirecREST
+  # *server's* newest tag, since the streamer has no tags of its own and `src`
+  # is the whole monorepo.  No `versionRegex` can help, because the series it
+  # would have to match does not exist.  Neither version guard in
+  # ../../scripts/update-packages.sh catches it either: 2.6.0 is a perfectly
+  # well-formed version, and it sorts forwards.  So the rev moves by hand, and
+  # `version` follows this subdirectory's own pyproject.toml.
+  passthru.updatePolicy = {
+    mode = "report";
+    reason = "no tag versions the streamer; the repository's tags are the FirecREST server's";
+  };
+
   meta = {
     description = "File streamer over websockets, used by pyfirecrest for large transfers";
     homepage = "https://github.com/eth-cscs/firecrest-v2";

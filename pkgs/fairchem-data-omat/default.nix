@@ -117,6 +117,10 @@ buildPythonPackage (finalAttrs: {
     "fairchem.data.omat.vasp.sets"
   ];
 
+  # This distribution's tag series out of the shared monorepo feed; see
+  # ../fairchem-core for what goes wrong without it.
+  passthru.updatePolicy.versionRegex = "fairchem_data_omat-(.*)";
+
   meta = {
     description = "VASP input sets and energy corrections for the OMat24 dataset";
     homepage = "https://github.com/facebookresearch/fairchem";

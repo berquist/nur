@@ -1,7 +1,7 @@
 {
   lib,
   buildPythonPackage,
-  fetchurl,
+  fetchPypi,
   pythonOlder,
 
   # build-system
@@ -52,8 +52,18 @@ buildPythonPackage rec {
 
   # Source distribution, not a wheel: setup.py reads parsl/version.py and
   # requirements.txt at build time, neither of which ships in the wheel.
-  src = fetchurl {
-    url = "https://files.pythonhosted.org/packages/16/94/32047135b76f8c2c56dc87cc2e53e41aa7848659e0d6f82f23f984d54552/parsl-${version}.tar.gz";
+  #
+  # `fetchPypi` rather than the `fetchurl` this used to be, and the reason is
+  # the updater rather than the build — the two fetch the same bytes to the same
+  # store path.  pythonhosted addresses a file by a hash of its contents
+  # (`packages/16/94/32047135…/parsl-2026.7.27.tar.gz`), which cannot be derived
+  # from a version, so `nix-update` could neither learn what the newest release
+  # was — it only recognises `mirror://pypi` URLs — nor construct the URL of one
+  # if it had.  This package was the sole permanent `failed` row in the scan for
+  # that reason.  `mirror://pypi/p/parsl/parsl-${version}.tar.gz` is derivable,
+  # so a bump is now an ordinary version rewrite.
+  src = fetchPypi {
+    inherit pname version;
     hash = "sha256-ox4ynnCLBb6oN9zd+WR+k3iFFPByR20+mvb0C+BNbH4=";
   };
 

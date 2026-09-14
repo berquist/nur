@@ -103,6 +103,16 @@ Three things it will not do, each of which the driver covers:
 2. **It rewrites one source.**  See §2 above and `scripts/refresh-hashes.sh`.
 3. **It says nothing about whether the package still works.**  See §6.
 
+The driver points it at `default.nix` rather than at the flake.  `--flake` runs
+`nix flake metadata` — which "always re-copies the flake", twice per invocation —
+and then evaluates flake.nix through flake-parts before it can reach one
+attribute; `--file` is a lazy `import`, and measured 0.17s against roughly 4.8s
+of CPU per package.  It also resolves four attributes the flake path could not
+see at all, `nix-update`'s `eval.nix` looking in `flake.packages.${system}` and
+the flake root but never in `legacyPackages`.  The cost is that `<nixpkgs>` is
+no longer pinned by `flake.lock`, so the driver exports NIX_PATH from
+`scripts/locked-nixpkgs.sh` before anything runs.
+
 `scripts/update-packages.sh` greps `nix-update --help` for the flags it intends
 to use before doing any work, so a renamed flag is one line at the start rather
 than a silent no-op three hundred packages deep.
@@ -165,6 +175,76 @@ default branch is the usual cause — and it is reported rather than committed. 
 declaration alone would not catch that, because the declaration would still be
 naming a branch that had moved.
 
+### The version guard, and why the date check was not enough
+
+The date check answers for the rev.  A second guard answers for the version
+string, and it turned out to be the busier of the two: twelve packages in the
+first scan it ran against were offering a version *lower* than the one already
+in the file.
+
+The cause is structural rather than incidental.  A dozen packages here carry a
+hand-written version because upstream's newest tag is years behind its default
+branch — `vise` is 827 commits past v0.1.13 and `pydefect` 764 past v0.2.6, with
+the real version in `__init__.py` — and `nix-update` reads the tag.  So a bump
+that correctly moves the rev forward also writes the version backward, and the
+file ends up claiming a release this repository passed long ago.  Two rules:
+
+- the new version does not begin with a digit, which is a ref name that reached
+  the version field (`mdanalysis` was offered `release-2.10.0`);
+- the new version sorts before the current one under `sort --version-sort`.
+
+Both compare a normalised prefix: the `-unstable-<date>` marker removed, and
+then a trailing PEP 440 dev or pre-release segment, so that `0.12.dev20260807 ->
+0.12` reads as the release it is rather than as a downgrade.  `sort` has never
+heard of PEP 440, and four packages here publish dated dev versions.
+
+A `rejected` row is a question for a human, not a defect.  The way out for a
+package that genuinely needs the bump is `versionRegex` below, or a note saying
+why the version is set by hand.
+
+### When a tag does not spell the version
+
+`passthru.updatePolicy.versionRegex` is `nix-update`'s `--version-regex`: one
+capture group naming the version inside a tag.  The four `fairchem-*`
+distributions are what forced it.  They share one monorepo which tags each
+separately, so all four are offered the same release feed —
+`fairchem_core-2.22.0`, `fairchem_data_omol-0.1.2` and the rest — and
+`nix-update` can parse none of them as a version.  Each declares its own series:
+
+```nix
+passthru.updatePolicy.versionRegex = "fairchem_data_omat-(.*)";
+```
+
+It applies in `branch` mode too, which is the less obvious half: a snapshot's
+version is `<newest reachable tag>-unstable-<date>`, drawn from that same feed,
+so `fairchem-data-oc` was being handed `fairchem_core-2.22.0-unstable-…` — the
+sibling distribution's tag.
+
+**Declaring it also switches that package to the paginated releases API**, and
+the two belong together.  `nix-update`'s default fetcher reads `releases.atom`,
+which carries only the newest handful of releases; a repository that needs a
+regex is by definition one with several series in that feed, so a series that
+has not released lately can be missing from it altogether.  `fairchem-data-omat`
+last tagged in November 2025 and its regex matched nothing at all — while
+`fairchem-core` and `fairchem-data-omol` passed on the feed only because they
+happened to be inside the window that week.  The API walk honours `GITHUB_TOKEN`
+and costs one request per regexed package.
+
+**It is not a universal escape hatch, and `firecrest-streamer` is the proof.**
+That package is one directory inside the FirecREST v2 server monorepo, whose
+tags version the *server*; there is no streamer series for a regex to match, so
+it was offering `0.0.21 -> 2.6.0` and neither version guard objected — 2.6.0 is
+well formed and sorts forward.  It is `mode = "report"`, and its rev moves by
+hand.
+
+`parsl` was the other permanent failure and needed a change to the derivation
+rather than to the policy.  Its `src` was a `fetchurl` of a pythonhosted URL,
+which addresses a file by a hash of its contents, so `nix-update` could neither
+recognise it as PyPI — it matches `mirror://pypi` alone — nor construct the URL
+of a release it had not already seen.  `fetchPypi` fetches the same bytes to the
+same store path and is derivable from `version`.  A fetcher that hides the
+version is worth spotting when the package is written.
+
 ### The universe, and how it stays honest
 
 The attribute paths come from `default.nix`, not from a list: every top-level
@@ -189,6 +269,8 @@ which are out for reasons given at `default.nix`.
 ```sh
 just update-scan                  # what would move; nothing built, nothing written
 just update-scan qcportal         # one package
+just update-from-scan             # bump everything the last scan called would-update
+just update-from-scan-pr          # the same, one pull request each
 just update qcportal              # rewrite + build + fix hashes; leaves the tree dirty
 just update-all                   # every actionable package
 just update-pr qcportal           # the above, then branch + signed commit + PR
@@ -196,6 +278,30 @@ just update-batch 5               # what the scheduled workflow runs
 just update-policy                # the resolved policy, as JSON; needs no daemon
 just update-flake-inputs          # §8
 ```
+
+### A scan is fast, and its answer outlives the terminal
+
+A whole-repository scan is around 16 seconds.  It was 57 minutes, and the three
+changes that account for that are worth knowing before anything is added to the
+per-package path:
+
+| | |
+|---|---|
+| `--file` rather than `--flake` | no store copy and no flake-parts evaluation per package; ~19× less CPU |
+| `--no-src` in scan mode | `nix-update` rewrites a hash by building the fetcher with `outputHash = ""` and reading the right answer out of the *failure*, which leaves nothing in the store — so every moving package was downloading its source and discarding it, for a value the scan then restored |
+| `--jobs`, defaulting to one per core capped at 8 | the work is forge round-trips, and a serial scan spent 79% of its wall clock waiting |
+
+`--jobs` is refused outside scan mode: `--deliver` drives git and `--limit` is a
+running count, and neither survives being raced.  Two attributes pointing at one
+file would race their snapshots, so the driver checks for that and drops back to
+a single worker rather than letting one bump vanish.
+
+`update-scan` always writes `.scratch/update-scan.json`, and `update-from-scan`
+reads its `would-update` rows back.  The scan's entire product is that list, and
+it used to exist only in scrollback — so the work was thrown away unless someone
+saved the log and retyped thirty-odd attribute names.  `rejected` and `failed`
+rows are deliberately not carried over: the first is a guard's considered answer
+and the second is a bug to fix.
 
 Delivery is a flag (`--deliver=none|commit|pr`), not a mode of execution, and
 `none` is the default everywhere including CI's scan job.  `--deliver=commit`

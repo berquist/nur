@@ -322,11 +322,32 @@ repro-gh channel=default_channel:
 #
 # `update-scan` and `update-policy` need neither a token nor a forge, and
 # `update-policy` needs no nix-daemon either.  Everything else builds.
+#
+# `update-scan` always writes its report, because the scan's whole product is
+# that list and it used to exist only in scrollback.  `update-from-scan` reads
+# the report's would-update rows back, which is the pair these two make: decide
+# from the table, then act on it without retyping thirty-odd attribute names.
+# Rows the scan marked `rejected` are deliberately not carried over — see the
+# version guards in scripts/update-packages.sh for what that status means.
 # ---------------------------------------------------------------------------
+
+# Where `update-scan` leaves its machine-readable report and `update-from-scan`
+# reads it back.  Under .scratch/ because it is a working note rather than
+# content: gitignored, and rewritten whole by every scan.
+scan_report := ".scratch/update-scan.json"
 
 # What would move, with nothing built and nothing written.
 update-scan *pkgs:
-    ./scripts/update-packages.sh --scan {{ pkgs }}
+    mkdir -p .scratch
+    ./scripts/update-packages.sh --scan --json={{ scan_report }} {{ pkgs }}
+
+# Bump everything the last scan called would-update. Hours of builds.
+update-from-scan:
+    ./scripts/update-packages.sh --from={{ scan_report }}
+
+# The same, one pull request each.
+update-from-scan-pr:
+    ./scripts/update-packages.sh --from={{ scan_report }} --deliver=pr
 
 # Bump named packages: rewrite, fix hashes, build. Leaves the tree dirty.
 update +pkgs:

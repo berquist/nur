@@ -190,6 +190,16 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
 | How are version updates automated, and why is `nixpkgs-update` the wrong tool for it? | `docs/version-updates.md` |
 | Where does a package's update mode come from, and how do I declare one that is pinned? | `scripts/update-universe.nix`, `pkgs/lobsterpy/default.nix` (`passthru.updatePolicy`) |
+| Why is `nix-update` pointed at `default.nix` rather than at the flake, and which four attributes did that fix? | `scripts/update-packages.sh` (the header), `docs/version-updates.md` (§3) |
+| Why does a scan download nothing, when it has to rewrite a hash to learn anything? | `scripts/update-packages.sh` (the `--no-src` note in `nix_update_argv`) |
+| Why is `--jobs` refused outside scan mode, and what happens if two attributes share a file? | `scripts/update-packages.sh` (the header, `shared_positions`) |
+| Why does a bump get rejected when its *version* goes backwards, and why was the date check not enough? | `scripts/update-packages.sh` (`version_regression`), `docs/version-updates.md` (§4) |
+| Why do `0.12.dev20260807 -> 0.12` and `0.11.0-rc1 -> 0.10.4` get opposite answers from that guard? | `scripts/update-packages.sh` (`version_prefix`) |
+| Why do the four fairchem packages each declare a `versionRegex`, and why does it matter in branch mode? | `pkgs/fairchem-core/default.nix` and `pkgs/fairchem-data-oc/default.nix` (`passthru.updatePolicy.versionRegex`) |
+| Why does a `versionRegex` also turn on the releases API, rather than that being a second field? | `scripts/update-packages.sh` (the note in `nix_update_argv`), `docs/version-updates.md` (§4) |
+| Why is `firecrest-streamer` `report` when no guard objected to its bump? | `pkgs/firecrest-streamer/default.nix` (`passthru.updatePolicy`) |
+| Why is `parsl` fetched with `fetchPypi` when the URL it had worked perfectly? | `pkgs/parsl/default.nix` (the `src` note) |
+| How do I apply what a scan found without retyping thirty attribute names? | `Justfile` (`update-from-scan`), `scripts/update-packages.sh` (`attrs_from_report`) |
 | Why does `missing` being non-empty abort the updater rather than warn? | `scripts/update-universe.nix` (the header), `flake.nix` (the `graphrc` note in `legacyPackages`) |
 | Why is no package `manual`, when five of them were called permanently manual? | `docs/version-updates.md` (§2), `pkgs/chemfiles/default.nix` and `pkgs/trexio/default.nix` (`passthru.updatePolicy.secondary`) |
 | How does a second, stale hash get recovered without a human reading the build log? | `scripts/refresh-hashes.sh` (the header) |

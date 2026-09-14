@@ -230,6 +230,13 @@ buildPythonPackage (finalAttrs: {
     }
   ];
 
+  # This distribution's tag series out of the shared monorepo feed; see
+  # ../fairchem-core.  It matters in `branch` mode too, and that is less obvious:
+  # a snapshot's version is `<newest reachable tag>-unstable-<date>`, drawn from
+  # the same feed, so without this the bump came back as
+  # `fairchem_core-2.22.0-unstable-…` — someone else's tag, on this package.
+  passthru.updatePolicy.versionRegex = "fairchem_data_oc-(.*)";
+
   meta = {
     description = "Adsorbate and catalyst structure generation for the Open Catalyst datasets";
     homepage = "https://github.com/facebookresearch/fairchem";

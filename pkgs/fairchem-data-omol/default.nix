@@ -113,6 +113,10 @@ buildPythonPackage (finalAttrs: {
     "fairchem.data.omol.orca.calc"
   ];
 
+  # This distribution's tag series out of the shared monorepo feed; see
+  # ../fairchem-core for what goes wrong without it.
+  passthru.updatePolicy.versionRegex = "fairchem_data_omol-(.*)";
+
   meta = {
     description = "ORCA input generation and evaluation for the OMol25 dataset";
     homepage = "https://github.com/facebookresearch/fairchem";

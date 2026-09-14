@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 #
-# refresh-hashes.sh — build a flake attribute and rewrite any fixed-output hash
-# it disagrees with, until it stops disagreeing.
+# refresh-hashes.sh — build an attribute of ../default.nix and rewrite any
+# fixed-output hash it disagrees with, until it stops disagreeing.
 #
-#   scripts/refresh-hashes.sh python313Packages.trexio
+#   scripts/refresh-hashes.sh internalPackages.trexio
 #   scripts/refresh-hashes.sh chemfiles 5
+#
+# `nix build -f` rather than `nix build .#`, and NIX_PATH from
+# ./locked-nixpkgs.sh, to match ./update-packages.sh — which is the only caller.
+# The two attributes that declare a secondary source are `chemfiles` and
+# `internalPackages.trexio`, and the second is not a flake output at all, so the
+# flake reference this used to build could never have realised it.
 #
 # This exists because `nix-update` rewrites exactly one source.  Six packages
 # here have a second fetch, and two of those — ../pkgs/trexio and
@@ -44,7 +50,7 @@ usage() {
     cat >&2 <<'EOF'
 usage: refresh-hashes.sh ATTR [MAX_ROUNDS]
 
-  ATTR        flake attribute to build, e.g. chemfiles or python313Packages.trexio
+  ATTR        attribute of ../default.nix, e.g. chemfiles or internalPackages.trexio
   MAX_ROUNDS  give up after this many rewrites (default 5)
 
 Exit status:
@@ -116,9 +122,17 @@ main() {
 
     cd "$repo_root"
 
+    # Only when the caller has not pinned it already; ./update-packages.sh
+    # exports the same value before it gets here.
+    if [[ -z "${NIX_PATH:-}" ]]; then
+        NIX_PATH="$("${repo_root}/scripts/locked-nixpkgs.sh")"
+        export NIX_PATH
+    fi
+
     while :; do
         local output=''
-        if output="$(nix build --no-link --print-build-logs ".#${attr}" 2>&1)"; then
+        if output="$(nix build --no-link --print-build-logs \
+            --file "$repo_root" "$attr" 2>&1)"; then
             if [[ $round -gt 0 ]]; then
                 log "${attr} builds after ${round} rewrite(s)"
             fi

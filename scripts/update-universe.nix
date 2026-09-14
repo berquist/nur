@@ -183,6 +183,20 @@ let
       # `--version=branch=<name>` where a package deliberately follows something
       # other than its repository's default branch.  Nothing declares one today.
       branch = declared.branch or null;
+      # `--version-regex`, for a repository whose tags do not spell a version on
+      # their own.  The four fairchem distributions are the case that forced it:
+      # they share one monorepo which tags each separately, so every one of them
+      # is offered all four tag series and `nix-update` cannot parse any of them
+      # as a version.  The regex names the series this attribute belongs to, and
+      # its one capture group is the version inside the tag.  It applies in
+      # branch mode too — a snapshot's `X-unstable-<date>` prefix comes from the
+      # same release feed.
+      #
+      # Declaring it also switches the driver to the paginated releases API, for
+      # a reason given at `nix_update_argv` in ../scripts/update-packages.sh: a
+      # repository with several series is exactly one whose newest-few-releases
+      # feed may not mention yours.
+      versionRegex = declared.versionRegex or null;
       # The attribute whose bump carries this one — `dpdata-plugin-test` builds
       # from ../pkgs/dpdata's `src` one directory down and has no version of its
       # own.  Reported, never acted on.
