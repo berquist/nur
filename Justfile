@@ -125,14 +125,15 @@ push-matrix:
 # errors with "unrecognised flag"), but it streams build output by default, so
 # the nix-build recipes below need nothing extra.
 
-# Everything: all three eval suites, the dotdrop and harmonwig integration
-# tests, every VM test, and the hooks.
+# Everything: all three eval suites, the dotdrop, anilist-mal-sync and
+# harmonwig integration tests, every VM test, and the hooks.
 check:
     nix flake check -L
 
 # Every non-VM test reachable without the flake: the three eval suites and the
-# dotdrop integration tests.  Not harmonwig — its cclib comes from a flake
-# input, so `just harmonwig-tests` goes through the flake instead.
+# dotdrop and anilist-mal-sync integration tests.  Not harmonwig — its cclib
+# comes from a flake input, so `just harmonwig-tests` goes through the flake
+# instead.
 tests:
     nix-build tests -A all --no-out-link
 
@@ -158,6 +159,10 @@ chemtools-eval-tests:
 # dotdrop integration tests. No VM, but these build the real package.
 dotdrop-tests:
     nix-build tests -A dotdrop.all --no-out-link
+
+# anilist-mal-sync integration tests. No VM, but these build the real package.
+anilist-mal-sync-tests:
+    nix-build tests -A anilist-mal-sync.all --no-out-link
 
 # harmonwig integration tests. Through the flake: harmonwig's cclib is a flake
 # input, so `nix-build tests` cannot produce a working one.

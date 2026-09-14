@@ -13,6 +13,7 @@ tests/aiida/vm.nix            NixOS VM integration tests for the same
 tests/cheminformatics/default.nix  eval tests for the two cheminformatics overlays
 tests/dotdrop/default.nix     integration tests for the dotdrop package
 tests/harmonwig/default.nix   integration tests for the harmonwig package
+tests/anilist-mal-sync/default.nix  integration tests for the anilist-mal-sync package
 ```
 
 Five properties worth preserving, each explained at the code:

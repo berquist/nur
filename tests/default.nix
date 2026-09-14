@@ -15,6 +15,7 @@
 #                           overlays, including the chemfiles name split
 #   dotdrop/default.nix     integration tests for the dotdrop package
 #   harmonwig/default.nix   integration tests for the harmonwig package
+#   anilist-mal-sync/default.nix  integration tests for the anilist-mal-sync package
 #
 # Run everything that needs no VM:
 #   nix-build tests -A all
@@ -54,6 +55,9 @@ let
   dotdrop = import ./dotdrop {
     pkgs = pkgs.extend (import ../overlays).dotdrop;
   };
+  anilist-mal-sync = import ./anilist-mal-sync {
+    pkgs = pkgs.extend (import ../overlays).anilist-mal-sync;
+  };
   aiida = import ./aiida { inherit pkgs; };
   cheminformatics = import ./cheminformatics { inherit pkgs; };
   chemtools = import ./chemtools { inherit pkgs; };
@@ -62,6 +66,7 @@ in
   inherit
     qcarchive
     dotdrop
+    anilist-mal-sync
     aiida
     cheminformatics
     chemtools
@@ -73,6 +78,7 @@ in
     paths = [
       qcarchive.all
       dotdrop.all
+      anilist-mal-sync.all
       aiida.all
       cheminformatics.all
       chemtools.all
