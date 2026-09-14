@@ -157,6 +157,9 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 |---|---|
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
 | How do I evaluate one expression from inside the sandbox, without running the whole suite? | `scripts/sandbox-eval.sh` (the header comment), `just eval` |
+| How do I find *every* attribute that will not evaluate on a channel, rather than one per CI round? | `scripts/channel-gaps.sh` (the header comment), `just channel-gaps` |
+| Why does that script force each attribute in its own process instead of reading `functionArgs`? | `scripts/channel-gaps.sh` (the header comment), `scripts/channel-gaps.nix` |
+| Why does it skip `drvPath` on broken and unfree packages, and still force `meta.broken`? | `scripts/channel-gaps.nix` (the note above `force`) |
 | Why does a green check here mean nothing if `<nixpkgs>` came from the flake registry? | `scripts/locked-nixpkgs.sh` (the header comment) |
 | Where does a `fetchFromGitHub` hash come from with no network and no daemon? | `scripts/offline-src-hash.sh` (the header comment), `just hash-src` |
 | When is a repository's `export-subst` actually fatal to an offline hash, and when is it not? | `scripts/offline-src-hash.sh` (the header comment, and the `export-subst` branch) |
@@ -368,6 +371,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does dropping `tensorflow[and-cuda]` not cost GPU support? | `pkgs/tensorpotential/default.nix` (`postPatch`) |
 | Why is `fairchem-core` null on nixos-26.05 rather than `meta.broken`? | `overlays/default.nix` (the `fairchem-core` binding in the materials overlay), `docs/TODO.md` |
 | Why are `sevenn` and `tensorpotential` nulled on nixos-26.05 too, and on which names? | `overlays/default.nix` (the `sevenn` and `tensorpotential` bindings in the materials overlay) |
+| Why is `nvalchemi-toolkit-ops` gated on warp-lang's *version* and not just its presence? | `overlays/default.nix` (the `nvalchemi-toolkit-ops` binding in the materials overlay) |
+| Why does `test_restart_after_daemon_reset` get 120 seconds, and why is it not an `--only-rerun` entry? | `pkgs/aiida-core/default.nix` (the note above its `timeout` hunk in `postPatch`) |
 | Why is `deepmd-kit` defaulted-to-null on `e3nn` instead of being nulled like the other three? | `pkgs/deepmd-kit/default.nix` (the note above `optional-dependencies`) |
 | Why does `matcalc` gate five of its ten extras, and why is `deepmd` not one of them? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |
 | Why can `matcalc` take an unfree extra and stay free and cacheable? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |

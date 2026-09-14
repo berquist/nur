@@ -770,8 +770,20 @@ in
         # `meta.broken` package, and an abort is not catchable.  warp-lang is a
         # recent nixpkgs addition, so the older legs of the matrix are the ones
         # to expect this on.
+        #
+        # **The presence test alone was not enough**, and the way it failed is
+        # worth keeping.  nixos-26.05 *has* warp-lang, at 1.11.0, against a
+        # `warp-lang >= 1.13.0` floor — so the attribute existed, the
+        # `callPackage` resolved, evaluation succeeded, and the build got as far
+        # as `pythonRuntimeDepsCheckHook` before reporting "warp-lang>=1.13.0 not
+        # satisfied by version 1.11.0".  A missing name is an abort at eval
+        # time; a name that is merely too old costs a whole build first.  Any
+        # gate written here wants the floor as well as the name.
         nvalchemi-toolkit-ops =
-          if pself ? warp-lang then pself.callPackage ../pkgs/nvalchemi-toolkit-ops { } else null;
+          if pself ? warp-lang && final.lib.versionAtLeast pself.warp-lang.version "1.13.0" then
+            pself.callPackage ../pkgs/nvalchemi-toolkit-ops { }
+          else
+            null;
 
         # nvalchemi-toolkit-ops' two check inputs that nixpkgs lacks, and what
         # each of them buys.  torch-pme is the reference its electrostatics
