@@ -15,7 +15,7 @@
   scikit-learn,
 
   # optional-dependencies
-  deepmd-kit,
+  deepmd-kit ? null, # needs scikit-build-core >= 1, and nixos-26.05 has 0.11.6
   fairchem-core ? null, # needs e3nn, not in nixos-26.05
   mace-torch ? null, # not in nixos-26.05
   maml,
@@ -99,18 +99,27 @@ buildPythonPackage (finalAttrs: {
   # only the `matgl` entry, so nothing about matcalc's own build touches it, and
   # matcalc stays buildable and cacheable as it was.
   #
-  # `sevennet` and `grace` join `fairchem` and `mace` in being conditional, and
-  # for the same reason rather than a new one: ../sevenn declares `e3nn` and
-  # `matscipy`, ../tensorpotential declares `matscipy`, nixos-26.05 has neither
-  # name, and the overlay nulls both there.  `deepmd` stays unconditional —
-  # ../deepmd-kit wants e3nn for one extra of its own rather than as a
-  # dependency, so it survives that channel and this extra with it.
+  # `sevennet`, `grace` and `deepmd` join `fairchem` and `mace` in being
+  # conditional, all of them because the overlay nulls the backend on
+  # nixos-26.05 — but not all for the same reason, and the differences are the
+  # interesting part.  ../sevenn declares `e3nn` and `matscipy` and
+  # ../tensorpotential declares `matscipy`, names 26.05 does not have at all.
+  # ../deepmd-kit is nulled over a *version*: `scikit-build-core>=1` against
+  # that channel's 0.11.6.
+  #
+  # `deepmd` was left unconditional when the other two were made conditional,
+  # on the reasoning that deepmd-kit wants `e3nn` for an extra of its own rather
+  # than as a dependency and so survives 26.05.  That was true about e3nn and
+  # wrong about the channel: it fails there for an unrelated reason, one that
+  # evaluation cannot see and only a build reports.
   optional-dependencies = {
     phonon = [ seekpath ];
     benchmark = [ matminer ];
-    deepmd = [ deepmd-kit ];
     maml = [ maml ];
     matgl = [ matgl ];
+  }
+  // lib.optionalAttrs (deepmd-kit != null) {
+    deepmd = [ deepmd-kit ];
   }
   // lib.optionalAttrs (sevenn != null) {
     sevennet = [ sevenn ];

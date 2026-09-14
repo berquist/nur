@@ -190,9 +190,16 @@ buildPythonPackage (finalAttrs: {
   #
   # Defaulted to null rather than gated in ../../overlays/default.nix the way
   # `fairchem-core` and `sevenn` are, and the difference is that e3nn is not a
-  # dependency here: it appears in this one extra and nowhere else, so
-  # deepmd-kit itself builds and `matcalc[deepmd]` keeps working on a channel
-  # without it.  Nulling the package would give up all of that for one extra.
+  # dependency here: it appears in this one extra and nowhere else, so nothing
+  # about e3nn's absence stops this package building.
+  #
+  # That is still the right treatment for e3nn and it is no longer the whole
+  # story for nixos-26.05, which is the channel that prompted it.  This package
+  # *is* nulled there — over `scikit-build-core`, which 26.05 has at 0.11.6
+  # against the `>= 1` that `pyproject.toml` requires in two places.  So on
+  # today's matrix the two gates happen to cover the same leg.  Keep both: they
+  # are independent conditions, and a channel with a new enough backend and no
+  # e3nn would need exactly this one.
   optional-dependencies = lib.optionalAttrs (e3nn != null) {
     dpa-adapt = [
       dpdata

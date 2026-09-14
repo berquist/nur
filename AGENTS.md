@@ -372,6 +372,9 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `fairchem-core` null on nixos-26.05 rather than `meta.broken`? | `overlays/default.nix` (the `fairchem-core` binding in the materials overlay), `docs/TODO.md` |
 | Why are `sevenn` and `tensorpotential` nulled on nixos-26.05 too, and on which names? | `overlays/default.nix` (the `sevenn` and `tensorpotential` bindings in the materials overlay) |
 | Why is `nvalchemi-toolkit-ops` gated on warp-lang's *version* and not just its presence? | `overlays/default.nix` (the `nvalchemi-toolkit-ops` binding in the materials overlay) |
+| Why is `deepmd-kit` gated on a *build backend's* version, and why is `minimum-version` not relaxed? | `overlays/default.nix` (the `deepmd-kit` binding in the materials overlay) |
+| Why does `deepmd-kit` carry two independent gates, one for e3nn and one for scikit-build-core? | `pkgs/deepmd-kit/default.nix` (the note above `optional-dependencies`) |
+| Which version floors has nixos-26.05 actually tripped, and why can no eval-time check find them? | `scripts/channel-gaps.sh` (the header comment) |
 | Why does `test_restart_after_daemon_reset` get 120 seconds, and why is it not an `--only-rerun` entry? | `pkgs/aiida-core/default.nix` (the note above its `timeout` hunk in `postPatch`) |
 | Why is `deepmd-kit` defaulted-to-null on `e3nn` instead of being nulled like the other three? | `pkgs/deepmd-kit/default.nix` (the note above `optional-dependencies`) |
 | Why does `matcalc` gate five of its ten extras, and why is `deepmd` not one of them? | `pkgs/matcalc/default.nix` (the note above `optional-dependencies`) |

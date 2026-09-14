@@ -26,12 +26,21 @@
 # as gaps, when ../overlays passes both explicitly, and it sees nothing at all
 # of a failure that is not about a missing argument.
 #
-# **It does not catch a dependency that is present but too old.**  A version
-# floor is checked by `pythonRuntimeDepsCheckHook` during the build, long after
-# evaluation has succeeded: nixos-26.05 carries warp-lang 1.11.0 against
-# ../pkgs/nvalchemi-toolkit-ops' `>= 1.13.0`, and this script is happy with it.
-# A gate written for a channel wants the floor as well as the name — see the
-# `nvalchemi-toolkit-ops` binding in ../overlays/default.nix.
+# **It does not catch a dependency that is present but too old**, and on an
+# older channel that is the failure to expect rather than a curiosity.  A
+# version floor is checked during the build, long after evaluation has
+# succeeded, and nixos-26.05 has supplied two of them:
+#
+#   * warp-lang 1.11.0 against ../pkgs/nvalchemi-toolkit-ops' `>= 1.13.0`,
+#     reported by `pythonRuntimeDepsCheckHook` after the wheel was built;
+#   * scikit-build-core 0.11.6 against ../pkgs/deepmd-kit's `>= 1`, reported by
+#     the build backend refusing itself before it was even asked what the build
+#     requires.
+#
+# Both were a green run here and a red one in CI.  The fix each time is a
+# version test in the overlay gate rather than a presence test, so a gate
+# written for a channel wants the floor as well as the name — see those two
+# bindings in ../overlays/default.nix.
 #
 # Usage:
 #

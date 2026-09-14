@@ -663,7 +663,30 @@ in
         # matcalc's `deepmd` extra, and internal for the same reason ../maml
         # and ../sevenn are: matcalc is its only dependant.
         dargs = pself.callPackage ../pkgs/dargs { };
-        deepmd-kit = pself.callPackage ../pkgs/deepmd-kit { };
+
+        # Gated on a *build backend's* version, which is a third shape again.
+        # `sevenn` and `tensorpotential` above are gated on a name the channel
+        # does not have, `nvalchemi-toolkit-ops` below on a name whose version
+        # is too low — and this one is too low in the thing that reads
+        # `pyproject.toml` rather than in anything the package imports.
+        # deepmd-kit asks for `scikit-build-core>=1` in `[build-system]` and
+        # sets `minimum-version = "1.0"` under `[tool.scikit-build]`;
+        # nixos-26.05 has 0.11.6, and scikit-build-core refuses itself with
+        # "scikit-build-core version 0.11.6 is too old" before the backend is
+        # even asked what the build requires.
+        #
+        # Not relaxed.  `minimum-version` is scikit-build-core's
+        # compatibility-policy knob rather than a floor to argue with — lowering
+        # it selects older defaults that upstream has not built against — and
+        # the `>=1` beside it is a hard requirement.  Overriding
+        # scikit-build-core itself on 26.05 would be a ../pkgs/monty-style
+        # backport of a build backend that most of nixpkgs' Python tree uses,
+        # which is a great deal of rebuild and risk for one internal package.
+        deepmd-kit =
+          if final.lib.versionAtLeast pself.scikit-build-core.version "1" then
+            pself.callPackage ../pkgs/deepmd-kit { }
+          else
+            null;
 
         # dpdata is deepmd-kit's too — its `dpa-adapt` extra, and its `test`
         # one.  It is a format converter with a CLI of its own, so it is closer
