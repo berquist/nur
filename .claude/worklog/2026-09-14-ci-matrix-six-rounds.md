@@ -15,6 +15,7 @@ touches:
   - "scripts/channel-gaps.sh"
   - "scripts/channel-gaps.nix"
   - "Justfile"
+  - "scripts/offline-src-hash.sh"
 ---
 
 # Six rounds of `log_ci_matrix`, and a tool for the round that keeps repeating
@@ -148,10 +149,12 @@ about the one dependency being reasoned over.
 
 ### Traps found along the way
 
-* **`scripts/offline-src-hash.sh` gives a wrong hash for a subdirectory of a clone.**  It passes
-  the argument to `git -C` but `git archive` defaults to the *current working directory* as a path
-  restriction, so pointing it at `wc/rootstock/rootstock` silently hashes that subtree.  Two
-  different hashes, no warning.  See Follow-ups.
+* **`scripts/offline-src-hash.sh` gave a wrong hash for a subdirectory of a clone.**  It passed the
+  argument to `git -C`, but `git archive` takes the *current working directory* as a pathspec when
+  given none, so pointing it at `wc/rootstock/rootstock` silently hashed that subtree.  Two
+  different hashes, no warning — and every other field it prints stayed correct, because
+  `rev-parse`, `log` and `describe` do not care where in the repository they run.  Fixed in this
+  session; see Follow-ups.
 * **nixpkgs' `uv-dynamic-versioning` ships a setup hook** that exports
   `UV_DYNAMIC_VERSIONING_BYPASS` from `$version` in `preBuildHooks`, which runs after `env` and
   wins.  A derivation's own `env.UV_DYNAMIC_VERSIONING_BYPASS` is dead code without
@@ -168,9 +171,12 @@ about the one dependency being reasoned over.
 
 ## Follow-ups
 
-* **`scripts/offline-src-hash.sh` should resolve its argument to the repository toplevel.**  One
-  line — `git -C "$clone" rev-parse --show-toplevel` — turns a silently wrong hash into a correct
-  one.  Worth doing before the next `-unstable-` bump.
+* ~~`scripts/offline-src-hash.sh` should resolve its argument to the repository toplevel.~~  Done
+  in this session, after the worklog was first written: `clone=$(git -C "$clone" rev-parse
+  --show-toplevel)` before anything is archived.  Both spellings of the rootstock clone now return
+  `sha256-ACTcBw/…`, the hash a real build confirmed, and the tag form of `wc/torch-pme` still
+  returns exactly what `pkgs/torch-pme` pins.  The `export-subst` and submodule warning paths were
+  re-checked against `wc/ParmEd` (fatal) and `wc/QCFractal` (benign).
 * **Sandbox PATH for the formatter/linter set.**  `nixfmt` ran 66 times this session, `shellcheck`
   34, `statix` 33, `shfmt` 18, `prek` 18 — and every one needed a store path hunted out by hand,
   because `just fmt` / `just lint` / `just hooks` all fail inside the sandbox with

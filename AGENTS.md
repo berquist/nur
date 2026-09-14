@@ -165,6 +165,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does it skip `drvPath` on broken and unfree packages, and still force `meta.broken`? | `scripts/channel-gaps.nix` (the note above `force`) |
 | Why does a green check here mean nothing if `<nixpkgs>` came from the flake registry? | `scripts/locked-nixpkgs.sh` (the header comment) |
 | Where does a `fetchFromGitHub` hash come from with no network and no daemon? | `scripts/offline-src-hash.sh` (the header comment), `just hash-src` |
+| Why does `offline-src-hash.sh` resolve its argument to the repository root, and what did it return before? | `scripts/offline-src-hash.sh` (the note above `rev-parse --show-toplevel`) |
 | When is a repository's `export-subst` actually fatal to an offline hash, and when is it not? | `scripts/offline-src-hash.sh` (the header comment, and the `export-subst` branch) |
 | Why is `sisl` pinned to a tag rather than main, and what did the extra commits break? | `pkgs/sisl/default.nix` (the note above `src`) |
 | Why is `node-graph` pinned to v0.6.5 exactly, one commit behind its main? | `pkgs/node-graph/default.nix` (the note above `src`) |
