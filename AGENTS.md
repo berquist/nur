@@ -429,6 +429,9 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `colour-science` take `opencv4` for EXR, when imageio lists two backends ahead of it? | `pkgs/colour-science/default.nix` (the `opencv4` paragraph above `nativeCheckInputs`) |
 | Why must `av` stay *out* of colour-science, rather than sit beside opencv4? | `pkgs/colour-science/default.nix` (the same paragraph) |
 | Why does `colour-science` export `OPENCV_IO_ENABLE_OPENEXR`? | `pkgs/colour-science/default.nix` (`preCheck`) |
+| Why can no EXR backend satisfy `test_read_image_Imageio`'s single-channel case, and what covers it instead? | `pkgs/colour-science/imageio-single-channel-exr.patch` (the header) |
+| Why does `rootstock` set `dontBypassUvDynamicVersioning`, when it already sets the variable that hook sets? | `pkgs/rootstock/default.nix` (the note above it) |
+| Why is `test_device_mismatch` handled by nvalchemi's CUDA gate rather than by `disabledTests`? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the note above `disabledTests`), `pkgs/nvalchemi-toolkit-ops/cuda-gating.patch` (`_MULTI_DEVICE_TESTS`) |
 | Why did 73 `nvalchemi-toolkit-ops` tests start failing the moment `torch-pme` began to build? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the third note above `patches`), `pkgs/nvalchemi-toolkit-ops/torchpme-prefactor-moved.patch` |
 | Why is dropping torch-pme's `prefactor` argument exact rather than approximate? | `pkgs/nvalchemi-toolkit-ops/torchpme-prefactor-moved.patch` (the header) |
 | Which three shapes of `cuda:0` does the nvalchemi conftest gate not reach, and why is one of them a *torch* device? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the last four notes in `postPatch`) |

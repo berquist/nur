@@ -264,6 +264,15 @@ buildPythonPackage (finalAttrs: {
     "not gpu"
   ];
 
+  # `test_device_mismatch` is not in this list, though it fails on a CPU-only
+  # machine too.  It needs *two distinct devices* rather than a CUDA one — it
+  # pairs the module's device constant against a hard-coded "cpu" and asserts
+  # the mismatch is rejected — so once the constant falls back to "cpu" the two
+  # agree and nothing raises.  That is the CUDA gate's business rather than a
+  # deselection's, and `cuda-gating.patch` now names it; a skip with a reason
+  # beats a silent drop, and the entry stays visible to anyone who runs this on
+  # a machine with a GPU, where it passes.
+  #
   # One genuine defect rather than a missing device: the test calls `cell_list()`
   # with a `shift_range_per_dimension` keyword that the function does not take at
   # v0.4.1, so it fails with a TypeError on any machine.  It is the only failure

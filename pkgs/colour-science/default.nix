@@ -39,6 +39,15 @@ buildPythonPackage {
     hash = "sha256-LsQ7zhW6Ij0oVXnq9rL1Ocx4kLEI5tkRA6q/9cOjx5o=";
   };
 
+  # The single-channel EXR assertion in `test_read_image_Imageio` cannot hold
+  # under any EXR backend installable here — one of the three imageio will
+  # consider is a library nixpkgs removed for vulnerabilities, one is an ffmpeg
+  # decoder that is not implemented, and the third always returns three
+  # channels.  See the patch's header, which is the long version of the
+  # `opencv4` note below, and note that the same assertion still runs through
+  # OpenImageIO in `TestReadImage`.
+  patches = [ ./imageio-single-channel-exr.patch ];
+
   build-system = [ hatchling ];
 
   # numpy is the only hard requirement upstream declares, and that is accurate:

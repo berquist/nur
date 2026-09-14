@@ -1,6 +1,6 @@
 --- a/test/conftest.py
 +++ b/test/conftest.py
-@@ -266,3 +266,63 @@
+@@ -266,3 +266,89 @@
  
      if torch.cuda.is_available():
          torch.cuda.empty_cache()
@@ -23,6 +23,20 @@
 +# a skip with a reason instead of a silent deselection.
 +
 +_CUDA_ONLY_DIRECTORIES = ("bindings/jax",)
++
++# Tests that need *two distinct devices* rather than a CUDA-capable one, and so
++# are unrunnable on a single-device machine whichever device that is.  They pair
++# a module-level device constant against a hard-coded "cpu" and assert that the
++# mismatch is rejected; with one device the two sides agree and the expected
++# ValueError never arrives -- "DID NOT RAISE".  Naming them is necessary because
++# nothing about them reads as CUDA: not the test name, not a parameter, not the
++# path.  Keyed on "<module basename>::<test name>" so a name this specific
++# cannot match somewhere else by accident.
++_MULTI_DEVICE_TESTS = frozenset(
++    {
++        "test_warp_dispatch.py::test_device_mismatch",
++    }
++)
 +
 +_WARP_HAS_CUDA: bool | None = None
 +
@@ -60,7 +74,19 @@
 +    return any(directory in item_path for directory in _CUDA_ONLY_DIRECTORIES)
 +
 +
++def _item_needs_two_devices(item: pytest.Item) -> bool:
++    """Whether a test needs two distinct devices to mean anything."""
++    module = os.path.basename(_item_path(item))
++    return f"{module}::{item.name}" in _MULTI_DEVICE_TESTS
++
++
 +def pytest_runtest_setup(item: pytest.Item) -> None:
-+    """Skip a test that needs a CUDA device when the machine has none."""
-+    if _item_needs_cuda(item) and not _warp_has_cuda():
++    """Skip a test that the machine cannot run for want of a device."""
++    if _warp_has_cuda():
++        return
++
++    if _item_needs_cuda(item):
 +        pytest.skip("requires a CUDA-capable device")
++
++    if _item_needs_two_devices(item):
++        pytest.skip("requires two distinct devices")

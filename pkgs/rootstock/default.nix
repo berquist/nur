@@ -44,6 +44,18 @@ buildPythonPackage (finalAttrs: {
   # The bypass env var is what it checks first.
   env.UV_DYNAMIC_VERSIONING_BYPASS = lib.head (lib.splitString "-" finalAttrs.version);
 
+  # ...and nixpkgs' uv-dynamic-versioning carries a setup hook that exports the
+  # same variable from `$version` in `preBuildHooks`, which runs after `env` is
+  # in place and therefore wins.  `$version` here is `1.6.4-unstable-<date>`,
+  # which PEP 440 rejects, so hatchling aborts with "Invalid version ... from
+  # source `uv-dynamic-versioning`" before a wheel is built.
+  #
+  # The hook guards itself on this exact name for this exact case.  Setting it
+  # is what lets the `env` above be the value that reaches the build; without it
+  # that line is dead, and the failure only shows on a package whose version is
+  # not PEP 440 — which is every `-unstable-` one here.
+  dontBypassUvDynamicVersioning = true;
+
   build-system = [
     hatchling
     uv-dynamic-versioning
