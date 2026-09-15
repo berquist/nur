@@ -23,15 +23,15 @@ buildPythonPackage rec {
   # `__version__ = metadata.version("morfeus-ml")`, so an installed dist under
   # any other name makes importing the package raise PackageNotFoundError.
   pname = "morfeus-ml";
-  version = "0.8.0-unstable-2026-08-07";
+  version = "0.8.0-unstable-2026-09-02";
   pyproject = true;
 
   # Fifteen commits past the v0.8.0 tag, whose `setup.py` still says 0.8.0.
   src = fetchFromGitHub {
     owner = "digital-chemistry-laboratory";
     repo = "morfeus";
-    rev = "4523aaef3e7f3bb657a2fb3ecd6a0bee1c214c1c";
-    hash = "sha256-eye+74RHLI8jQx+jMyvqlv7AzZWzsMmaBAtIjdGsz0k=";
+    rev = "e5dacf9e0519249ea0ce22f113b490da18846441";
+    hash = "sha256-AWp7bb+eQpA4il5y4wtMw6PT8/5oD4QaDJg6GMwpSZc=";
   };
 
   build-system = [ setuptools ];

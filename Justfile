@@ -329,6 +329,12 @@ repro-gh channel=default_channel:
 # from the table, then act on it without retyping thirty-odd attribute names.
 # Rows the scan marked `rejected` are deliberately not carried over — see the
 # version guards in scripts/update-packages.sh for what that status means.
+#
+# `update-scan` picks its own worker count; `update-from-scan` and `update-all`
+# take one, because theirs are real builds and how many of those a machine can
+# hold at once is not something this file can know — `just update-from-scan 4`.
+# The recipes that deliver take no such argument at all; see the header of
+# scripts/update-packages.sh for which pieces of state cannot be raced.
 # ---------------------------------------------------------------------------
 
 # Where `update-scan` leaves its machine-readable report and `update-from-scan`
@@ -341,9 +347,9 @@ update-scan *pkgs:
     mkdir -p .scratch
     ./scripts/update-packages.sh --scan --json={{ scan_report }} {{ pkgs }}
 
-# Bump everything the last scan called would-update. Hours of builds.
-update-from-scan:
-    ./scripts/update-packages.sh --from={{ scan_report }}
+# Bump everything the last scan called would-update, `jobs` at a time. Hours of builds.
+update-from-scan jobs="1":
+    ./scripts/update-packages.sh --from={{ scan_report }} --jobs={{ jobs }}
 
 # The same, one pull request each.
 update-from-scan-pr:
@@ -354,8 +360,8 @@ update +pkgs:
     ./scripts/update-packages.sh {{ pkgs }}
 
 # The same over every actionable package. Hours of builds; see the scan first.
-update-all:
-    ./scripts/update-packages.sh
+update-all jobs="1":
+    ./scripts/update-packages.sh --jobs={{ jobs }}
 
 # Bump named packages and open one pull request each.
 update-pr +pkgs:

@@ -18,7 +18,7 @@
 
 buildPythonPackage rec {
   pname = "custodian";
-  version = "2025.12.14-unstable-2026-08-03";
+  version = "2025.12.14-unstable-2026-09-07";
   pyproject = true;
 
   # A commit rather than the v2025.12.14 tag: the tag is eight months behind
@@ -28,8 +28,8 @@ buildPythonPackage rec {
   src = fetchFromGitHub {
     owner = "materialsproject";
     repo = "custodian";
-    rev = "bb78390b4a9560d7268bc88455a1b8f3f72fef95";
-    hash = "sha256-v5CjuqOkSvr9x/fY7tk10dAOgDAiMShYY4ANAMr71oE=";
+    rev = "13a7ae090284b38b3484afcc3c8c0596fa3a6891";
+    hash = "sha256-EghYmQQd3DjNO9PgrSrEHOM+w6NSj65U3F+RNvhPrqI=";
   };
 
   # `TestVaspNpTMDValidator::test_check_and_correct` fails on

@@ -22,7 +22,7 @@
 
 buildPythonPackage {
   pname = "aiida-diff";
-  version = "1.2.0-unstable-2024-01-29";
+  version = "2.0.0-unstable-2024-01-29";
   pyproject = true;
 
   # Here for ../aiida-testing, which is here for ../aiida-psi4.  This is the

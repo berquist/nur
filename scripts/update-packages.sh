@@ -62,16 +62,48 @@
 # restored.  `--no-src` skips that step and keeps the version rewrite, which is
 # the only part a scan reads back.
 #
-# ## Parallelism is a scan-mode feature
+# ## What --jobs is allowed to race, and what it is not
 #
-# Packages are independent and a scan touches one file each, so --jobs fans them
-# out; the report becomes one file per attribute in a directory rather than a
-# shared append.  It is refused for anything that writes, because --deliver
-# drives git, --limit is a running count across the whole run, and neither
-# survives being raced.  A file claimed by two attributes drops the run back to
-# one worker rather than letting them overwrite each other's snapshots.
+# Packages are independent and each one touches a single file, so --jobs fans
+# them out; the report becomes one file per attribute in a directory rather than
+# a shared append.  A file claimed by two attributes drops the run back to one
+# worker rather than letting them overwrite each other's snapshots.
+#
+# The refusals are about the two pieces of state that are *not* per-package:
+#
+# - --deliver=commit and --deliver=pr drive git, which does not take two
+#   writers.  A commit stages the index, and ./forge-pr.sh switches branches; a
+#   second worker doing either at the same time produces a commit holding
+#   somebody else's file, or a branch cut from a tree mid-rewrite.
+# - --limit is a running count over the whole run.  Racing it means the packages
+#   that stop the run are whichever ones happened to answer first, which is not
+#   a decision anyone made.
+#
+# Neither applies to `--deliver=none`, which is what `just update-from-scan`
+# runs: the workers rewrite one file each, build, and report.  So --jobs is
+# allowed there, and it is worth having — the apply path's cost is builds, and a
+# serial run leaves the daemon idle between them whenever a build is smaller
+# than the machine.  It stays opt-in rather than defaulting to one per core,
+# because these are real builds: eight concurrent pytest suites is a memory
+# decision, not a throughput one, and only the person running it knows the
+# machine.
+#
+# One thing does move when workers race: prek.  It keeps a shared hook cache and
+# is not written to be run twice at once, so tidy() skips it under --jobs>1 and
+# main() runs it once over every changed file at the end instead.  nixfmt is
+# per-file and stays where it is.
 #
 # Needs a nix-daemon and the network.  --policy is the one mode that does not.
+#
+# ## Progress
+#
+# A run that spends twenty minutes inside one build must not be
+# indistinguishable from one that has hung, and nix-update's own output is
+# captured rather than streamed — the report wants the last three lines of a
+# failure, not the whole build log on the terminal.  So each package announces
+# itself on stderr as `[n/total] attr: <status>`, and the paths that build
+# announce a `start` as well, because that is where the long silence is.  stderr
+# rather than stdout, so --json and the final table are unaffected.
 
 set -euo pipefail
 
@@ -90,6 +122,8 @@ json_out=''
 policy_only=false
 policy=''
 report_dir=''
+total=0
+total_width=1
 snapshot=''
 snapshot_target=''
 keep_changes=false
@@ -102,7 +136,8 @@ usage: update-packages.sh [OPTIONS] [ATTR...]
   --scan              report what would move, then restore the tree
   --deliver=MODE      none (default) | commit | pr
   --limit=N           stop after N packages have actually changed (0 = no limit)
-  --jobs=N            packages to scan at once (scan mode only; 0 = one per core, capped at 8)
+  --jobs=N            packages at once; needs --scan or --deliver=none, and no --limit
+                      (0 = one per core capped at 8 when scanning, 1 otherwise)
   --from=PATH         take the attributes from a previous --json report's would-update rows
   --no-build          skip the build gate; scan mode never builds anyway
   --dry-run           with --deliver=pr, print the API calls without issuing them
@@ -137,6 +172,33 @@ die() {
 
 log() {
     printf 'update-packages: %s\n' "$1" >&2
+}
+
+# One line per package, on stderr.  The index comes from the caller rather than
+# from a counter, because under --jobs>1 there is no counter to share: every
+# worker is a subshell, so an incremented variable would be incremented in a
+# copy and thrown away.  The loop knows the position it is dispatching, which is
+# the same number and needs nothing shared.
+#
+# A single printf per line, so that two workers cannot interleave inside one.
+progress() {
+    printf 'update-packages: [%*d/%d] %s\n' "$total_width" "$1" "$total" "$2" >&2
+}
+
+# What a worker just wrote about itself, for the completion line.  Reading the
+# row back rather than threading the status out of process_one() keeps every
+# path out of that function reporting, including the ones that return early.
+finished_status() {
+    local row="${report_dir}/${1}.json"
+
+    [[ -r "$row" ]] || {
+        printf 'no result'
+        return 0
+    }
+
+    jq --raw-output \
+        '.status + (if .old == .new then "" else "  " + .old + " -> " + .new end)' \
+        "$row"
 }
 
 parse_args() {
@@ -178,7 +240,8 @@ parse_args() {
     # One worker per core for a scan, and one for everything else.  The cap is
     # about the far end rather than this one: a scan is a hundred-odd requests to
     # a handful of forges, and fanning that out further is rude before it is
-    # faster.
+    # faster.  The apply path is not given a default above 1 on purpose; see the
+    # header for why that is a memory decision rather than a throughput one.
     if [[ "$jobs" -eq 0 ]]; then
         if [[ "$scan" == true ]]; then
             jobs="$(nproc 2>/dev/null || echo 4)"
@@ -189,7 +252,10 @@ parse_args() {
     fi
 
     if [[ "$jobs" -gt 1 && "$scan" != true ]]; then
-        die '--jobs>1 needs --scan; a run that writes drives git and counts --limit as it goes'
+        [[ "$deliver" == none ]] \
+            || die "--jobs>1 cannot use --deliver=${deliver}; git does not take two writers"
+        [[ "$limit" -eq 0 ]] \
+            || die '--jobs>1 cannot honour --limit; which packages stop the run would be whichever answered first'
     fi
 
     [[ -z "$from_file" || ${#selected[@]} -eq 0 ]] \
@@ -467,9 +533,28 @@ tidy() {
         nixfmt "${repo_root}/${file}" >/dev/null 2>&1 || true
     fi
 
-    if command -v prek >/dev/null; then
+    # prek keeps a shared hook cache and is not written to be run twice at once,
+    # so under --jobs>1 it is deferred to tidy_all() at the end of the run.  That
+    # is only ever the --deliver=none path, where nothing is delivered between
+    # here and there and the deferral costs nothing.
+    if [[ "$jobs" -eq 1 ]] && command -v prek >/dev/null; then
         (cd "$repo_root" && prek run --files "$file") >/dev/null 2>&1 || true
     fi
+}
+
+# The deferred half of tidy(), over every file the run left changed.  One
+# invocation rather than one per package, which is also faster: prek starts up
+# once and each hook sees the whole set.
+tidy_all() {
+    local -a changed=()
+
+    command -v prek >/dev/null || return 0
+
+    mapfile -t changed < <(git -C "$repo_root" diff --name-only)
+    [[ ${#changed[@]} -gt 0 ]] || return 0
+
+    log "running the hooks over ${#changed[@]} changed file(s)"
+    (cd "$repo_root" && prek run --files "${changed[@]}") >/dev/null 2>&1 || true
 }
 
 commit_locally() {
@@ -640,11 +725,23 @@ process_one() {
 }
 
 process() {
+    local attr="$1" index="$2"
+
     snapshot=''
     snapshot_target=''
     keep_changes=false
 
-    process_one "$1" || log "$1: the driver itself failed; the tree has been restored"
+    # Only the paths that build announce a start.  A scan answers in about a
+    # second, so a start line there is one more line to read for nothing; a bump
+    # disappears into a check phase for minutes, which is the silence worth
+    # breaking.
+    if [[ "$build" == true ]]; then
+        progress "$index" "${attr}: start"
+    fi
+
+    process_one "$attr" || log "${attr}: the driver itself failed; the tree has been restored"
+
+    progress "$index" "${attr}: $(finished_status "$attr")"
 
     if [[ -n "$snapshot" ]]; then
         if [[ "$keep_changes" != true ]]; then
@@ -672,10 +769,11 @@ shared_positions() {
 }
 
 run_serial() {
-    local attr moved
+    local attr moved index=0
 
     for attr in "$@"; do
-        process "$attr"
+        index=$((index + 1))
+        process "$attr" "$index"
 
         if [[ "$limit" -gt 0 ]]; then
             moved="$(report_json | jq --raw-output --slurp \
@@ -697,12 +795,13 @@ run_serial() {
 # report directory; a non-zero status reaching `set -e` here would abandon the
 # jobs still running, and with them the snapshots they have yet to restore.
 run_parallel() {
-    local attr running=0
+    local attr running=0 index=0
 
-    log "scanning ${#} packages, ${jobs} at a time"
+    log "${#} packages, ${jobs} at a time"
 
     for attr in "$@"; do
-        process "$attr" &
+        index=$((index + 1))
+        process "$attr" "$index" &
         running=$((running + 1))
         if [[ "$running" -ge "$jobs" ]]; then
             wait -n || true
@@ -792,9 +891,14 @@ main() {
     fi
 
     report_dir="$(mktemp --directory)"
+    total=${#selected[@]}
+    total_width=${#total}
 
     if [[ "$jobs" -gt 1 ]]; then
         run_parallel "${selected[@]}"
+        if [[ "$scan" != true ]]; then
+            tidy_all
+        fi
     else
         run_serial "${selected[@]}"
     fi

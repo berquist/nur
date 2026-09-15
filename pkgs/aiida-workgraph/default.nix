@@ -33,14 +33,14 @@
 
 buildPythonPackage rec {
   pname = "aiida-workgraph";
-  version = "0.8.1-unstable-2026-08-10";
+  version = "1.0.0b4-unstable-2026-08-28";
   pyproject = true;
 
   src = fetchFromGitHub {
     owner = "aiidateam";
     repo = "aiida-workgraph";
-    rev = "5cccb31054974b4a364eedd44c26fc77c663a3fd";
-    hash = "sha256-E4sLzdQCM9hK/LV6JRBCPVbDmxw3R7zs9XINbjdsKNU=";
+    rev = "502c1b5baaea252ff8b80d423f7f5f10e34ca315";
+    hash = "sha256-oymqRxamABy6jOKKJ8pfZD5RVWtQCrVs4YwO2vBfs1s=";
   };
 
   # Two tests in tests/test_cli.py send a pause or a kill to a process that no

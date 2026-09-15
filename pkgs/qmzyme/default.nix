@@ -28,7 +28,7 @@
 
 buildPythonPackage rec {
   pname = "qmzyme";
-  version = "0.1.2.dev20260605";
+  version = "0.1.2";
   pyproject = true;
 
   src = fetchFromGitHub {

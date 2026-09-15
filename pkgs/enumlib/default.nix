@@ -37,7 +37,7 @@ in
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "enumlib";
-  version = "2.0.6-unstable-2024-11-15";
+  version = "2.0.6-unstable-2024-11-16";
 
   # HEAD rather than v2.0.6, three commits past it.  Two are comment fixes; the
   # third repairs `get_gspace_representation`, which used the wrong basis for

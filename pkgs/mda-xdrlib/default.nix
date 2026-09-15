@@ -13,7 +13,7 @@
 
 buildPythonPackage rec {
   pname = "mda-xdrlib";
-  version = "0.2.0.dev20251012";
+  version = "0.2.0";
   pyproject = true;
 
   src = fetchFromGitHub {
