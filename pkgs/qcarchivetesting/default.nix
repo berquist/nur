@@ -13,12 +13,12 @@
 
 buildPythonPackage rec {
   pname = "qcarchivetesting";
-  version = "0.65";
+  version = "0.70";
   pyproject = true;
 
   src = fetchPypi {
     inherit pname version;
-    hash = "sha256-HWTxXH9LX2ZSjmTmsSnZv+L5K6xwZlxuybevr3YddbM=";
+    hash = "sha256-DQPsPS1MvUKx2zpaMALo/DvP5eOM1qQRgFxJ3Ytf5NE=";
   };
 
   build-system = [

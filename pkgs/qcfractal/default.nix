@@ -27,12 +27,12 @@
 
 buildPythonPackage rec {
   pname = "qcfractal";
-  version = "0.65";
+  version = "0.70";
   pyproject = true;
 
   src = fetchPypi {
     inherit pname version;
-    hash = "sha256-+6evn7D/PYNUJMbmUiDsCy8BHiYc6S5FxjcRwFrrxdk=";
+    hash = "sha256-nyuiIGDchuN7MmLAINcPjuBJ1KOO0tdkPJ43Nf4AOGY=";
   };
 
   build-system = [
