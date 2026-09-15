@@ -192,7 +192,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Where does a package's update mode come from, and how do I declare one that is pinned? | `scripts/update-universe.nix`, `pkgs/lobsterpy/default.nix` (`passthru.updatePolicy`) |
 | Why is `nix-update` pointed at `default.nix` rather than at the flake, and which four attributes did that fix? | `scripts/update-packages.sh` (the header), `docs/version-updates.md` (§3) |
 | Why does a scan download nothing, when it has to rewrite a hash to learn anything? | `scripts/update-packages.sh` (the `--no-src` note in `nix_update_argv`) |
-| Why is `--jobs` refused outside scan mode, and what happens if two attributes share a file? | `scripts/update-packages.sh` (the header, `shared_positions`) |
+| Which two pieces of updater state cannot be raced, and what happens if two attributes share a file? | `scripts/update-packages.sh` (the header, `shared_positions`), `docs/version-updates.md` (§5) |
+| Why does the apply path take `--jobs` but never default above one worker? | `scripts/update-packages.sh` (the header, `parse_args`), `Justfile` (`update-from-scan`) |
+| Why does `prek` move to the end of the run under `--jobs>1`, when `nixfmt` does not? | `scripts/update-packages.sh` (`tidy`, `tidy_all`) |
+| Where does the per-package progress line come from, when nix-update's own output is captured? | `scripts/update-packages.sh` (`progress`, `finished_status`) |
 | Why does a bump get rejected when its *version* goes backwards, and why was the date check not enough? | `scripts/update-packages.sh` (`version_regression`), `docs/version-updates.md` (§4) |
 | Why do `0.12.dev20260807 -> 0.12` and `0.11.0-rc1 -> 0.10.4` get opposite answers from that guard? | `scripts/update-packages.sh` (`version_prefix`) |
 | Why do the four fairchem packages each declare a `versionRegex`, and why does it matter in branch mode? | `pkgs/fairchem-core/default.nix` and `pkgs/fairchem-data-oc/default.nix` (`passthru.updatePolicy.versionRegex`) |
