@@ -61,7 +61,7 @@
 # are simply left out.
 buildPythonPackage (finalAttrs: {
   pname = "atomate2";
-  version = "0.1.5-unstable-2026-08-31";
+  version = "0.1.5-unstable-2026-09-14";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -72,8 +72,8 @@ buildPythonPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "materialsproject";
     repo = "atomate2";
-    rev = "14bacb526a022140318b3016adf3b6ea8bde1188";
-    hash = "sha256-w2jFnZwqIQjg3lsTuN6WG70Xl8h6uZD5mEoiBHyXXCg=";
+    rev = "ab60477fac220e2bfd7abe6b0087753a2ec47739";
+    hash = "sha256-pSUIcr1fmv8t+GQUCNQuFs6jOQi47spNlRAbkLw1w3I=";
   };
 
   # versioningit's `method = "git"` against a fetchFromGitHub tarball with no

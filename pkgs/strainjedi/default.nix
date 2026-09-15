@@ -18,7 +18,7 @@
 
 buildPythonPackage rec {
   pname = "strainjedi";
-  version = "1.1.0-unstable-2026-07-01";
+  version = "1.1.0-unstable-2026-09-02";
   pyproject = true;
 
   # The distribution is `strainjedi` and the import name is `strainjedi`, but
@@ -30,8 +30,8 @@ buildPythonPackage rec {
   src = fetchFromGitHub {
     owner = "neudecker-group";
     repo = "jedi";
-    rev = "ecb59e1bae65eb7664386489270c812665cd0c84";
-    hash = "sha256-OFjxymjGM/XFbcHyQyT8DRkaj2PvoAP+lx5XxuP2soo=";
+    rev = "c7f6601938d7fee9613f7fc1954b22ee98b7bc68";
+    hash = "sha256-6dc5IR58BftWB/R+4Xs/ZCVDDylvo8oUgYaZGf6gars=";
   };
 
   build-system = [ setuptools ];

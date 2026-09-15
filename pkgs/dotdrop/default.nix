@@ -28,14 +28,14 @@
 
 buildPythonApplication rec {
   pname = "dotdrop";
-  version = "1.16.2";
+  version = "1.17.0";
   pyproject = true;
 
   src = fetchFromGitHub {
     owner = "deadc0de6";
     repo = "dotdrop";
     tag = "v${version}";
-    hash = "sha256-kgy4ESUEQnlB5lfyUIuvxaqLqiJ4+Qq1T5JwCcqLo+E=";
+    hash = "sha256-wYi0EZbWKuyfdAJCdVe5FNf+lZci7JikC9X8xSIPyWk=";
   };
 
   build-system = [ setuptools ];

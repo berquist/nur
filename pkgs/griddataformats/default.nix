@@ -23,7 +23,7 @@ buildPythonPackage rec {
   # substituted into versioningit's `default-version` below, and the build fails
   # outright on anything the packaging library cannot parse.  Same in
   # ../mda-xdrlib and ../qmzyme.
-  version = "1.2.0.dev20260723";
+  version = "1.2.0";
   pyproject = true;
 
   src = fetchFromGitHub {
