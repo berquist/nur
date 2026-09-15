@@ -17,12 +17,12 @@
 
 buildPythonPackage rec {
   pname = "qcfractalcompute";
-  version = "0.65";
+  version = "0.70";
   pyproject = true;
 
   src = fetchPypi {
     inherit pname version;
-    hash = "sha256-QxAvT7GEBogE8LQa5nIp6//p37qvOX3aTfjOJVVxu/I=";
+    hash = "sha256-VHyI38b80HxocjnDTcrvzIODHDHjQwUA7oo+42MBVhE=";
   };
 
   # run_scripts/qcengine_compute.py runs the QCEngine call under
