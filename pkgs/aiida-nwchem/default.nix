@@ -12,17 +12,13 @@
 
   # tests
   pytestCheckHook,
-  pgtest,
   procps,
   mpiCheckPhaseHook,
-  postgresql,
   ase,
   pymatgen,
   seekpath,
   spglib,
   nwchem,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -164,6 +160,17 @@ buildPythonPackage rec {
   # NWChem.  It still generates its `system crystal` block, and nothing here
   # runs it, because nothing in this suite pairs it with a plane-wave task.
   postPatch = ''
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    substituteInPlace tests/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
+      --replace-fail \
+        'def nwchem_code(aiida_local_code_factory):' \
+        'def nwchem_code(aiida_code_installed):' \
+      --replace-fail \
+        "aiida_local_code_factory(entry_point='nwchem.nwchem', executable='nwchem')" \
+        "aiida_code_installed(default_calc_job_plugin='nwchem.nwchem', filepath_executable='nwchem')"
+
       substituteInPlace tests/conftest.py \
         --replace-fail \
           'code.computer.set_default_mpiprocs_per_machine(1)' \
@@ -216,19 +223,8 @@ buildPythonPackage rec {
     '
   '';
 
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
-  '';
-
   nativeCheckInputs = [
     pytestCheckHook
-
-    # tests/conftest.py names `aiida.manage.tests.pytest_fixtures`, the
-    # deprecated module, whose profile is a real PostgreSQL one.  See ../pgtest
-    # for why postgresql is listed alongside it.
-    pgtest
-    postgresql
-
     # The `atomic_tools` extra of aiida-core.  `dependencies` above cannot carry
     # it — nixpkgs' buildPythonPackage has no notion of installing a dependency
     # *with* an extra — and the suite needs it: the `h2o` fixture calls

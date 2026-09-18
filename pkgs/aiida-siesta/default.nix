@@ -17,11 +17,7 @@
   # tests
   pytestCheckHook,
   pytest-regressions,
-  pgtest,
-  postgresql,
   coreutils,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -39,6 +35,12 @@ buildPythonPackage rec {
     rev = "76d04250504638d8edc88a2f915690af9ff3796b";
     hash = "sha256-jHb9taaYV7JcxcZPdVnH7GuNo/Q/nObqnUbKq80N8HE=";
   };
+
+  # A patch file rather than `postPatch`, for the same reason as
+  # ../aiida-orca: the fixtures below need their own exact indentation kept,
+  # and Nix's indented-string dedent operates over the whole `postPatch`
+  # literal -- see ../pymatgen/default.nix for what that costs a careless one.
+  patches = [ ./regen-stale-fixtures.patch ];
 
   build-system = [ flit-core ];
 
@@ -78,8 +80,8 @@ buildPythonPackage rec {
   # `n`, `l`, `m`, `P`, `R` and `q0` all still exist under those names, so this
   # one line is the whole of the name drift.
   #
-  # The third and fourth substitutions are the *value* half of the same sisl
-  # drift, and it is the dangerous half.  `IonData.get_orbitals` throws away
+  # The `ion.py` and `test_pao_manager.py` substitutions are the *value* half of
+  # the same sisl drift, and it is the dangerous half.  `IonData.get_orbitals` throws away
   # the orbital sisl just read and rebuilds it from the bare radial grid,
   # passing no `R`:
   #
@@ -116,6 +118,32 @@ buildPythonPackage rec {
   # covering what they were written to cover; see ../aiida-octopus for the
   # same call.
   postPatch = ''
+    # aiida-core vendored plumpy in 60aa10a4e and dropped the dependency, so
+    # `from plumpy import ...` is a ModuleNotFoundError here.  See
+    # ../aiida-optimize for why the standalone library is not the answer:
+    # `ProcessState` is an Enum, and two copies compare unequal member for
+    # member, which is the quiet version of the same problem.
+    substituteInPlace \
+      tests/workflows/test_two_steps_opt.py \
+      tests/workflows/test_stm.py \
+      tests/workflows/test_simplex_basis.py \
+      tests/workflows/test_neb_base.py \
+      tests/workflows/test_iterate.py \
+      tests/workflows/test_epsilon.py \
+      tests/workflows/test_eos.py \
+      tests/workflows/test_converge.py \
+      tests/workflows/test_basis_opt.py \
+      tests/workflows/test_base.py \
+      tests/workflows/test_bandgap.py \
+      --replace-fail \
+        'from plumpy import ProcessState' \
+        'from aiida.common.processes import ProcessState'
+
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    substituteInPlace tests/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures'
+
     substituteInPlace tests/conftest.py \
       --replace-fail "'/bin/true'" "'${coreutils}/bin/true'"
 
@@ -134,19 +162,9 @@ buildPythonPackage rec {
       --replace-fail ' 7.659398\t 5.13417' ' 7.659252\t 5.134092'
   '';
 
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
-  '';
-
   nativeCheckInputs = [
     pytestCheckHook
     pytest-regressions
-
-    # tests/conftest.py names `aiida.manage.tests.pytest_fixtures`, the
-    # deprecated module; see ../aiida-core/default.nix for what that needs
-    # patched, and ../pgtest for why postgresql accompanies pgtest.
-    pgtest
-    postgresql
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.

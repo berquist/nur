@@ -15,11 +15,7 @@
   # tests
   pytestCheckHook,
   aiida-testing,
-  pgtest,
-  postgresql,
   procps,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage {
@@ -144,7 +140,52 @@ buildPythonPackage {
   # TEST_DICT: qcelemental honours a provenance supplied at the top level but
   # regenerates the molecule's, because Molecule.__init__ re-stamps it through
   # molparse.from_schema.
+  #
+  # `jsonb_order` is the second half of the same argument, and it is what the
+  # fixture migration above cost.  The digest is over the *bytes* of
+  # `input.json`, which `_write_input_file` produces with a bare
+  # `json.dumps(self.inputs.qcschema.get_dict(), indent=2)` — no `sort_keys` —
+  # so the key order is whatever the storage backend hands back.  The
+  # deprecated fixture plugin built its profile on `core.psql_dos`, whose
+  # `jsonb` column reorders every object's keys by byte length and then
+  # bytewise; `aiida.tools.pytest_fixtures` defaults to `core.sqlite_dos`,
+  # which is plain JSON and echoes back whatever order the dict was built in.
+  # Different order, different bytes, different md5, and the recorded directory
+  # describes nothing again:
+  #
+  #     QCSchemaParser: [ERROR] Found files '['_scheduler-stderr.txt',
+  #       '_scheduler-stdout.txt']', expected to find '['output.json']'
+  #     KeyError: 'qcschema'
+  #
+  # The recorded `tests/data/mock-psi4-1.4rc2-8ee90fe.../input.json` is itself
+  # proof of which order the digests were taken in: its top level runs
+  # id, model, driver, extras, keywords, molecule, protocols, provenance,
+  # schema_name, schema_version — length, then lexicographic, recursively, at
+  # every level.  Sorting the dict that way before `set_dict` reproduces those
+  # bytes exactly, so `24adc79085d1b8f0d854137ffa8076e6` keeps hitting.  It is
+  # also idempotent under psql_dos, which would re-sort to the same order, so
+  # this survives a move back the other way.
+  #
+  # example_02 is the control that says nothing *else* moved: its working
+  # directory is `_aiidasubmit.sh` plus a literal PsiAPI string with no dict in
+  # it, and its digest still hits across both the storage-backend change and
+  # the aiida-core bump that came with it.  So the submit script is unchanged
+  # and the key order is the whole of the difference.
+  #
+  # `key.encode()` rather than the str: jsonb orders by the key's UTF-8 byte
+  # length and then by its bytes.  Every key here is ASCII, so it makes no
+  # difference today — it is written this way so that a non-ASCII key added
+  # upstream does not silently sort differently from the database that
+  # recorded the fixture.
   postPatch = ''
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    substituteInPlace conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
+      --replace-fail \
+        'def clear_database_auto(clear_database):' \
+        'def clear_database_auto(aiida_profile_clean):'
+
     substituteInPlace setup.json \
       --replace-fail '"setup_requires": ["reentry"],' "" \
       --replace-fail '"reentry_register": true,' ""
@@ -163,10 +204,19 @@ buildPythonPackage {
       --replace-fail \
         "    atomic_input = AtomicInput(TEST_DICT)" \
         "    atomic_input = AtomicInput(TEST_DICT)
+
+        def jsonb_order(value):
+            if isinstance(value, dict):
+                keys = sorted(value, key=lambda key: (len(key.encode()), key.encode()))
+                return {key: jsonb_order(value[key]) for key in keys}
+            if isinstance(value, list):
+                return [jsonb_order(item) for item in value]
+            return value
+
         pinned = atomic_input.get_dict()
         pinned['provenance']['version'] = '0.50.4'
         pinned['molecule']['provenance']['version'] = '0.50.4'
-        atomic_input.set_dict(pinned)"
+        atomic_input.set_dict(jsonb_order(pinned))"
 
     mv tests/data/mock-psi4-1.4rc2-8ee90fe88003087a30e5fa3bc31a1a44 \
        tests/data/mock-psi4-1.4rc2-24adc79085d1b8f0d854137ffa8076e6
@@ -191,23 +241,12 @@ buildPythonPackage {
     sqlalchemy
   ];
 
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
-  '';
-
   nativeCheckInputs = [
     pytestCheckHook
 
     # conftest.py loads `aiida_testing.mock_code` as a pytest plugin; see
     # ../aiida-testing for why that is a git-pinned fork rather than a release.
     aiida-testing
-
-    # conftest.py also loads `aiida.manage.tests.pytest_fixtures`, the
-    # deprecated module, whose profile is config_psql_dos({}) and so needs a
-    # real PostgreSQL.  See ../pgtest for why postgresql is listed too.
-    pgtest
-    postgresql
-
     # The `direct` scheduler polls with `ps`, and without it the joblist comes
     # back empty, the job is declared finished at once, and retrieval takes
     # whatever exists at that instant.  That is the two `_scheduler-*.txt`

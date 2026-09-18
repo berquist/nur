@@ -9,7 +9,6 @@
   # dependencies
   aiida-core,
   aiida-pythonjob,
-  aiida-shell,
   cloudpickle,
   jsonschema,
   node-graph,
@@ -88,20 +87,23 @@ buildPythonPackage rec {
 
   build-system = [ flit-core ];
 
-  # aiida-core for the usual pre-release reason, and aiida-shell because the
-  # pin is `~=0.8` against the 0.9.0 in ../aiida-shell.  `node-graph~=0.6.5`
-  # and `aiida-pythonjob~=0.5.2` are both satisfied by what this overlay
-  # carries, so they are deliberately not in this list — a relax that is not
-  # needed hides the day it becomes needed.
-  pythonRelaxDeps = [
-    "aiida-core"
-    "aiida-shell"
-  ];
+  # aiida-core for the usual pre-release reason.  `aiida-shell` used to be here
+  # too, for a `~=0.8` pin against 0.9.0; the distribution is gone — aiida-core
+  # absorbed it — and `pythonRemoveDeps` drops the requirement outright below.
+  # `node-graph~=0.6.5` and `aiida-pythonjob~=0.5.2` are both satisfied by what
+  # this overlay carries, so they are deliberately not in this list — a relax
+  # that is not needed hides the day it becomes needed.
+  pythonRelaxDeps = [ "aiida-core" ];
+
+  # aiida-core vendored aiida-shell, so nothing provides this distribution any
+  # more and the requirement cannot be satisfied at all.  Everything it named is
+  # still here, under aiida's own namespace; see the import rewrites in
+  # postPatch.
+  pythonRemoveDeps = [ "aiida-shell" ];
 
   dependencies = [
     aiida-core
     aiida-pythonjob
-    aiida-shell
     cloudpickle
     jsonschema
     node-graph
@@ -162,6 +164,162 @@ buildPythonPackage rec {
   # machine, while a daemon that is genuinely wedged still gives up inside the
   # build's patience.  `yield profile` occurs once in the file.
   postPatch = ''
+    # kiwipy went the same way as plumpy — aiida-core absorbed it in 60aa10a4e
+    # and no longer depends on it, so `import kiwipy` is a ModuleNotFoundError.
+    # The one name used is the `Communicator` annotation on `message_receive`,
+    # and aiida-core's own `message_receive` annotates it
+    # `broker_communicator.Communicator` from aiida.brokers.communicator, which
+    # is the same object under its new home.
+    substituteInPlace src/aiida_workgraph/engine/workgraph.py \
+      --replace-fail \
+        'import kiwipy' \
+        'from aiida.brokers import communicator as kiwipy_communicator' \
+      --replace-fail 'kiwipy.Communicator' 'kiwipy_communicator.Communicator'
+
+    # The next layer of the same drift: upstream deleted the `Protect`
+    # metaclass from this module too, and replaced the two methods it guarded
+    # -- `on_exiting`, `on_wait`, in that order -- with the standard library's
+    # `typing.final`, a static-analysis-only marker with no runtime
+    # enforcement.  `t.final` is that exact replacement, already reachable
+    # under this module's own `import typing as t`.
+    substituteInPlace src/aiida_workgraph/engine/workgraph.py \
+      --replace-fail \
+        'from aiida.engine.processes.workchains.workchain import Protect, WorkChainSpec' \
+        'from aiida.engine.processes.workchains.workchain import WorkChainSpec' \
+      --replace-fail 'class WorkGraphEngine(Process, metaclass=Protect):' 'class WorkGraphEngine(Process):' \
+      --replace-fail '@Protect.final' '@t.final'
+
+    # `ProfileParamType(load_profile=True)` is no longer a thing aiida-core
+    # accepts: 9f3d98e45, "Load profile before verdi eager exits" (#7605), parses
+    # the top-level verdi arguments up front and loads the profile there, so the
+    # kwarg goes straight through to `object.__init__` and the CLI module dies at
+    # import —
+    #
+    #   TypeError: object.__init__() takes exactly one argument (the instance to
+    #   initialize)
+    #
+    # Dropping it gives up nothing: what it asked for is what upstream now does
+    # unconditionally.  ../aiida-pseudo carries the same one line.
+    substituteInPlace src/aiida_workgraph/cli/cmd_workgraph.py \
+      --replace-fail \
+        '@options.PROFILE(type=types.ProfileParamType(load_profile=True), expose_value=False)' \
+        '@options.PROFILE(type=types.ProfileParamType(), expose_value=False)'
+
+    # aiida-core vendored plumpy in 60aa10a4e and dropped the dependency; see
+    # ../aiida-optimize for why the standalone library is not the answer.
+    #
+    # `Port` and `PortNamespace` map to the *generic* module, not to
+    # aiida.engine.processes.ports — that one's PortNamespace is aiida's own
+    # subclass, and plumpy's was the base these sockets are checked against.
+    substituteInPlace src/aiida_workgraph/socket_spec.py \
+      --replace-fail \
+        'from plumpy.ports import Port, PortNamespace' \
+        'from aiida.engine.processes.generic.ports import Port, PortNamespace'
+
+    substituteInPlace src/aiida_workgraph/engine/workgraph.py \
+      --replace-fail \
+        'from plumpy import process_comms' \
+        'from aiida.engine.processes import communications as process_comms' \
+      --replace-fail \
+        'from plumpy.persistence import auto_persist' \
+        'from aiida.engine.processes.persistence import auto_persist' \
+      --replace-fail \
+        'from plumpy.process_states import Continue, Wait' \
+        'from aiida.engine.processes.states import Continue, Wait' \
+      --replace-fail \
+        'from plumpy.workchains import _PropagateReturn' \
+        'from aiida.engine.processes.workchains.outline import _PropagateReturn'
+
+    # The third layer, and the one that cost ten tests rather than an import.
+    # df3df5cc4, "Remove ineffective protected decorator" (#7607), renamed the
+    # `Process` methods that were never public -- `set_logger`, `log_with_pid`,
+    # `encode_input_args`, `decode_input_args` -- to carry a leading
+    # underscore, "while preserving public APIs such as `out()` and
+    # `load_instance_state()`".  aiida-core updated its own `WorkChain`, which
+    # makes the identical call one line from this one; nothing updated the
+    # plugins, and this is the only call site in the whole family
+    # (`rg '\.set_logger\(' wc/ -g '*.py'` finds it and nothing else).
+    #
+    # What makes it expensive is *where* it sits: inside `load_instance_state`,
+    # which is only ever reached when a process is recreated from its
+    # checkpoint -- that is, by a daemon worker continuing a submitted process.
+    # `wg.run()` builds the process in-process and never deserialises one, so
+    # the whole suite looks healthy right up until something calls
+    # `wg.submit()`, and then every such test fails at once:
+    #
+    #   11 failed, 230 passed -- and all eleven either submit, or assert on a
+    #   task that a submitted graph was supposed to create.
+    #
+    # The AttributeError is raised inside the worker, so it excepts the process
+    # rather than surfacing anywhere the test can see.  An EXCEPTED process is
+    # terminal, which is why `wg.wait()` returns promptly instead of timing
+    # out, and it has no report and no `exit_status`, which is why the failures
+    # read as four unrelated complaints:
+    #
+    #   assert None == 5                      outputs never produced
+    #   assert None == 302                    exit_status of an excepted process
+    #   assert '...' in 'No log messages recorded for this entry'
+    #   AttributeError: 'AiiDAFunctionTask' object has no attribute 'node'
+    #
+    # The last of those is not an API break, though it reads like one:
+    # `Task.update_state` assigns `self.node` only when the task has a process
+    # node, so a graph that never ran leaves the attribute unset.
+    #
+    # The four tests that instead time out -- test_task_pause_play,
+    # test_task_kill, test_pause_play_task, test_task_monitor_kill -- are the
+    # same defect seen from the other side: they wait for a *task* state that
+    # only a running graph can reach.  Note that this puts the `--numprocesses`
+    # note above out of date as an explanation of the current failures; the two
+    # CLI tests it describes are a genuine race, but they cannot even be
+    # reached while this is broken.
+    substituteInPlace src/aiida_workgraph/engine/workgraph.py \
+      --replace-fail \
+        'self.set_logger(self.node._logger_adapter)' \
+        'self._set_logger(self.node._logger_adapter)'
+
+    substituteInPlace src/aiida_workgraph/utils/__init__.py \
+      --replace-fail \
+        'from plumpy.utils import AttributesFrozendict' \
+        'from aiida.common.extendeddicts import AttributesFrozendict'
+
+    substituteInPlace tests/test_engine.py \
+      --replace-fail \
+        'from plumpy.process_comms import MessageBuilder' \
+        'from aiida.engine.processes.communications import MessageBuilder'
+
+    # aiida-shell is not a distribution any more: aiida-core absorbed it in the
+    # same release that absorbed plumpy, and this repo dropped the package
+    # rather than ship a second copy of entry points aiida-core now registers
+    # itself — two `core.shell` registrations is a MultipleEntryPointError at
+    # import, not a subtle problem.  Every name moves to aiida's own namespace
+    # and nothing else about them changed:
+    #
+    #   aiida_shell.ShellJob                      aiida.calculations.shell
+    #   aiida_shell.calculations.shell.ShellJob   aiida.calculations.shell
+    #   aiida_shell.launch.prepare_shell_job_inputs   aiida.tools.shell
+    #   aiida_shell.launch.prepare_code           aiida.tools.shell
+    #   aiida_shell.parsers.shell.ShellParser     aiida.parsers.plugins.shell.parser
+    substituteInPlace src/aiida_workgraph/utils/__init__.py \
+      --replace-fail \
+        'from aiida_shell.calculations.shell import ShellJob' \
+        'from aiida.calculations.shell import ShellJob'
+
+    substituteInPlace src/aiida_workgraph/tasks/shelljob_task.py \
+      --replace-fail \
+        'from aiida_shell import ShellJob' \
+        'from aiida.calculations.shell import ShellJob' \
+      --replace-fail \
+        'from aiida_shell.launch import prepare_shell_job_inputs' \
+        'from aiida.tools.shell import prepare_shell_job_inputs' \
+      --replace-fail \
+        'from aiida_shell.parsers.shell import ShellParser' \
+        'from aiida.parsers.plugins.shell.parser import ShellParser'
+
+    substituteInPlace tests/test_shell.py \
+      --replace-fail \
+        'from aiida_shell.launch import prepare_code' \
+        'from aiida.tools.shell import prepare_code'
+
     substituteInPlace tests/conftest.py \
       --replace-fail "filepath_executable='/bin/bash'" "filepath_executable='${bash}/bin/bash'" \
       --replace-fail "filepath_executable='/bin/true'" "filepath_executable='${coreutils}/bin/true'" \

@@ -14,11 +14,7 @@
   # tests
   pytestCheckHook,
   pytest-regressions,
-  pgtest,
-  postgresql,
   bash,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -39,6 +35,15 @@ buildPythonPackage rec {
     hash = "sha256-EQhOjFTbrFPV3gMBkJUO1dLXkZZ698pXNe7jff7lYyQ=";
   };
 
+  # A patch file rather than `postPatch`: the fixtures below need their own
+  # exact indentation (a literal tab in the .in file, two- and four-space
+  # nesting in the .yml files) preserved byte for byte, and Nix computes an
+  # indented string's dedent over the whole `postPatch` literal -- see
+  # ../pymatgen/default.nix for what that quietly does to a replacement that
+  # has to keep its own indentation, and ../aiida-workgraph's
+  # await-daemon-adoption.patch for the same call made the same way.
+  patches = [ ./regen-stale-fixtures.patch ];
+
   build-system = [ hatchling ];
 
   # aiida-core here is 2.10.0.dev0, and a pre-release does not satisfy
@@ -52,20 +57,9 @@ buildPythonPackage rec {
     periodictable
   ];
 
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
-  '';
-
   nativeCheckInputs = [
     pytestCheckHook
     pytest-regressions
-
-    # tests/conftest.py names `aiida.manage.tests.pytest_fixtures`, the
-    # deprecated module, which builds its profile from config_psql_dos({}) and
-    # therefore wants a real PostgreSQL.  pgtest supplies a throwaway cluster;
-    # see ../pgtest for why postgresql has to be listed alongside it.
-    pgtest
-    postgresql
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.
@@ -83,6 +77,29 @@ buildPythonPackage rec {
   # unconditional, and postBuild runs late enough that only the check phase
   # would ever have seen it.
   postPatch = ''
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    # The dropped fixtures too; see ../aiida-diff.  These run before the
+    # /bin/bash rewrite below on purpose — that one would otherwise have already
+    # changed the argument this matches on.  `recursive_merge` is safe: this
+    # conftest defines its own, it never came from the plugin.
+    substituteInPlace tests/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
+      --replace-fail \
+        'def generate_inputs_orca(aiida_local_code_factory, generate_structure):' \
+        'def generate_inputs_orca(aiida_code_installed, generate_structure):' \
+      --replace-fail \
+        "aiida_local_code_factory('orca.orca', '/bin/bash')" \
+        "aiida_code_installed(default_calc_job_plugin='orca.orca', filepath_executable='/bin/bash')"
+    substituteInPlace examples/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
+      --replace-fail \
+        'def orca_code(aiida_local_code_factory):' \
+        'def orca_code(aiida_code_installed):' \
+      --replace-fail \
+        "aiida_local_code_factory('orca', 'orca')" \
+        "aiida_code_installed(default_calc_job_plugin='orca', filepath_executable='orca')"
+
     substituteInPlace tests/conftest.py \
       --replace-fail "/bin/bash" "${bash}/bin/bash"
   '';

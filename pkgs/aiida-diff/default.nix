@@ -13,11 +13,7 @@
   # tests
   pytestCheckHook,
   diffutils,
-  pgtest,
-  postgresql,
   procps,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage {
@@ -53,6 +49,38 @@ buildPythonPackage {
 
   build-system = [ flit-core ];
 
+  # See ../aiida-cp2k for why this is a rewrite rather than a version bump, and
+  # why pgtest, postgresql and the locale export left with it.
+  #
+  # The module path is only half of it, and the half that fails loudly.  The new
+  # plugin also **dropped thirteen fixtures**, so a conftest that loads cleanly
+  # can still collect nothing:
+  #
+  #   E       fixture 'clear_database' not found
+  #   E       fixture 'aiida_local_code_factory' not found
+  #
+  # `clear_database` and its four siblings are replaced by `aiida_profile_clean`,
+  # which resets the storage rather than the whole profile.  And
+  # `aiida_local_code_factory` is not renamed to `aiida_code_installed` so much
+  # as replaced by it: the old one took `(entry_point, executable)` and searched
+  # PATH for the executable, the new one takes keywords and stores what it is
+  # given.  A bare name is still fine — `validate_filepath_executable` skips any
+  # path that is not absolute, and the program is on PATH here through
+  # nativeCheckInputs — so only the argument names move.
+  postPatch = ''
+    substituteInPlace conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
+      --replace-fail \
+        'def clear_database_auto(clear_database):' \
+        'def clear_database_auto(aiida_profile_clean):' \
+      --replace-fail \
+        'def diff_code(aiida_local_code_factory):' \
+        'def diff_code(aiida_code_installed):' \
+      --replace-fail \
+        'aiida_local_code_factory(executable="diff", entry_point="diff")' \
+        'aiida_code_installed(filepath_executable="diff", default_calc_job_plugin="diff")'
+  '';
+
   # `aiida-core>=2.5,<3` against a 2.10.0.dev0 snapshot: a pre-release does not
   # satisfy that without an opt-in.  Every AiiDA plugin here needs this.
   pythonRelaxDeps = [ "aiida-core" ];
@@ -68,17 +96,8 @@ buildPythonPackage {
     export AIIDA_PATH="$HOME"
   '';
 
-  # conftest.py names `aiida.manage.tests.pytest_fixtures`, so the profile is
-  # core.psql_dos and the cluster needs a locale it would not otherwise have —
-  # ../pgsu/default.nix has the long version.
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
-  '';
-
   nativeCheckInputs = [
     pytestCheckHook
-    pgtest
-    postgresql
 
     # The plugin's whole subject.  Its `diff_code` fixture is
     # `aiida_local_code_factory(executable="diff", entry_point="diff")`, which

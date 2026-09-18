@@ -13,11 +13,7 @@
   # tests
   pytestCheckHook,
   pytest-regressions,
-  pgtest,
-  postgresql,
   coreutils,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -77,6 +73,11 @@ buildPythonPackage rec {
   # for the reason given in aiida-quantumespresso: it would rewrite every
   # reference in the suite and hide any that had drifted for a real reason.
   postPatch = ''
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    substituteInPlace tests/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures'
+
     substituteInPlace tests/conftest.py \
       --replace-fail "'/bin/true'" "'${coreutils}/bin/true'"
 
@@ -92,19 +93,9 @@ buildPythonPackage rec {
       symbols:'
   '';
 
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
-  '';
-
   nativeCheckInputs = [
     pytestCheckHook
     pytest-regressions
-
-    # tests/conftest.py names `aiida.manage.tests.pytest_fixtures`, the
-    # deprecated module, whose profile is a real PostgreSQL one.  See ../pgtest
-    # for why postgresql is listed alongside it.
-    pgtest
-    postgresql
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.

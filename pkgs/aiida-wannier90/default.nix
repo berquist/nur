@@ -13,11 +13,7 @@
   pytestCheckHook,
   pytest-regressions,
   pytest-datadir,
-  pgtest,
-  postgresql,
   coreutils,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -46,12 +42,13 @@ buildPythonPackage rec {
   # and a Nix build sandbox has only /bin/sh.  ../aiida-orca/default.nix has the
   # long form of why an absent executable does not surface as "no such file".
   postPatch = ''
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    substituteInPlace tests/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures'
+
     substituteInPlace tests/conftest.py \
       --replace-fail '"/bin/true"' '"${coreutils}/bin/true"'
-  '';
-
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
   '';
 
   nativeCheckInputs = [
@@ -62,13 +59,6 @@ buildPythonPackage rec {
     # both are here.
     pytest-regressions
     pytest-datadir
-
-    # tests/conftest.py names `aiida.manage.tests.pytest_fixtures`, the
-    # deprecated module, whose profile is a real PostgreSQL one.  See ../pgtest
-    # for why postgresql is listed alongside, and ../aiida-core/default.nix for
-    # what that module needs patched to work without a broker.
-    pgtest
-    postgresql
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.

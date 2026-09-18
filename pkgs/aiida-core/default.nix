@@ -7,30 +7,35 @@
   flit-core,
 
   # dependencies
+  aio-pika,
   alembic,
   archive-path,
   asyncssh,
   circus,
   click,
   click-spinner,
+  dill,
   disk-objectstore,
   docstring-parser,
   graphviz,
+  greenback,
+  greenlet,
   importlib-metadata,
   ipython,
   jedi,
   jinja2,
-  kiwipy,
   numpy,
+  pamqp,
   paramiko,
   pgsu,
-  plumpy,
   psutil,
   psycopg,
   pydantic,
+  pytray,
   pytz,
   pyyaml,
   requests,
+  shortuuid,
   sqlalchemy,
   tabulate,
   tqdm,
@@ -75,6 +80,9 @@
   vim,
   procps,
   bash,
+  coreutils,
+  diffutils,
+  unzip,
   jq,
   stdenv,
   glibcLocalesUtf8,
@@ -82,7 +90,7 @@
 
 buildPythonPackage rec {
   pname = "aiida-core";
-  version = "2.10.0.dev0-unstable-2026-08-16";
+  version = "2.9.2-unstable-2026-09-12";
   pyproject = true;
 
   # Not fetchPypi.  The newest release is 2.9.0, and the ZeroMQ broker —
@@ -94,8 +102,8 @@ buildPythonPackage rec {
   src = fetchFromGitHub {
     owner = "aiidateam";
     repo = "aiida-core";
-    rev = "e56a90689325d5296add6565fbff1b9e38789ac5";
-    hash = "sha256-8zuLtmE/IkYoZSd3Sqm+ZptpMrUq/Ek1ooHuufz+Vbw=";
+    rev = "e4d99200ab68fc86f84bc1f275856bc7dd640f56";
+    hash = "sha256-19sGoqt45qhTCyKt6KEeqbggnXxLTw7xWG+VeL8b1lY=";
   };
 
   # `core.sqlite_dos` opens its database on SQLite's two defaults: a rollback
@@ -269,8 +277,10 @@ buildPythonPackage rec {
   # the class asserts on the path: the one test that inspects the folder reads
   # the absolute path back out of `node.dry_run_info`.
   #
-  # The three fixture rewrites are a separate matter: a pytest 9
-  # incompatibility, not a packaging choice.  Upstream pins `pytest~=7.0`; nixpkgs carries 9.1.1, which
+  # Three fixture rewrites used to live here and are **gone, because upstream
+  # made them itself** in f30d9f205, "Change to correct use of usefixtures in
+  # fixtures" (#7632).  They were a pytest 9 incompatibility rather than a
+  # packaging choice: upstream pins `pytest~=7.0`, nixpkgs carries 9.1.1, and 9
   # turned "applying a mark to a fixture" from a deprecation warning into a
   # collection error:
   #
@@ -278,13 +288,14 @@ buildPythonPackage rec {
   #       - Failed: Marks cannot be applied to fixtures.
   #
   # Two whole modules failed to collect, and xdist reports a collection error
-  # once per worker, so this showed up as 256 errors rather than as the two
-  # problems it is.
-  #
-  # `@pytest.mark.usefixtures` on a fixture never had any effect pytest
-  # guaranteed; requesting the fixture as an argument is the documented way to
-  # say the same thing, and is what upstream will have to do. `aiida_profile_clean`
-  # goes first in the signature so it still runs before the other fixtures.
+  # once per worker, so it showed up as 256 errors rather than as the two
+  # problems it was.  `@pytest.mark.usefixtures` on a fixture never had any
+  # effect pytest guaranteed, so the fix was to request the fixture as an
+  # argument — `profile_with_minimal_data`, `profile_with_actual_data` and
+  # `process_nodes`, with `aiida_profile_clean` first in the signature so it
+  # still ran before the other fixtures.  That is character-for-character what
+  # #7632 now ships, so the `--replace-fail` hunks stopped matching and the
+  # build said so.  Nothing to carry forward.
   #
   # Three more tests ask for that same fixture for an unrelated reason: they
   # assume an empty group table and upstream never says so.  Each sits beside a
@@ -584,10 +595,20 @@ buildPythonPackage rec {
   # is never split.  They would start failing the moment one of them became
   # interactive, and this is the note that says why.
   #
-  # The last hunk is not for this package's own suite at all — it is for the
-  # plugins.  src/aiida/manage/tests/pytest_fixtures.py is the *deprecated*
-  # fixture plugin, the one that prints "please use aiida.tools.pytest_fixtures
-  # instead" on import, and its `aiida_profile_factory` hardcodes a
+  # **Upstream deleted the deprecated fixture plugin, and the four hunks that
+  # patched it are gone with it.**  01bd7146d, "Remove leftover deprecated pytest
+  # fixtures" (#7631), removes src/aiida/manage/tests/pytest_fixtures.py
+  # outright — 884 lines — on the grounds that "nothing references the module
+  # anymore".  Nothing in *aiida-core* does.  Thirteen packages in this repo do,
+  # through their own conftests, and every one of them now loses its fixture
+  # plugin; see the note in ../aiida-cp2k for the shape of that.  Keep the
+  # paragraphs below: they are the reasoning those packages need when they are
+  # moved to `aiida.tools.pytest_fixtures`, and the RabbitMQ argument in
+  # particular is about a profile, not about a module path.
+  #
+  # What that last hunk did, and why it mattered: the deprecated plugin printed
+  # "please use aiida.tools.pytest_fixtures instead" on import, and its
+  # `aiida_profile_factory` hardcoded a
   # process_control block naming RabbitMQ on 127.0.0.1:5672.  Every plugin here
   # whose conftest still says `pytest_plugins =
   # ['aiida.manage.tests.pytest_fixtures']` therefore gets a profile that
@@ -621,15 +642,17 @@ buildPythonPackage rec {
   # A plugin test that genuinely needs a broker still fails, now with the
   # ConfigurationError that says so.
   #
-  # The same file gets the per-worker role, the per-worker port and the _close
-  # tolerance described above, because the deprecated plugin does not share the
-  # supported one's fixtures — it carries its own `postgres_cluster`, with its
-  # own `PGTest()` and its own hardcoded `guest`.  Nothing needed that while the
-  # plugins ran serially.  ../aiida-cp2k now asks for `--dist worksteal`, which
-  # makes every race in the note above live again for it, ../aiida-orca,
-  # ../aiida-gaussian-datatypes and ../aiida-testing, and those four are exactly
-  # the packages on the deprecated plugin.  Two copies of the same three fixes
-  # is the price of upstream keeping two copies of the fixtures.
+  # That same file also got the per-worker role, the per-worker port and the
+  # _close tolerance described above, because the deprecated plugin did not
+  # share the supported one's fixtures — it carried its own `postgres_cluster`,
+  # with its own `PGTest()` and its own hardcoded `guest`.  Nothing needed that
+  # while the plugins ran serially.  ../aiida-cp2k asks for `--dist worksteal`,
+  # which makes every race in the note above live again for it, ../aiida-orca,
+  # ../aiida-gaussian-datatypes and ../aiida-testing.  Two copies of the same
+  # three fixes was the price of upstream keeping two copies of the fixtures,
+  # and #7631 is upstream stopping.  The four packages still need all three —
+  # from `aiida.tools.pytest_fixtures`, which is patched below and which they
+  # have to be moved onto first.
   #
   # These patch an installed module rather than tests/, unlike the
   # /bin/bash rewrite above, and that is deliberate: the module only ever runs
@@ -666,6 +689,92 @@ buildPythonPackage rec {
   postPatch = ''
     substituteInPlace pyproject.toml \
       --replace-fail "'click>=8.1.0,<8.3'" "'click>=8.1.0'"
+
+    # `[build-system] requires` is checked before the backend is even loaded, so
+    # `pythonRelaxDeps` — which rewrites the built wheel's runtime metadata —
+    # cannot reach it:
+    #
+    #     ERROR Unmet dependencies (checked against .../bin/python3.13):
+    #      flit_core<5,>=4.0.2
+    #              wanted: <5,>=4.0.2
+    #              found: 3.12.0
+    #
+    # e94b2060d, "Update to flit 4" (#7524), is a three-file commit: the release
+    # workflow, one line of docs, and this pin.  No metadata moved with it —
+    # `license = {file = 'LICENSE.txt'}` is still the table form flit 3 has
+    # always written, and `[tool.flit.module]` / `[tool.flit.sdist]` are
+    # untouched.  So >=3.8 is not a guess: it is the pin the rev packaged here
+    # before this bump carried, against the same flit-core 3.12.0.
+    substituteInPlace pyproject.toml \
+      --replace-fail '"flit_core >=4.0.2,<5"' '"flit_core >=3.8,<5"'
+
+    # ../plumpy's two patches, moved here because the code they fix moved here.
+    # 60aa10a4e vendored plumpy into `src/aiida/engine/processes/generic/`, and
+    # it brought both bugs along byte for byte — only the `# type: ignore`
+    # comments differ.  aiida-core no longer imports plumpy at all, so patching
+    # ../plumpy now fixes nothing that AiiDA runs, and leaving these out would
+    # have reintroduced both silently.  ../plumpy keeps its copies: it is still
+    # a real package, and its own note is the long form of everything below.
+    #
+    # The first is DeliveryError.  A state-change broadcast is best-effort by
+    # construction and upstream already treats it that way, warning and carrying
+    # on for ConnectionClosed, ChannelInvalidStateError and the broker timeout,
+    # because the state change is committed to storage and only the notification
+    # is lost.  RabbitMQ 4 adds a fourth way to fail: it nacks a confirmed
+    # publish whose target queue is being torn down, so the `verdi run` that
+    # submits a workchain drops its exclusive broadcast queue on exit and the
+    # daemon worker's next broadcast EXCEPTs the whole process with the work
+    # already done and correct.  Caught by ../../tests/aiida/vm.nix
+    # (daemon-rabbitmq).
+    #
+    # The second is Process.spec()'s shared mutable state: `cls.__called` is one
+    # flag for every caller, so a second caller entering for the same class
+    # resets it between the first's define() and its assert, and the first dies
+    # claiming define() was never called.  The flag moves onto a local spec
+    # object so concurrent builders each get their own.  An RLock was tried and
+    # is not enough — the interleaving is asyncio and greenlet, not threads.
+    substituteInPlace src/aiida/engine/processes/generic/process.py \
+      --replace-fail \
+        "from aio_pika.exceptions import ChannelInvalidStateError, ConnectionClosed" \
+        "from aio_pika.exceptions import ChannelInvalidStateError, ConnectionClosed, DeliveryError" \
+      --replace-fail \
+        "            except (ConnectionClosed, ChannelInvalidStateError):" \
+        "            except (ConnectionClosed, ChannelInvalidStateError, DeliveryError):" \
+      --replace-fail \
+        "                message = 'Process<%s>: no connection available to broadcast state change from %s to %s'" \
+        "                message = 'Process<%s>: could not broadcast state change from %s to %s'"
+
+    substituteInPlace src/aiida/engine/processes/generic/process.py \
+      --replace-fail \
+        "            try:
+                    cls._spec: ProcessSpec = cls._spec_class()  # type: ignore[attr-defined, misc]
+                    cls.__called: bool = False  # type: ignore[misc]
+                    cls.define(cls._spec)  # type: ignore[attr-defined]
+                    assert cls.__called, (
+                        f'Process.define() was not called by {cls}\nHint: Did you forget to call the superclass method in '
+                        'your define? Try: super().define(spec)'
+                    )
+                    return cls._spec  # type: ignore[attr-defined]
+                except Exception:
+                    del cls._spec  # type: ignore[attr-defined]
+                    cls.__called = False
+                    raise" \
+        "            spec: ProcessSpec = cls._spec_class()  # type: ignore[attr-defined]
+                spec.__called = False  # type: ignore[attr-defined]
+                cls._spec = spec  # type: ignore[attr-defined]
+                try:
+                    cls.define(spec)  # type: ignore[attr-defined]
+                    assert spec.__called, (  # type: ignore[attr-defined]
+                        f'Process.define() was not called by {cls}\nHint: Did you forget to call the superclass method in '
+                        'your define? Try: super().define(spec)'
+                    )
+                except Exception:
+                    del cls._spec  # type: ignore[attr-defined]
+                    raise
+                return spec" \
+      --replace-fail \
+        "        cls.__called = True" \
+        "        _spec.__called = True  # type: ignore[attr-defined]"
 
     substituteInPlace src/aiida/transports/cli.py \
       --replace-fail \
@@ -711,6 +820,35 @@ buildPythonPackage rec {
       --replace-fail \
         "code = aiida_code_installed('add')" \
         "code = aiida_code_installed('add', filepath_executable='${bash}/bin/bash')"
+
+    # aiida-shell was vendored too, alongside plumpy — src/aiida/calculations/
+    # shell.py and src/aiida/tools/shell.py — and its suite came with the
+    # hardcoded interpreter paths ../aiida-shell has always had to rewrite.
+    # Seven tests fail without these, every one of them on a path a Nix build
+    # sandbox does not have: /bin holds `sh` and nothing else.
+    #
+    # `generate_shell_code` resolves its argument through
+    # `transport.exec_command_wait(f'which {command}')`, so an absolute
+    # `/bin/echo` surfaces as `which: no echo in (/bin)` — which reads like a
+    # PATH problem and is not one.  The bare names the same fixture is given
+    # elsewhere (`diff`, and `echo` through `shutil.which`) resolve against the
+    # build PATH and need only the program present, which is what coreutils,
+    # diffutils and unzip are doing in nativeCheckInputs.  `test_filename_stdin`
+    # then compares the generated script against a recorded file naming
+    # /usr/bin/diff, so that has to move with it.
+    #
+    # The `find ... sed` above cannot reach the portable-code case: it matches
+    # `'/bin/bash'` quoted on its own, and that test writes the interpreter
+    # inside a longer string, `'#!/bin/bash\necho "$@"\n'`.
+    substituteInPlace tests/calculations/test_shell.py \
+      --replace-fail "'/bin/echo'" "'${coreutils}/bin/echo'"
+
+    substituteInPlace tests/calculations/test_shell/test_filename_stdin.txt \
+      --replace-fail "'/usr/bin/diff'" "'${diffutils}/bin/diff'"
+
+    substituteInPlace tests/tools/test_shell.py \
+      --replace-fail "'/bin/true'" "'${coreutils}/bin/true'" \
+      --replace-fail '#!/bin/bash\necho' '#!${bash}/bin/bash\necho'
 
     substituteInPlace tests/calculations/test_stash.py \
       --replace-fail "#!/bin/bash" "#!${bash}/bin/bash"
@@ -797,16 +935,6 @@ buildPythonPackage rec {
         "('sleep 1; vim -cwq',)" \
         "('vim -cwq',)"
 
-    substituteInPlace tests/manage/configuration/test_profile.py \
-      --replace-fail \
-        "@pytest.mark.usefixtures('aiida_profile_clean')
-    def profile_with_minimal_data():" \
-        "def profile_with_minimal_data(aiida_profile_clean):" \
-      --replace-fail \
-        "@pytest.mark.usefixtures('aiida_profile_clean')
-    def profile_with_actual_data(generate_calculation_node_io, generate_workchain_node_io):" \
-        "def profile_with_actual_data(aiida_profile_clean, generate_calculation_node_io, generate_workchain_node_io):"
-
     substituteInPlace tests/engine/test_launch.py \
       --replace-fail \
         "    def init_profile(self, aiida_localhost):" \
@@ -837,10 +965,16 @@ buildPythonPackage rec {
     # asserts `is_finished_ok`.  Only the patience changes.  The worst case is
     # 60 (await) + 30 (restart) + 120 (this) = 210s, well inside the 900-second
     # pytest-timeout cap set in `pytestFlags`.
+    # Upstream has since raised this itself, and its commit message reaches the
+    # same conclusion from the other side: "under CPU contention the post-restart
+    # wait alone approaches the 10 seconds this test used to allow."  The
+    # hard-coded `timeout = 10` local is gone, replaced by an argument at the
+    # call, so the hunk moved rather than went — 30 is upstream's number for a
+    # runner doing nothing else, and this build is not that.
     substituteInPlace tests/engine/processes/calcjobs/test_calc_job.py \
       --replace-fail \
-        "    timeout = 10" \
-        "    timeout = 120"
+        "    submit_and_await(node, ProcessState.FINISHED, timeout=30)" \
+        "    submit_and_await(node, ProcessState.FINISHED, timeout=120)"
 
     substituteInPlace tests/manage/test_profile_access.py \
       --replace-fail \
@@ -868,12 +1002,6 @@ buildPythonPackage rec {
         "        list_repository_contents(folder_data, path=''', color=True)
             values = outstreams[0].getvalue()"
 
-    substituteInPlace tests/orm/nodes/process/test_process.py \
-      --replace-fail \
-        "@pytest.mark.usefixtures('aiida_profile')
-    def process_nodes():" \
-        "def process_nodes(aiida_profile):"
-
     substituteInPlace src/aiida/tools/pytest_fixtures/storage.py \
       --replace-fail \
         "import pathlib
@@ -900,56 +1028,6 @@ buildPythonPackage rec {
             if self.cluster is not None:
                 try:
                     self.cluster.close()
-                except RuntimeError as exception:
-                    if 'Is server running?' not in str(exception):
-                        raise"
-
-    # broker_virtual_host is an empty Python string upstream.  Two apostrophes
-    # would close this whole block eleven hunks early, so it is written below
-    # as three: that is how a Nix indented string escapes a literal pair.
-    substituteInPlace src/aiida/manage/tests/pytest_fixtures.py \
-      --replace-fail \
-        "            'process_control': {
-                    'backend': 'rabbitmq',
-                    'config': {
-                        'broker_protocol': 'amqp',
-                        'broker_username': 'guest',
-                        'broker_password': 'guest',
-                        'broker_host': '127.0.0.1',
-                        'broker_port': 5672,
-                        'broker_virtual_host': ''',
-                    },
-                },
-                'options': {" \
-        "            'process_control': {
-                    'backend': None,
-                    'config': None,
-                },
-                'options': {" \
-      --replace-fail \
-        "            'database_username': database_username or 'guest'," \
-        "            'database_username': database_username or 'guest_' + os.environ.get('PYTEST_XDIST_WORKER', 'master')," \
-      --replace-fail \
-        "    cluster = None
-        try:
-            cluster = PGTest()
-            cluster.create_database = create_database
-            yield cluster
-        finally:
-            if cluster is not None:
-                cluster.close()" \
-        "    worker = os.environ.get('PYTEST_XDIST_WORKER', ''')
-        port = 21000 + int(worker[2:]) if worker[:2] == 'gw' and worker[2:].isdigit() else None
-
-        cluster = None
-        try:
-            cluster = PGTest(port=port)
-            cluster.create_database = create_database
-            yield cluster
-        finally:
-            if cluster is not None:
-                try:
-                    cluster.close()
                 except RuntimeError as exception:
                     if 'Is server running?' not in str(exception):
                         raise"
@@ -1023,16 +1101,13 @@ buildPythonPackage rec {
     #
     # Patched in the shipped fixture plugin rather than overridden in
     # tests/conftest.py, because the plugin is what every AiiDA plugin package
-    # in this repo tests against and they all build under the same load.  Both
-    # copies get it; `aiida.manage.tests.pytest_fixtures` is the deprecated one,
-    # and the note above its own hunk says why this repo still has to patch it.
+    # in this repo tests against and they all build under the same load.  There
+    # is one copy to patch now rather than two — see the deprecated-plugin note
+    # above for what happened to the other.
     #
     # 60 rather than more because `test_process_kill` calls the fixture six
     # times in one test — see the pytest-timeout note in `pytestFlags`.
     substituteInPlace src/aiida/tools/pytest_fixtures/daemon.py \
-      --replace-fail 'timeout: int = 20,' 'timeout: int = 60,'
-
-    substituteInPlace src/aiida/manage/tests/pytest_fixtures.py \
       --replace-fail 'timeout: int = 20,' 'timeout: int = 60,'
 
     # `test_process_kill_failing_ebm_kill` passes its own `timeout=kill_timeout`
@@ -1084,10 +1159,17 @@ buildPythonPackage rec {
   # instead, which does.  The call site here, src/aiida/orm/nodes/data/upf.py,
   # uses `upf_to_json(text, fname=...)`, and that signature is identical across
   # the two.
+  # aio-pika and pamqp arrive with the vendored plumpy: both were kiwipy's pins
+  # until 60aa10a4e, and both are behind nixpkgs — `aio-pika~=9.5.0` against
+  # 9.6.2 and `pamqp~=3.2` against 4.0.1.  They were never checked here before,
+  # because as transitive dependencies of kiwipy no metadata check of this
+  # package's own ever looked at them.
   pythonRelaxDeps = [
+    "aio-pika"
     "asyncssh"
     "importlib-metadata"
     "jedi"
+    "pamqp"
     "paramiko"
     "pytz"
     "tabulate"
@@ -1095,31 +1177,44 @@ buildPythonPackage rec {
     "wrapt"
   ];
 
+  # `plumpy` and `kiwipy` are **gone from this list because upstream absorbed
+  # them**.  60aa10a4e, "Integrate plumpy into aiida-core", vendors the whole
+  # library — 6756 insertions over 71 files — and `rg '^\s*(import|from)
+  # (plumpy|kiwipy)'` over the tag's `src/` and `tests/` now matches nothing at
+  # all.  What used to arrive through those two is declared here directly, which
+  # is aio-pika, dill, greenback, greenlet, pamqp, pytray and shortuuid; the
+  # ../plumpy and ../kiwipy derivations stay, because they are still real
+  # packages, but nothing in this repo consumes them any more.
   dependencies = [
+    aio-pika
     alembic
     archive-path
     asyncssh
     circus
     click
     click-spinner
+    dill
     disk-objectstore
     docstring-parser
     graphviz
+    greenback
+    greenlet
     importlib-metadata
     ipython
     jedi
     jinja2
-    kiwipy
     numpy
+    pamqp
     paramiko
     pgsu
-    plumpy
     psutil
     psycopg
     pydantic
+    pytray
     pytz
     pyyaml
     requests
+    shortuuid
     sqlalchemy
     tabulate
     tqdm
@@ -1127,12 +1222,9 @@ buildPythonPackage rec {
     upf-to-json
     wrapt
   ]
-  # aiida-core asks for `kiwipy[rmq]` and `psycopg[binary]`, not the bare
-  # distributions.  The rmq extra is what supplies the RabbitMQ broker backend;
-  # the ZeroMQ one is built in.  psycopg's `binary` extra is a prebuilt wheel on
-  # PyPI, and `c` is nixpkgs' equivalent — the same accelerated implementation,
-  # compiled against nixpkgs' libpq.
-  ++ kiwipy.optional-dependencies.rmq
+  # aiida-core asks for `psycopg[binary]`, not the bare distribution.  That
+  # extra is a prebuilt wheel on PyPI, and `c` is nixpkgs' equivalent — the same
+  # accelerated implementation, compiled against nixpkgs' libpq.
   ++ psycopg.optional-dependencies.c;
 
   # Not `rec`: attribute names like `ase` and `flask` collide with the function
@@ -1269,6 +1361,16 @@ buildPythonPackage rec {
     # aiida.common.utils and several cmdline tests shell out to `which`.
     which
 
+    # The vendored aiida-shell suite, which resolves the commands it drives
+    # against this PATH rather than against a rewritten literal — see the note
+    # above its hunks in postPatch.  coreutils and diffutils are in stdenv
+    # already and are named here because the rewrites need them as arguments;
+    # `unzip` is the one that is genuinely absent, and `test_nodes_remote_data`
+    # is the pair of tests that launch it.
+    coreutils
+    diffutils
+    unzip
+
     # tests/calculations/test_stash.py writes its own shell script as the code
     # for a StashCalculation and pipes the calculation's JSON through `jq` to
     # read source_path, source_list and target_base out of it, so the script
@@ -1372,7 +1474,8 @@ buildPythonPackage rec {
     # Which tests it hits varies run to run, which is what marks them as
     # scheduling artefacts rather than failures.
     #
-    # The fourth was a data race inside plumpy rather than a timing margin, and
+    # The fourth was a data race inside plumpy — since 60aa10a4e, inside *this*
+    # package, at src/aiida/engine/processes/generic/process.py — rather than a
     # it is the one entry here that should no longer fire.  Process.spec() built
     # the spec on the class itself, in three steps that are not atomic:
     #
@@ -1384,12 +1487,13 @@ buildPythonPackage rec {
     # A second caller entering for the same class resets __called between the
     # first's define() and its assert, and the assertion message then names
     # define() — which reads like a plugin that forgot super().define(spec), and
-    # every AiiDA process class does call it.  ../plumpy now builds into a local
-    # and hangs the flag on the spec object, so there is nothing left to race
-    # on; see the shared-state note there, including why the RLock that was
-    # tried first did not do.
+    # every AiiDA process class does call it.  The hunk in `postPatch` above now
+    # builds into a local and hangs the flag on the spec object, so there is
+    # nothing left to race on; ../plumpy carries the same patch and the long
+    # form of the reasoning, including why the RLock that was tried first did
+    # not do.
     #
-    # The pattern stays as a backstop for a plumpy that patch stops applying to.
+    # The pattern stays as a backstop for a tree that hunk stops applying to.
     # It is also the one whose retry can no longer help: the `except` clause it
     # relied on, which deleted _spec and cleared __called before re-raising, was
     # removed along with the state it was cleaning up.  If this ever fires

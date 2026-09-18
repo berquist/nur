@@ -38,9 +38,12 @@ buildPythonPackage rec {
   # PGTest` and it shells out to initdb, pg_ctl and postgres from the *calling*
   # process's PATH.  There is no console script here to wrap, so nothing this
   # derivation can do makes those binaries reachable — every derivation whose
-  # checkPhase uses pgtest, directly or through
-  # aiida.manage.tests.pytest_fixtures, has to list `postgresql` in its own
-  # nativeCheckInputs.  Without it pgtest fails with "Could not find PostgreSQL
+  # checkPhase uses pgtest has to list `postgresql` in its own
+  # nativeCheckInputs.  That used to be most of the AiiDA plugins here, through
+  # the deprecated `aiida.manage.tests.pytest_fixtures`; upstream deleted that
+  # module and the thirteen moved to `aiida.tools.pytest_fixtures`, whose
+  # profile is core.sqlite_dos, so they need neither pgtest nor postgresql any
+  # more.  See ../aiida-cp2k.  Without it pgtest fails with "Could not find PostgreSQL
   # executables", because the paths it searches (/usr/lib/postgresql/*/bin and
   # friends) exist on no NixOS machine.
   #

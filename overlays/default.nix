@@ -1182,7 +1182,6 @@ in
           pgsu = pself.callPackage ../pkgs/pgsu { };
           pytray = pself.callPackage ../pkgs/pytray { };
           kiwipy = pself.callPackage ../pkgs/kiwipy { };
-          plumpy = pself.callPackage ../pkgs/plumpy { };
           upf-to-json = pself.callPackage ../pkgs/upf-to-json { };
           pgtest = pself.callPackage ../pkgs/pgtest { };
 
@@ -1347,7 +1346,6 @@ in
           aiida-phonopy = pself.callPackage ../pkgs/aiida-phonopy { };
           aiida-pythonjob = pself.callPackage ../pkgs/aiida-pythonjob { };
           aiida-restapi = pself.callPackage ../pkgs/aiida-restapi { };
-          aiida-shell = pself.callPackage ../pkgs/aiida-shell { };
           aiida-siesta = pself.callPackage ../pkgs/aiida-siesta { };
           aiida-submission-controller = pself.callPackage ../pkgs/aiida-submission-controller { };
           aiida-wannier90 = pself.callPackage ../pkgs/aiida-wannier90 { };
@@ -1391,7 +1389,6 @@ in
       aiida-phonopy
       aiida-pythonjob
       aiida-restapi
-      aiida-shell
       aiida-siesta
       aiida-submission-controller
       aiida-wannier90

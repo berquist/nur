@@ -1,0 +1,36 @@
+Regenerate two stale pytest-regressions fixtures
+
+Same root cause as ../aiida-orca/regen-stale-fixtures.patch: the already-staged
+fixture migration off `aiida.manage.tests.pytest_fixtures` moved this suite
+from `core.psql_dos` (PostgreSQL jsonb, which reorders an object's keys by
+byte length and then lexicographically) to `core.sqlite_dos` (plain JSON,
+which preserves insertion order).  `aiida_siesta/calculations/siesta.py`'s
+`for k, v in lua_parameters.get_dict().items():` loop, and the fdf writer's
+equivalent walk over the `optical` dict, both just emit whatever order
+`get_dict()` hands back — the plugin is unchanged and correct, these two
+recorded fixtures are stale.
+
+--- a/tests/calculations/test_siesta/test_lua.lua	2026-09-15 23:29:53.091705078 -0400
++++ b/tests/calculations/test_siesta/test_lua.lua	2026-09-15 23:29:53.109780860 -0400
+@@ -1,4 +1,4 @@
+ --- Lua script parameters 
++number_of_internal_images_in_path = 5
+ neb_spring_constant = 0.45
+ neb_image_file_prefix = "image-"
+-number_of_internal_images_in_path = 5
+--- a/tests/calculations/test_siesta/test_optical.fdf	2026-09-15 23:29:53.093705077 -0400
++++ b/tests/calculations/test_siesta/test_optical.fdf	2026-09-15 23:29:53.109850642 -0400
+@@ -25,11 +25,11 @@
+ %block opticalmesh 
+  1 1 1
+ %endblock optical-mesh
+-opticalcalculation True
++opticalpolarizationtype polarized
+ %block opticalvector 
+  1.0 0.0 0.0
+ %endblock optical-vector
+-opticalpolarizationtype polarized
++opticalcalculation True
+ #
+ # -- Structural Info follows
+ #

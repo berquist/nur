@@ -37,7 +37,7 @@ in
 
   # The overlaid 3.13 package set, exposed so that the twenty-odd dependencies
   # this repo carries but does not re-export at the top level — mdanalysis,
-  # griddataformats, lwreg, kiwipy, plumpy and the rest — have an attribute path
+  # griddataformats, lwreg, kiwipy and the rest — have an attribute path
   # something can point at:
   #
   #   nix run nixpkgs#nix-update -- --flake python313Packages.mdanalysis
@@ -212,7 +212,6 @@ in
     aiida-pythonjob
     aiida-quantumespresso
     aiida-restapi
-    aiida-shell
     aiida-siesta
     aiida-submission-controller
     aiida-testing
@@ -230,7 +229,6 @@ in
     node-graph-widget
     pgsu
     pgtest
-    plumpy
     postopus
     profilehooks
     pyfirecrest
