@@ -122,6 +122,12 @@ buildPythonPackage {
     tqdm
   ];
 
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
+
   # pytest-mpl registers the `mpl_image_compare` marker that 35 tests carry;
   # `--mpl` is deliberately not passed, so the plotting runs and the pixels go
   # uncompared.  Same decision as ../doped and ../matplotlib-label-lines.
@@ -129,8 +135,7 @@ buildPythonPackage {
   # **No pytest-xdist**, for the reason ../doped documents at length and this
   # suite shares: five of its eight modules `os.chdir`, `shutil.move` or
   # `shutil.rmtree` their way around the working tree, which parallel workers
-  # cannot survive.  Here it is known in advance rather than diagnosed from a
-  # wrecked build log.
+  # cannot survive.
   nativeCheckInputs = [
     pytestCheckHook
     pytest-mpl

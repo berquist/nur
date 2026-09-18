@@ -70,6 +70,12 @@ buildPythonPackage (finalAttrs: {
     scikit-image
   ];
 
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
+
   # The first build ran 38 passed / 8 failed / 11 errors.  All were missing
   # optional dependencies:
   #

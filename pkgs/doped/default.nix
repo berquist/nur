@@ -101,6 +101,12 @@ buildPythonPackage {
     vise
   ];
 
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
+
   # pytest-mpl registers the `mpl_image_compare` marker that 121 tests across
   # eight modules carry.  `--mpl` is deliberately not passed, so the plotting
   # runs and the pixels go uncompared; see ../matplotlib-label-lines for the

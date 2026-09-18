@@ -63,6 +63,12 @@ buildPythonPackage (finalAttrs: {
     typing-extensions
   ];
 
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
+
   # The suite is not run.  Every `tests/` module drives a live `MPRester`
   # against `api.materialsproject.org` and needs an API key — there is no
   # recorded-cassette layer.  Same shape as ../pubchempy.

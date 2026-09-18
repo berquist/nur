@@ -1,0 +1,37 @@
+Give each xdist worker its own scratch and results directory
+
+tests/core/conftest.py points every worker at one shared pair of directories:
+
+    TEST_RESULTS_DIR = Path(__file__).parent / "_test_results"
+    TEST_SCRATCH_DIR = Path(__file__).parent / "_test_scratch"
+
+and `pytest_sessionfinish` removes both with `rmtree`.  Under pytest-xdist each
+worker is its own session, so every worker runs that teardown — on directories
+the other workers are still writing into.  The result is a spray of failures on
+files that existed a moment earlier:
+
+    FileNotFoundError: .../_test_scratch/tmp-quacc-.../opt.log
+    FileNotFoundError: .../_test_results/symlink-tmp-quacc-...
+
+It is a race, so the count tracks machine speed rather than anything about the
+tests: the same tree gave 4 failures on a 209-second run and 37 on a 28-second
+one.
+
+Suffixing both paths with `PYTEST_XDIST_WORKER` isolates the workers from each
+other and leaves a serial run untouched, since the variable is absent and the
+suffix is empty.  `os` is already imported directly above.
+
+--- a/tests/core/conftest.py
++++ b/tests/core/conftest.py
+@@ -4,8 +4,9 @@
+ from pathlib import Path
+ from shutil import rmtree
+ 
+-TEST_RESULTS_DIR = Path(__file__).parent / "_test_results"
+-TEST_SCRATCH_DIR = Path(__file__).parent / "_test_scratch"
++_XDIST_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "")
++TEST_RESULTS_DIR = Path(__file__).parent / f"_test_results{_XDIST_WORKER}"
++TEST_SCRATCH_DIR = Path(__file__).parent / f"_test_scratch{_XDIST_WORKER}"
+ 
+ 
+ def pytest_sessionstart():

@@ -50,6 +50,24 @@ buildPythonPackage {
     hash = "sha256-Gf9jaYEieUPvMDhh2cvJz4ztlHXvPavt8CEixzYSggI=";
   };
 
+  # pydefect's Mpl plotters draw onto pyplot's *current* axes — none of them
+  # calls `plt.figure()` — and nothing in the suite ever closes a figure, so one
+  # test inherits whatever the last one left behind.  When that is
+  # `chem_pot_diag/cpd_plotter.py`'s three-dimensional diagram, the next
+  # plotting test dies on a message about marker sizes:
+  #
+  #   ValueError: s must be float, but has type object
+  #
+  # which is `Axes3D.scatter` forwarding its own `s=None` default to
+  # `Axes.scatter`, where a 2-D axes would have substituted the rcParam.  The
+  # failure is a 3-D axes receiving a 2-D plot, not anything about sizes.
+  #
+  # Order-dependent, so a lottery under the pytest-xdist this package uses —
+  # which test lands on which worker decides whether it fires at all.  The patch
+  # closes every figure after each test, which removes the shared state rather
+  # than the symptom.  See ../../.claude/worklog for the same shape in aiida.
+  patches = [ ./close-figures-between-tests.patch ];
+
   build-system = [ setuptools ];
 
   # `setup.py` reads requirements.txt, which names eight: numpy, monty,
@@ -85,6 +103,27 @@ buildPythonPackage {
     tabulate
     vise
   ];
+
+  # MPLCONFIGDIR as well as HOME, and that is not belt and braces: the HOME
+  # export alone did **not** hold here.  A build of this package still reported
+  #
+  #   mkdir -p failed for path /homeless-shelter/.config/matplotlib
+  #
+  # from pythonImportsCheckPhase, which runs long after `runHook preBuild` — so
+  # matplotlib was reading the sandbox's own HOME at that point, not the one set
+  # below.  Nothing in stdenv's setup or in any of the Python setup hooks
+  # between the two phases reassigns HOME, so why it did not carry is not
+  # established; what is established is that it did not.
+  #
+  # MPLCONFIGDIR is the variable matplotlib's own message asks for and the only
+  # one it consults before falling back to `Path.home()`, so it settles the
+  # question regardless.  The directory has to exist and be writable, hence the
+  # mkdir rather than a bare `env` attribute pointing somewhere in the store.
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
 
   # joblib is imported by the tests alone.  pytest-mock supplies the `mocker`
   # fixture, which sixty-nine of them want — the same omission ../vise's first

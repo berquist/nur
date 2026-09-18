@@ -137,6 +137,12 @@ buildPythonPackage (finalAttrs: {
     phonon3 = [ phono3py ];
   };
 
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
+
   # The suite is not run.  `tests/conftest.py` imports `matgl` at module scope
   # and its `matpes_calculator` fixture calls `matcalc.load_fp(...)`, which
   # downloads a model — and nearly every test needs a working calculator, so

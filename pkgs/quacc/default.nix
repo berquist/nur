@@ -48,6 +48,7 @@
 
   # tests
   pytestCheckHook,
+  pytest-xdist,
   pytest-asyncio,
   pytest-cov,
   openbabel-bindings,
@@ -61,7 +62,7 @@
 # ASE-native ones are optional extras and left out.
 buildPythonPackage (finalAttrs: {
   pname = "quacc";
-  version = "1.5.10-unstable-2026-09-02";
+  version = "1.5.11-unstable-2026-09-14";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -70,9 +71,27 @@ buildPythonPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "Quantum-Accelerators";
     repo = "quacc";
-    rev = "1e7a229b87d189d26c5577cfafc47302b521ac18";
-    hash = "sha256-amzPB23yaYAlT2tQBtDnBqzghiLItaqLhQoIiAAtEhs=";
+    rev = "cc8c370236e2f35ba29e512e19111e0210ec1515";
+    hash = "sha256-8FvemnsEWVIIWL98VxV1PK/dzJA8kuDxInf4fYGGDvo=";
   };
+
+  # This suite runs under `--numprocesses`, and tests/core/conftest.py points
+  # every worker at one shared `_test_results` / `_test_scratch` pair that its
+  # `pytest_sessionfinish` then rmtrees.  Each xdist worker is its own session,
+  # so every one of them runs that teardown on directories the others are still
+  # writing into, and the suite sprays FileNotFoundError over files that existed
+  # a moment earlier.  A race, so the count tracks machine speed rather than
+  # anything here — 4 failures on a 209-second run, 37 on a 28-second one.
+  #
+  # Per-worker directories rather than dropping xdist: parallelism is the reason
+  # it was turned on.  ../aiida-core takes the same way out for its per-worker
+  # PostgreSQL role and port; ../fireworks and ../doped take the other one and
+  # refuse xdist outright, which here would give back the time it bought.
+  #
+  # A patch file rather than `postPatch`, because the replacement is Python
+  # carrying both quote characters and a Nix indented string has no comfortable
+  # spelling for that — see ../aiida-workgraph for the same call.
+  patches = [ ./per-worker-test-dirs.patch ];
 
   # `version` is a plain string in pyproject.toml.
   build-system = [ setuptools ];
@@ -174,6 +193,12 @@ buildPythonPackage (finalAttrs: {
     typer
   ];
 
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
+
   # The espresso suite brings its own MPI, and it should not.  Its conftest
   # declares an autouse fixture that sets `ESPRESSO_PARALLEL_CMD` to
   # `mpirun -np 2` whenever `mpirun` is on PATH and the machine reports two
@@ -188,6 +213,34 @@ buildPythonPackage (finalAttrs: {
   postPatch = ''
     substituteInPlace tests/core/recipes/espresso_recipes/conftest.py \
       --replace-fail 'which("mpirun") and psutil.cpu_count(logical=False) >= 2' 'False'
+
+    # `test_aqcat25_magnetic_initialization` calls ASE's `set_magmom` with six
+    # positional arguments.  It takes five:
+    #
+    #   def set_magmom(ispin, spinpol, atoms, magmom_input, sorting)
+    #
+    # and it takes five in nixpkgs' 3.29.0 *and* in the 3.28.0 still in this
+    # store, so this is not version skew that a different ASE would satisfy —
+    # quacc declares `ase>=3.27.0` and the call matches nothing in that range.
+    # It arrived with the recipe itself, in upstream's "Aqcat25 static recipe"
+    # (#3481), so it has never run against the ASE it asks for.
+    #
+    # The first five arguments bind correctly as written — ispin=2, spinpol=True,
+    # the atoms, the magmom list, sorting=[0, 1, 2] — so dropping the trailing
+    # `False` is the whole fix, and the assertion that follows still checks the
+    # MAGMOM line it was written to check.  Four tests.
+    #
+    # Note the indentation of the two blocks below.  A Nix indented string
+    # strips the common leading whitespace from every line it contains, so each
+    # continuation line is written four columns deeper than the Python it has to
+    # match.  ../plumpy/default.nix has the long form of that trap.
+    substituteInPlace tests/core/recipes/vasp_recipes/mocked/test_vasp_recipes.py \
+      --replace-fail \
+        '            [0, 1, 2],
+                False,
+            )' \
+        '            [0, 1, 2],
+            )'
   '';
 
   # The whole of upstream's own `testpaths`, less what is named below.  It was
@@ -362,6 +415,7 @@ buildPythonPackage (finalAttrs: {
   # this input drags `mpirun` in behind it.
   nativeCheckInputs = [
     pytestCheckHook
+    pytest-xdist
     pytest-asyncio
     pytest-cov
     openbabel-bindings
