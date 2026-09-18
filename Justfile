@@ -294,6 +294,23 @@ build-flake pkg:
 demux-log +args:
     ./scripts/demux-build-log.sh {{ args }}
 
+# The other half of the same job.  `demux-log` untangles what a run printed;
+# this fetches what it did not — a `--keep-going` build that loses a dozen
+# derivations ends with a dozen `nix log /nix/store/…` lines, each a separate
+# command with a hash in it nobody can type:
+#
+#   just ci-build 2>&1 | tee log_ci
+#   just build-logs log_ci         # one log- file per failed derivation
+#   just build-logs -n log_ci      # print the commands instead
+#
+# `*args` rather than `+args`, because the script reads stdin with no argument:
+# `just ci-build 2>&1 | just build-logs` works too, at the cost of not keeping
+# the log itself.  Needs a nix-daemon, unlike demux-log.
+
+# Fetch the build log of every derivation a failed run pointed at.
+build-logs *args:
+    ./scripts/fetch-build-logs.sh {{ args }}
+
 # Builds qcportal against a channel's *default* interpreter rather than the
 # python313 the repo pins.
 #
