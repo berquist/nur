@@ -320,11 +320,11 @@ buildPythonPackage (finalAttrs: {
     # own cache warnings are the same problem, and are the easier tell.
     chmod -R u+w .
 
-    # min(8, NIX_BUILD_CORES); see dontUsePytestXdist above for why this is not
+    # min(2, NIX_BUILD_CORES); see dontUsePytestXdist above for why this is not
     # simply an entry in pytestFlags.  NIX_BUILD_CORES can be 0, meaning "all",
     # in which case the cap is the whole answer.
-    workers=8
-    if [ "''${NIX_BUILD_CORES:-0}" -gt 0 ] && [ "$NIX_BUILD_CORES" -lt 8 ]; then
+    workers=2
+    if [ "''${NIX_BUILD_CORES:-0}" -gt 0 ] && [ "$NIX_BUILD_CORES" -lt "$workers" ]; then
       workers="$NIX_BUILD_CORES"
     fi
     echo "pytest-xdist: $workers workers (NIX_BUILD_CORES=''${NIX_BUILD_CORES:-unset})"
