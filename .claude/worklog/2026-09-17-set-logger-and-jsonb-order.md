@@ -107,11 +107,17 @@ in a test that asserts on outputs, and the way to tell them apart is whether the
 timed out.** `test_failed_node`'s `exit_status is None` is the cleanest single confirmation: an
 excepted process has no exit status, a failed one has 302.
 
-Expect this to reveal the next layer. The two CLI race tests that `await-daemon-adoption.patch`
-exists for cannot be reached at all while submission is broken, so that patch is untested against
-this aiida-core. The `--numprocesses` note above `patches` — the one about 32 workers failing and
-128 passing — no longer describes the current failures; it was left in place and cross-referenced
-rather than rewritten, because re-measuring it needs a build.
+The expectation here was that the fix would reveal the next layer, as it usually does in this
+repo — the two CLI race tests that `await-daemon-adoption.patch` exists for could not be reached
+at all while submission was broken, leaving that patch untested against this aiida-core. **It did
+not.** The build passed with the one rewrite, at `--numprocesses=32`, which means
+`await-daemon-adoption.patch` is now exercised and holding: the race it guards is real, and the
+guard works at the worker count that used to lose it.
+
+That also settles the `--numprocesses` note above `patches`, the one about 32 workers failing and
+128 passing. It was left in place and cross-referenced rather than rewritten, on the grounds that
+re-measuring needed a build; the build has now happened and the two tests it describes pass at 32.
+The note is history rather than live behaviour, and should be read as the reason the patch exists.
 
 ### aiida-psi4: jsonb key order, not qcelemental
 
@@ -154,26 +160,38 @@ built store path: md5 over `sorted(Path('.').glob('**/*'))`, each file contribut
 and the mock binary's abspath. That is what makes the working directory's *byte* content, not its
 semantics, the thing the digest is over.
 
-### What was verified, and what was not
+### What was verified
 
-`just check-no-daemon` passes and both files are nixfmt-clean. Neither check phase was run: the
-sandbox blocks `socket(AF_UNIX)`, so `nix build` fails with `cannot create Unix domain socket`
-before it starts.
+**Both packages build.** `just build aiida-workgraph && just build aiida-psi4`, run by the user
+outside the sandbox after the diagnosis, both green — so both check phases pass in full, including
+the eleven workgraph tests and psi4's `example_01`, and the recovered `24adc79085d1b8f0d854137ffa8076e6`
+digest does hit.
+
+Nothing in this session could establish that from inside the sandbox. `socket(AF_UNIX)` is blocked,
+so `nix build` fails with `cannot create Unix domain socket` before it starts; what was reachable
+was `just check-no-daemon` (passes), `nixfmt --check` (clean), and `scripts/sandbox-eval.sh`.
 
 To compensate, both evaluated `postPatch` scripts were replayed against the real upstream trees in
 `wc/` under a twelve-line `substituteInPlace` shim that reproduces `--replace-fail`'s
-pattern-not-found abort. Every anchor matched and every patched module parses under `ast.parse`.
-That does not prove the tests pass, but it does rule out the failure mode that would otherwise
-waste a whole build — a stale anchor aborting `patchPhase`.
+pattern-not-found abort. Every anchor matched and every patched module parsed under `ast.parse`.
+That could not prove the tests pass — the builds did that afterwards — but it ruled out the failure
+mode that would otherwise have wasted a whole build, a stale anchor aborting `patchPhase`.
+
+The psi4 fix had a second offline check worth repeating for this class of problem: the *expected*
+`input.json` was reconstructed with the store's own qcelemental 0.50.4 and diffed against the
+recorded fixture, confirming before any build that the only remaining differences were the three
+already accounted for. An md5 digest is unguessable, but the bytes it is taken over are not.
 
 ## Follow-ups
 
-- **Neither fix has been built.** `just build aiida-workgraph && just build aiida-psi4` is the
-  outstanding confirmation. Expect workgraph's two CLI race tests to reappear once submission
-  works, since they have not run against this aiida-core.
-- **The `--numprocesses` note in `pkgs/aiida-workgraph/default.nix` is stale** as an account of
-  current failures. Once a build gets past the `_set_logger` fix, re-measure whether the 32-vs-128
-  behaviour it describes still holds, and rewrite or delete it.
+- **`log_ci_matrix`'s remaining legs have not been run.** Both packages build on
+  `nixpkgs-unstable`, which is where they failed; `nixos-26.05` and the third leg stopped at the
+  first failure and have not been reached since. `just ci-matrix` is the outstanding confirmation,
+  not these two packages.
+- **The `--numprocesses` note in `pkgs/aiida-workgraph/default.nix` now describes history.** Its
+  two CLI tests pass at 32 workers because `await-daemon-adoption.patch` fixes the race; the note
+  is the reason that patch exists, not a live symptom. Worth a sentence saying so the next time
+  that file is edited — not worth a commit of its own.
 - **Capturing repeated commands** — a new one, and a third instance of an old one:
   - *New.* Replaying an evaluated `postPatch` against its `wc/` clone under a `substituteInPlace`
     shim was invented this session and used for both packages. It catches a dead `--replace-fail`
