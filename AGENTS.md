@@ -8,16 +8,22 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 `nur-packages-template`. It holds five unrelated bodies of work:
 
 - the **QCArchive/QCFractal ecosystem** — Python packages (`qcportal`, `qcfractal`,
-  `qcfractalcompute`, `qcarchivetesting`, `parsl`) plus two NixOS service modules.
+  `qcfractalcompute`, `qcarchivetesting`, `parsl`) plus two NixOS service modules. Two more
+  packages, `qcelemental` and `qcengine`, are guarded backports rather than ours: nixpkgs has
+  both, but 26.05 ships a release *candidate* of each — below the floors `qcportal` and
+  `qcfractalcompute` declare. See the `internalPackages` note below for the shape, which they
+  share with `monty` and `pycifrw`, and the `newEnough` binding in `overlays/default.nix` for
+  why a candidate needs a gate that `lib.versionAtLeast` cannot express.
 - the **AiiDA ecosystem** — `aiida-core`, twenty plugins, the thirty-odd dependencies of those
   that nixpkgs does not carry, and one NixOS service module. Six wrap a quantum chemistry or
   materials program (`aiida-cp2k`, `aiida-gaussian`, `aiida-orca`, `aiida-octopus`,
   `aiida-psi4`, `aiida-quantumespresso`); six more wrap another simulation code (`aiida-ase`,
   `aiida-gromacs`, `aiida-lammps`, `aiida-nwchem`, `aiida-siesta`, `aiida-wannier90`); two
   build workflows on top of those (`aiida-phonopy`, `aiida-wannier90-workflows`); and six are
-  infrastructure rather than a wrapper — `aiida-shell`, which runs an arbitrary command under
-  provenance and so reaches the ~60 programs already in `pkgs.qchem.*` without a plugin each,
-  `aiida-pythonjob` and `aiida-workgraph`, which do the same for Python functions and for whole
+  infrastructure rather than a wrapper.  Running an arbitrary command under provenance — which
+  reaches the ~60 programs already in `pkgs.qchem.*` without a plugin each — used to be
+  `aiida-shell`; aiida-core absorbed that distribution, so it is `aiida.tools.shell` now and the
+  package is gone.  `aiida-pythonjob` and `aiida-workgraph` do the same for Python functions and for whole
   graphs of them, `aiida-submission-controller`, `aiida-restapi`, and `aiida-firecrest`, whose
   transport runs jobs through a FirecREST endpoint rather than over SSH.
   That module offers both of aiida-core's read-write storage plugins: `core.psql_dos` by
@@ -161,6 +167,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
 | How do I evaluate one expression from inside the sandbox, without running the whole suite? | `scripts/sandbox-eval.sh` (the header comment), `just eval` |
 | How do I find *every* attribute that will not evaluate on a channel, rather than one per CI round? | `scripts/channel-gaps.sh` (the header comment), `just channel-gaps` |
+| How do I collect the build logs a failed `--keep-going` run pointed at, without retyping a dozen store hashes? | `scripts/fetch-build-logs.sh` (the header comment), `just build-logs` |
+| Why does that script put the store hash at the *end* of each filename? | `scripts/fetch-build-logs.sh` (the header comment, and `log_name_of`) |
 | Why does that script force each attribute in its own process instead of reading `functionArgs`? | `scripts/channel-gaps.sh` (the header comment), `scripts/channel-gaps.nix` |
 | Why does it skip `drvPath` on broken and unfree packages, and still force `meta.broken`? | `scripts/channel-gaps.nix` (the note above `force`) |
 | Why does a green check here mean nothing if `<nixpkgs>` came from the flake registry? | `scripts/locked-nixpkgs.sh` (the header comment) |
@@ -173,6 +181,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does one `aiida-workgraph` test gain a daemon fixture and another a longer timeout? | `pkgs/aiida-workgraph/default.nix` (the note above `postPatch`) |
 | Why do two `aiida-workgraph` CLI tests fail at 32 xdist workers and pass at 128? | `pkgs/aiida-workgraph/default.nix` (the note above `patches`), `pkgs/aiida-workgraph/await-daemon-adoption.patch` |
 | Why does `aiida-workgraph` raise `daemon.timeout` to 30, and why on the profile rather than globally? | `pkgs/aiida-workgraph/default.nix` (the last note above `postPatch`) |
+| Why did one renamed method break every `aiida-workgraph` test that submits, and none that runs? | `pkgs/aiida-workgraph/default.nix` (the `_set_logger` note in `postPatch`) |
+| How do I tell an *excepted* process from one no daemon worker ever adopted? | `pkgs/aiida-workgraph/default.nix` (the same note) |
 | Why are `aiida-phonopy`'s two workflow tests deselected when the rest of its suite runs? | `pkgs/aiida-phonopy/default.nix` (`disabledTestPaths`) |
 | Why is `aiida-phonopy`'s `phonopy~=4.0` relaxed, and what does 26.05's phonopy 3.5.1 still get wrong? | `pkgs/aiida-phonopy/default.nix` (`pythonRelaxDeps`) |
 | Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
@@ -192,7 +202,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Where does a package's update mode come from, and how do I declare one that is pinned? | `scripts/update-universe.nix`, `pkgs/lobsterpy/default.nix` (`passthru.updatePolicy`) |
 | Why is `nix-update` pointed at `default.nix` rather than at the flake, and which four attributes did that fix? | `scripts/update-packages.sh` (the header), `docs/version-updates.md` (§3) |
 | Why does a scan download nothing, when it has to rewrite a hash to learn anything? | `scripts/update-packages.sh` (the `--no-src` note in `nix_update_argv`) |
-| Why is `--jobs` refused outside scan mode, and what happens if two attributes share a file? | `scripts/update-packages.sh` (the header, `shared_positions`) |
+| Which two pieces of updater state cannot be raced, and what happens if two attributes share a file? | `scripts/update-packages.sh` (the header, `shared_positions`), `docs/version-updates.md` (§5) |
+| Why does the apply path take `--jobs` but never default above one worker? | `scripts/update-packages.sh` (the header, `parse_args`), `Justfile` (`update-from-scan`) |
+| Why does `prek` move to the end of the run under `--jobs>1`, when `nixfmt` does not? | `scripts/update-packages.sh` (`tidy`, `tidy_all`) |
+| Where does the per-package progress line come from, when nix-update's own output is captured? | `scripts/update-packages.sh` (`progress`, `finished_status`) |
 | Why does a bump get rejected when its *version* goes backwards, and why was the date check not enough? | `scripts/update-packages.sh` (`version_regression`), `docs/version-updates.md` (§4) |
 | Why do `0.12.dev20260807 -> 0.12` and `0.11.0-rc1 -> 0.10.4` get opposite answers from that guard? | `scripts/update-packages.sh` (`version_prefix`) |
 | Why do the four fairchem packages each declare a `versionRegex`, and why does it matter in branch mode? | `pkgs/fairchem-core/default.nix` and `pkgs/fairchem-data-oc/default.nix` (`passthru.updatePolicy.versionRegex`) |
@@ -229,10 +242,17 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does MDAnalysis run no tests, and why is that not `doCheck = false`? | `pkgs/mdanalysis/default.nix` (the note above `pythonImportsCheck`) |
 | Why does the AiiDA eval suite need a second, broken-allowing package set? | `tests/aiida/default.nix` (`brokenPkgs`) |
 | Why do eight packages come from a git tag rather than PyPI? | `pkgs/kiwipy/default.nix` (the `src` comment) |
-| Why does `aiida-shell` rewrite its conftest's broker to `core.zeromq`? | `pkgs/aiida-shell/default.nix` (`postPatch`) |
-| Why does `aiida-shell` need `which` when two of its three path rewrites are absolute? | `pkgs/aiida-shell/default.nix` (`nativeCheckInputs`) |
-| Why does the `aiida-shell` VM test run two jobs, and why does one of them exist only to be boring? | `tests/aiida/vm.nix` (`plugin-shell`) |
+| Why is there no `aiida-shell` package any more, and where did its five names go? | `pkgs/aiida-workgraph/default.nix` (the note above `postPatch`), `pkgs/aiida-core/default.nix` (the vendored-shell note) |
+| Why does the shell VM test install no plugin at all now? | `tests/aiida/vm.nix` (`plugin-shell`) |
+| Why does the shell VM test run two jobs, and why does one of them exist only to be boring? | `tests/aiida/vm.nix` (`plugin-shell`) |
 | Why does that test put `which` and `xtb` on *both* `systemPackages` and `extraPackages`? | `tests/aiida/vm.nix` (the `environment.systemPackages` note in `plugin-shell`) |
+| Why did migrating to `aiida.tools.pytest_fixtures` need more than the module path? | `pkgs/aiida-diff/default.nix` (the note above `postPatch`) |
+| What replaced `aiida_local_code_factory`, and why can a bare executable name still be passed? | `pkgs/aiida-diff/default.nix` (the same note) |
+| Why does `aiida-lammps` convert its code-factory calls to keywords rather than leaving them positional? | `pkgs/aiida-lammps/default.nix` (the note above its fixture hunks) |
+| Why do three plugins import plumpy through `aiida.` rather than declaring the standalone package? | `pkgs/aiida-optimize/default.nix` (the note above its plumpy hunk) |
+| Why was `aiida-gaussian-datatypes` missed by the first migration pass? | `pkgs/aiida-gaussian-datatypes/default.nix` (the note above `postPatch`) |
+| Why does `aiida-pseudo` drop `load_profile=True` from its profile parameter type? | `pkgs/aiida-pseudo/default.nix` (the note above `postPatch`) |
+| Why does `quacc` delete one argument from an ASE call rather than deselect four tests? | `pkgs/quacc/default.nix` (the `set_magmom` note in `postPatch`) |
 | Why is `gpaw` deliberately *not* a check input of `aiida-ase`? | `pkgs/aiida-ase/default.nix` (`pythonImportsCheck`) |
 | Why does `aiida-nwchem` take `ase`, `pymatgen`, `seekpath` and `spglib` as check inputs? | `pkgs/aiida-nwchem/default.nix` (`nativeCheckInputs`) |
 | Why does `aiida-nwchem` ask for two MPI ranks when its tests run one water molecule? | `pkgs/aiida-nwchem/default.nix` (`postPatch`) |
@@ -264,6 +284,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `sisl` set `dontUseCmakeConfigure` while still listing `cmake`? | `pkgs/sisl/default.nix` (`nativeBuildInputs`) |
 | Why is `aiida-optimize`'s license a two-entry list, and what is the GPLv3 mention about? | `pkgs/aiida-optimize/default.nix` (`meta.license`) |
 | Why is `pycifrw` carried here when nixpkgs has one, and when should it be deleted? | `pkgs/pycifrw/default.nix` (the header), `overlays/default.nix` (the `pycifrw` binding) |
+| Why is `qcelemental` carried here when nixpkgs has one, and why can qcportal's floor not be relaxed? | `pkgs/qcelemental/default.nix` (the header), `overlays/default.nix` (the `qcelemental` binding) |
+| Why is `qcengine` carried here too, when the channel's version looks like it meets the floor? | `pkgs/qcengine/default.nix` (the header), `overlays/default.nix` (the `newEnough` binding) |
+| Why can a version gate here not be `lib.versionAtLeast` alone, and which package proved it? | `overlays/default.nix` (the `newEnough` binding in the qcfractal overlay) |
+| What catches a channel whose `qcelemental` or `qcengine` is too old, before a full build does? | `tests/qcarchive/default.nix` (`overlay-molssi-floors-satisfied`) |
 | Why are the two `mosquito` overrides guarded, and why does 26.05 not need them? | `overlays/default.nix` (the `hasMetadataCheck` binding in the `aiida` extension) |
 | Why do the two cp2k-\*-tools packages rewrite their build backend? | `pkgs/cp2k-output-tools/default.nix` (`postPatch`) |
 | Why does `mrcfile` patch eight `.dtype` assignments instead of pinning NumPy? | `pkgs/mrcfile/default.nix` (`postPatch`) |
@@ -277,6 +301,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does the daemon unit put `bash` and `procps` on its PATH, when NixOS already supplies coreutils? | `nixos-modules/aiida.nix` (`path` on `systemd.services.aiida-daemon`) |
 | Why does `plumpy` catch one more exception than upstream, and what does RabbitMQ 4 have to do with it? | `pkgs/plumpy/default.nix` (`postPatch`) |
 | Why does `Process.spec()` build into a local and move `__called` onto the spec, and why did a lock not do? | `pkgs/plumpy/default.nix` (the shared-state note above `postPatch`) |
+| Why are both of those patches *also* in `aiida-core`, against a different file? | `pkgs/aiida-core/default.nix` (the vendored-plumpy note in `postPatch`), `pkgs/plumpy/default.nix` (the header of `postPatch`) |
+| Why do `plumpy` and `kiwipy` no longer appear in `aiida-core`'s `dependencies`, and what replaced them? | `pkgs/aiida-core/default.nix` (the note above `dependencies`) |
 | Why does aiida-core want `procps`, `rsync` and `vim` as check inputs? | `pkgs/aiida-core/default.nix` (`nativeCheckInputs`) |
 | What does relaxing aiida-core's `click<8.3` cost, and why patch the library? | `pkgs/aiida-core/default.nix` (the comment above `postPatch`) |
 | Why are thirteen `test_remote.py` size-on-disk tests deselected on this machine? | `pkgs/aiida-core/default.nix` (the ZFS note in `pytestFlags`) |
@@ -284,6 +310,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `PostgresCluster` pin its port to the xdist worker index, and why does `_close` still tolerate a postmaster that was never running? | `pkgs/aiida-core/default.nix` (the `_create`/`_close` note above `postPatch`) |
 | Why is the pinned port base 21000 rather than 45000, and what did the old comment get wrong? | `pkgs/aiida-core/default.nix` (the ephemeral-range note above `postPatch`) |
 | Why do two group tests have `aiida_profile_clean` injected when upstream never asks for it? | `pkgs/aiida-core/default.nix` (the group-table note above `postPatch`) |
+| Why did thirteen plugins move off `aiida.manage.tests.pytest_fixtures`, and why did pgtest and postgresql leave with it? | `pkgs/aiida-cp2k/default.nix` (the note above `postPatch`), `pkgs/aiida-core/default.nix` (the deprecated-plugin note) |
+| Why is only the module path rewritten rather than the whole `pytest_plugins` line? | `pkgs/aiida-cp2k/default.nix` (the same note) |
+| Why is `aiida-gaussian` the one of the thirteen whose conftest could not be checked first? | `pkgs/aiida-gaussian/default.nix` (the note above `postPatch`) |
+| Why does aiida-core relax `flit_core >=4.0.2` when nixpkgs has 3.12.0, and why can `pythonRelaxDeps` not do it? | `pkgs/aiida-core/default.nix` (the note above the second `pyproject.toml` hunk) |
 | Why does `test_backup` need `aiida_profile_clean` when the test before it cleans already? | `pkgs/aiida-core/default.nix` (the `test_backup` note above `postPatch`) |
 | Why does one parser test call `spec()` before rebinding `define`, when nothing reads it? | `pkgs/aiida-core/default.nix` (the `test_parser.py` note above `postPatch`) |
 | Why does one repository test read its isolated stream inside the `with` block? | `pkgs/aiida-core/default.nix` (the `test_repository.py` note above `postPatch`) |
@@ -298,6 +328,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `aiida-testing` rewrite `collections.Iterable`, and what still blocks `test_diff.py`? | `pkgs/aiida-testing/default.nix` (`postPatch`, `nativeCheckInputs`) |
 | Why do the recorded `mock-*` fixture directories get renamed, and how do I get the new digests? | `pkgs/aiida-testing/default.nix` and `pkgs/aiida-psi4/default.nix` (the notes above `postPatch`) |
 | Why does `example_01` overwrite two `provenance.version` strings, and why only those? | `pkgs/aiida-psi4/default.nix` (the example_01 note above `postPatch`) |
+| Why does `example_01` sort its dict by key *byte length* before storing it, and what does the storage backend have to do with a checksum? | `pkgs/aiida-psi4/default.nix` (the `jsonb_order` note above `postPatch`) |
+| Why is `example_02` the control that says a stale digest is the key order and nothing else? | `pkgs/aiida-psi4/default.nix` (the same note) |
 | Why does `aiida-psi4` stop setting `codeinfo.withmpi`? | `pkgs/aiida-psi4/default.nix` (the note above `postPatch`) |
 | Why are the per-worker role, port and `_close` fixes applied to *two* fixture modules? | `pkgs/aiida-core/default.nix` (the deprecated-plugin note above `postPatch`) |
 | Why does `aiida-cp2k` need `procps` when the failure is `assert 303 == 0`? | `pkgs/aiida-cp2k/default.nix` (`nativeCheckInputs`) |
@@ -547,7 +579,7 @@ is reserved in `overlay.nix` alone**. Being skipped by `ci.nix` is what the pred
 for, and skipping that one would defeat its whole purpose; both files carry the reasoning at
 their own copy.
 
-**Every package this repository defines is a top-level attribute**, with five named exceptions.
+**Every package this repository defines is a top-level attribute**, with seven named exceptions.
 That is the rule, and the reason for it is that being top-level is what makes `ci.nix` build a
 package in its own right: a package nothing builds is a package nobody finds out is broken.
 `pkgs/sevenn` sat green-by-omission for months because it was reachable only through an
@@ -557,11 +589,11 @@ package in its own right: a package nothing builds is a package nobody finds out
 **two**, and only because their names are already taken at the top level by different derivations:
 `chemfiles` (the C++ library) and `trexio` (nixpkgs' C library), both of which
 `tests/chemtools/default.nix` asserts. It still carries `recurseIntoAttrs`, which is exactly what
-`python313Packages` below must not. Three more packages are outside the rule for reasons that are
+`python313Packages` below must not. Five more packages are outside the rule for reasons that are
 not collisions, and stay reachable as `python313Packages.<name>`: `tensorpotential` (unfree, and
-`just ci-eval` forces `drvPath` over everything it can reach) and the guarded backports `monty`
-and `pycifrw` (nixpkgs' own derivations on a new enough channel, which CI has no business
-building as ours). See the note at the attribute itself.
+`just ci-eval` forces `drvPath` over everything it can reach) and the guarded backports `monty`,
+`pycifrw`, `qcelemental` and `qcengine` (nixpkgs' own derivations on a new enough channel, which
+CI has no business building as ours). See the note at the attribute itself.
 
 `scripts/update-universe.nix` is what keeps this honest: it reads `pkgs/` with `builtins.readDir`
 and fails if any directory has no attribute path. That check is what found `graphrc`, which was
@@ -592,7 +624,7 @@ new package needs:
 **All three steps, for every package.** They used to be "steps 2 and 3 are for public packages
 only", and the dependencies carried for one dependant each — `kiwipy`, `plumpy`,
 `disk-objectstore`, `pgsu`, `mdanalysis`, `colour-science`, `lwreg` and the rest — stopped at step
-1. They no longer do; see the `internalPackages` note above for why, and for the five packages
+1. They no longer do; see the `internalPackages` note above for why, and for the seven packages
 that still stop short. `tests/aiida/default.nix` spells out the public AiiDA list in
 `exportedPackages`, a fourth hand-written copy that exists so the other three cannot drift apart
 silently.

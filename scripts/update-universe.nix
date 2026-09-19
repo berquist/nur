@@ -77,15 +77,18 @@ let
     lib.filterAttrs (_: lib.isDerivation) nur.internalPackages
   );
 
-  # The five packages ../default.nix names but does not expose at the top level,
-  # each for a reason given at its own note there.  Spelled out rather than
-  # discovered, because the whole 3.13 set cannot be enumerated and these are
-  # bounded: two name collisions, one unfree package, and two guarded backports.
+  # The seven packages ../default.nix names but does not expose at the top
+  # level, each for a reason given at its own note there.  Spelled out rather
+  # than discovered, because the whole 3.13 set cannot be enumerated and these
+  # are bounded: two name collisions, one unfree package, and four guarded
+  # backports.
   extras = {
     "internalPackages.chemfiles" = nur.internalPackages.chemfiles;
     "internalPackages.trexio" = nur.internalPackages.trexio;
     "python313Packages.monty" = nur.python313Packages.monty;
     "python313Packages.pycifrw" = nur.python313Packages.pycifrw;
+    "python313Packages.qcelemental" = nur.python313Packages.qcelemental;
+    "python313Packages.qcengine" = nur.python313Packages.qcengine;
     "python313Packages.tensorpotential" = nur.python313Packages.tensorpotential;
     # Reachable as `nix build .#graphrc` only — see ../flake.nix.
     inherit (pkgs') graphrc;
@@ -173,9 +176,10 @@ let
       # `external` overrides a declared mode as well as the inferred one, and
       # has to: the attribute resolves to a derivation defined outside ../pkgs,
       # so the file `nix-update` would rewrite is nixpkgs' own — in the store,
-      # and not ours to touch.  `pycifrw` and `monty` are the guarded backports
-      # this is for; on a channel new enough to carry them, ../overlays leaves
-      # nixpkgs' derivation in place and there is nothing here to update.
+      # and not ours to touch.  `pycifrw`, `monty`, `qcelemental` and `qcengine`
+      # are the guarded backports this is for; on a channel new enough to carry
+      # them, ../overlays leaves nixpkgs' derivation in place and there is
+      # nothing here to update.
       mode = if directory == null then "external" else declared.mode or inferred;
       inferredMode = inferred;
       declaredMode = declared.mode or null;
@@ -220,10 +224,10 @@ let
 
   # A directory whose package *is* reachable, but whose attribute resolves to
   # nixpkgs' derivation rather than ours.  That is the guarded backport working
-  # as designed — ../pkgs/monty and ../pkgs/pycifrw both say so at their headers
-  # — and it must not be confused with a directory nothing can reach.  Matched
-  # on the attribute's last component, which is the distribution name and so the
-  # directory name too.
+  # as designed — ../pkgs/monty, ../pkgs/pycifrw, ../pkgs/qcelemental and
+  # ../pkgs/qcengine all say so at their headers — and it must not be confused
+  # with a directory nothing can reach.  Matched on the attribute's last
+  # component, which is the distribution name and so the directory name too.
   shadowed = lib.unique (
     builtins.filter (d: builtins.elem d onDisk) (
       map (e: lib.last (lib.splitString "." e.attr)) externalEntries

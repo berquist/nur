@@ -45,7 +45,7 @@
 
 buildPythonPackage rec {
   pname = "parsl";
-  version = "2026.7.27";
+  version = "2026.9.7";
   pyproject = true;
 
   disabled = pythonOlder "3.10";
@@ -64,7 +64,7 @@ buildPythonPackage rec {
   # so a bump is now an ordinary version rewrite.
   src = fetchPypi {
     inherit pname version;
-    hash = "sha256-ox4ynnCLBb6oN9zd+WR+k3iFFPByR20+mvb0C+BNbH4=";
+    hash = "sha256-zDKJAUKJX/lznuUF1VaDloEfv3MIxQsavhCw/sWqolk=";
   };
 
   # parsl/tests/conftest.py still declares pytest_ignore_collect with the

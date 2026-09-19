@@ -18,14 +18,10 @@
   pytestCheckHook,
   pytest-regressions,
   pytest-timeout,
-  pgtest,
-  postgresql,
   ase,
   pymatgen,
   lammps,
   coreutils,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -105,6 +101,38 @@ buildPythonPackage rec {
   # multi-line replacement in a Nix `''` string has its indentation rewritten
   # by the dedent.
   postPatch = ''
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    substituteInPlace conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
+      --replace-fail 'aiida_profile.clear_profile()' 'aiida_profile.reset_storage()'
+
+    # The dropped fixtures; see ../aiida-diff.  This package is the one that
+    # calls the factory *positionally* — `(entry_point, executable)` — and the
+    # replacement's positional order is `(label, description, ...)`, so passing
+    # them through unchanged would have built a code labelled "lammps.base" with
+    # the default /bin/bash executable and no plugin.  Keywords rather than a
+    # reorder, so that is not a question anyone has to ask again.
+    substituteInPlace tests/test_calculations.py \
+      --replace-fail 'aiida_local_code_factory,' 'aiida_code_installed,' \
+      --replace-fail \
+        'aiida_local_code_factory("lammps.base", "bash")' \
+        'aiida_code_installed(default_calc_job_plugin="lammps.base", filepath_executable="bash")'
+
+    substituteInPlace tests/calculations/test_raw.py \
+      --replace-fail 'aiida_local_code_factory):' 'aiida_code_installed):' \
+      --replace-fail \
+        'aiida_local_code_factory("lammps.raw", "bash")' \
+        'aiida_code_installed(default_calc_job_plugin="lammps.raw", filepath_executable="bash")'
+
+    # See ../aiida-optimize for why the standalone plumpy is not the answer.
+    # `ProcessState` is an Enum, so two copies would compare unequal member for
+    # member — the quiet version of the same problem.
+    substituteInPlace tests/test_workflows.py \
+      --replace-fail \
+        'from plumpy import ProcessState' \
+        'from aiida.common.processes import ProcessState'
+
     substituteInPlace conftest.py \
       --replace-fail '"/bin/true"' '"${coreutils}/bin/true"'
 
@@ -115,10 +143,6 @@ buildPythonPackage rec {
     substituteInPlace src/aiida_lammps/validation/schemas/lammps_schema.json \
       --replace-fail '"id": "#root",' \
         '"$schema": "http://json-schema.org/draft-07/schema#", "id": "#root",'
-  '';
-
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
   '';
 
   # nixpkgs installs the LAMMPS executable as `lmp`, with `lmp_serial` beside
@@ -174,13 +198,6 @@ buildPythonPackage rec {
     pytestCheckHook
     pytest-regressions
     pytest-timeout
-
-    # conftest.py names `aiida.manage.tests.pytest_fixtures`, the deprecated
-    # module, whose profile is a real PostgreSQL one.  See ../pgtest for why
-    # postgresql is listed alongside it.
-    pgtest
-    postgresql
-
     # Two members of aiida-core's `atomic_tools` extra, which `dependencies`
     # cannot express.  tests/test_workflows.py compares structures through
     # `StructureData.get_pymatgen()`, and the four restart tests in

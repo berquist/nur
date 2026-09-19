@@ -134,6 +134,14 @@ buildPythonPackage {
   # names the replacement.  `mv` rather than a copy, so a digest that has moved
   # on fails the build instead of leaving the old directory to be found.
   postPatch = ''
+    # The fifteenth package on the deprecated fixture plugin.  Its conftest
+    # names it beside aiida-testing's own `mock_code` plugin, which is why a
+    # pattern matching the whole `pytest_plugins` line would not have found it
+    # either; the module path is the part every one of them agrees on.  See
+    # ../aiida-cp2k for the migration.
+    substituteInPlace tests/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures'
+
     substituteInPlace setup.cfg \
       --replace-fail "aiida-core>=1.0.0<2.0.0" "aiida-core>=1.0.0,<2.0.0"
 

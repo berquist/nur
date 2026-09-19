@@ -24,7 +24,7 @@
 
 buildPythonPackage rec {
   pname = "pyfirecrest";
-  version = "3.9.0";
+  version = "3.10.0";
   pyproject = true;
 
   # fetchFromGitHub for consistency with the rest of this family rather than
@@ -36,7 +36,7 @@ buildPythonPackage rec {
     owner = "eth-cscs";
     repo = "pyfirecrest";
     tag = "v${version}";
-    hash = "sha256-6XKHOh6t4yHTO33ph8QkobcqyBILF7+DHbxcXV2toJI=";
+    hash = "sha256-/jnPFfnqFCdBa+Rns2xjYeOJwCZDSKsR2zB/K76FsoA=";
   };
 
   build-system = [ flit-core ];

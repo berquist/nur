@@ -17,10 +17,6 @@
   # tests
   pytestCheckHook,
   pytest-regressions,
-  pgtest,
-  postgresql,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -48,6 +44,45 @@ buildPythonPackage rec {
   # ../aiida-wannier90 satisfy it, and the version it pins, v2.2.0, is exactly
   # what that package builds.
   postPatch = ''
+    # `ProfileParamType(load_profile=True)` is no longer a thing aiida-core
+    # accepts: 9f3d98e45, "Load profile before verdi eager exits" (#7605), parses
+    # the top-level verdi arguments up front and loads the profile there, so the
+    # kwarg goes straight through to `object.__init__` and the CLI module dies at
+    # import —
+    #
+    #   TypeError: object.__init__() takes exactly one argument (the instance to
+    #   initialize)
+    #
+    # Dropping it gives up nothing: what it asked for is what upstream now does
+    # unconditionally.  ../aiida-pseudo carries the same one line.
+    substituteInPlace src/aiida_wannier90_workflows/cli/root.py \
+      --replace-fail \
+        '@options.PROFILE(type=types.ProfileParamType(load_profile=True))' \
+        '@options.PROFILE(type=types.ProfileParamType())'
+
+    # aiida-core vendored plumpy in 60aa10a4e and dropped the dependency; see
+    # ../aiida-optimize for why the standalone library is not the answer.
+    substituteInPlace \
+      tests/workflows/conftest.py \
+      tests/conftest.py \
+      src/aiida_wannier90_workflows/cli/group.py \
+      --replace-fail \
+        'from plumpy import ProcessState' \
+        'from aiida.common.processes import ProcessState'
+
+    substituteInPlace tests/workflows/test_wannier90.py \
+      --replace-fail \
+        'from plumpy.process_states import ProcessState' \
+        'from aiida.common.processes import ProcessState'
+
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    # `Profile.clear_profile()` went with the deprecated plugin; the supported
+    # one resets the storage instead, which is what `aiida_profile_clean` calls.
+    substituteInPlace tests/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
+      --replace-fail 'aiida_profile.clear_profile()' 'aiida_profile.reset_storage()'
+
     substituteInPlace pyproject.toml \
       --replace-fail \
         '"aiida-wannier90 @ git+https://github.com/aiidateam/aiida-wannier90.git@v2.2.0",' \
@@ -79,19 +114,9 @@ buildPythonPackage rec {
     colorama
   ];
 
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
-  '';
-
   nativeCheckInputs = [
     pytestCheckHook
     pytest-regressions
-
-    # tests/conftest.py names `aiida.manage.tests.pytest_fixtures`, the
-    # deprecated module; see ../aiida-core/default.nix for what that needs
-    # patched, and ../pgtest for why postgresql accompanies pgtest.
-    pgtest
-    postgresql
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.

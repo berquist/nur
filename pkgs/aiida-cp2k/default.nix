@@ -17,12 +17,8 @@
 
   # tests
   pytestCheckHook,
-  pgtest,
-  postgresql,
   cp2k,
   procps,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -71,19 +67,88 @@ buildPythonPackage rec {
   # and a `conda activate`.  Pointed at the real binary, it works.
   # `$(` and `\n` below are literal in a Nix indented string — only `${` would
   # need escaping — so these match the Python source exactly as written.
+  # The plugin migration, and this is the copy of the reasoning the other twelve
+  # point at.
+  #
+  # Upstream deleted `aiida.manage.tests.pytest_fixtures` in 01bd7146d, "Remove
+  # leftover deprecated pytest fixtures" (#7631), on the grounds that "nothing
+  # references the module anymore".  Nothing in aiida-core did.  Thirteen
+  # packages here did, through their own conftests, and this is that migration.
+  # It is a simplification rather than a rename.
+  #
+  # The deprecated plugin built its profile from `config_psql_dos({})`, so all
+  # thirteen needed a real PostgreSQL: `pgtest` for a throwaway cluster,
+  # `postgresql` for the binaries it starts, and a UTF-8 locale archive, because
+  # aiida-core's Postgres helper creates the database with
+  # `LC_COLLATE 'en_US.UTF-8'` and a cluster built from nixpkgs' glibc does not
+  # have it — all 37 tests here used to error in setup with
+  #
+  #     psycopg.errors.WrongObjectType: invalid LC_COLLATE locale name:
+  #     "en_US.UTF-8"
+  #
+  # It also hardcoded a `process_control` block naming RabbitMQ on
+  # 127.0.0.1:5672, which ../aiida-core had to patch back to `backend: None`.
+  #
+  # `aiida.tools.pytest_fixtures` needs none of that.  Its `aiida_profile_factory`
+  # defaults to `storage_backend = 'core.sqlite_dos'` and `broker_backend = None`,
+  # and the `aiida_profile` docstring says so outright: "The profile defines no
+  # broker and uses the ``core.sqlite_dos`` storage backend, meaning it requires
+  # no services to run."  So pgtest, postgresql, glibcLocalesUtf8, stdenv and the
+  # whole `preCheck` leave with the module path.  ../aiida-octopus arrived at
+  # this shape first, from the other side — its conftest already named the
+  # modern module, and its note is the one that had it right.
+  #
+  # Only the module path is rewritten, not the surrounding `pytest_plugins` line.
+  # The thirteen conftests spell that line with single quotes, with double
+  # quotes, with a trailing `# pylint: disable=invalid-name`, and in
+  # ../aiida-psi4's case beside a second plugin; the path is the only part all of
+  # them agree on, and `--replace-fail` still catches a conftest that stops
+  # naming it.
+  #
+  # `--dist worksteal` below is safe on sqlite: `aiida_config` gives each session
+  # its own `tmp_path_factory.mktemp(...)` directory, so two workers never share
+  # a database file.  Where one would, ../aiida-core's
+  # sqlite-dos-concurrent-access.patch supplies WAL and a 60-second busy timeout.
   postPatch = ''
     substituteInPlace conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
+      --replace-fail \
+        'def cp2k_code(aiida_local_code_factory):' \
+        'def cp2k_code(aiida_code_installed):' \
+      --replace-fail 'return aiida_local_code_factory(' 'return aiida_code_installed(' \
+      --replace-fail 'entry_point="cp2k",' 'default_calc_job_plugin="cp2k",' \
       --replace-fail 'executable="/opt/conda/envs/cp2k/bin/cp2k.psmp"' \
-                     'executable="${cp2k}/bin/cp2k.psmp"' \
+                     'filepath_executable="${cp2k}/bin/cp2k.psmp"' \
       --replace-fail 'eval "$(command conda shell.bash hook 2> /dev/null)"\nconda activate cp2k\n' \
                      "" \
       --replace-fail 'subprocess.run(' 'list('
+
+    # Eight tests take `clear_database` as a plain argument; see ../aiida-diff
+    # for the fixture that replaced it.
+    #
+    # **It moves to the front of the signature, and that is the whole point.**
+    # pytest instantiates fixtures in the order they are requested, and
+    # `aiida_profile_clean` calls `reset_storage()`, which closes and rebuilds
+    # the profile's storage.  Left where `clear_database` sat — last, after
+    # `cp2k_basissets` and `cp2k_pseudos` — it wipes the storage those two have
+    # just populated, and the node objects they handed back are pointing at a
+    # backend that no longer exists:
+    #
+    #   aiida.common.exceptions.ClosedStorage: SqliteDosStorage[…]: closed
+    #
+    # All eight, every one of them at the first attribute read.  The deprecated
+    # `clear_database` deleted rows without closing anything, which is why the
+    # argument order never mattered before.  ../aiida-core's own note about
+    # these rewrites says it in one line: `aiida_profile_clean` goes first so it
+    # still runs before the other fixtures.
+    substituteInPlace test/test_gaussian_datatypes.py \
+      --replace-fail \
+        '(cp2k_code, cp2k_basissets, cp2k_pseudos, clear_database):' \
+        '(aiida_profile_clean, cp2k_code, cp2k_basissets, cp2k_pseudos):'
   '';
 
   nativeCheckInputs = [
     pytestCheckHook
-    pgtest
-    postgresql
     cp2k
 
     # The five tests in test/test_gaussian_datatypes.py are the only ones here
@@ -106,23 +171,6 @@ buildPythonPackage rec {
   preBuild = ''
     export HOME="$(mktemp -d)"
     export AIIDA_PATH="$HOME"
-  '';
-
-  # conftest.py names `aiida.manage.tests.pytest_fixtures`, so the profile is
-  # core.psql_dos and every test wants a database.  aiida-core's Postgres helper
-  # creates it with `LC_COLLATE 'en_US.UTF-8'`, which a cluster built from
-  # nixpkgs' glibc does not have, and all 37 tests error in setup with
-  #
-  #     psycopg.errors.WrongObjectType: invalid LC_COLLATE locale name:
-  #     "en_US.UTF-8"
-  #
-  # ../pgsu/default.nix has the long version of why the locale is supplied
-  # rather than the constant rewritten, and why the export is what matters:
-  # nixpkgs' glibc reads LOCALE_ARCHIVE from the environment, and it is the
-  # postgres server that calls setlocale, not pytest.  ../aiida-orca and
-  # ../aiida-gaussian-datatypes carry the same three lines.
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
   '';
 
   # `test`, singular, is the unit-test directory.  Restricting to it is a

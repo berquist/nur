@@ -59,6 +59,49 @@ buildPythonPackage rec {
   #
   # `core.zeromq` runs inside the daemon and needs no service.
   postPatch = ''
+    # aiida-core vendored plumpy in 60aa10a4e and dropped the dependency, so
+    # `import plumpy` here is a ModuleNotFoundError.  See ../aiida-optimize for
+    # why installing the standalone library back would be worse than the error.
+    #
+    # This one uses plumpy through dotted attribute access rather than through
+    # `from` imports, so each module is bound under a `plumpy_`-prefixed alias
+    # and every use is rewritten to match.  The prefix is kept deliberately
+    # close to the original: a reader comparing this tree against upstream
+    # should be able to see that nothing moved but the source of the module.
+    #
+    # Three of the four map straight across.  `plumpy.persistence.LoadSaveContext`
+    # is the exception — aiida renamed it `CheckpointContext`, same constructor
+    # (`loader` plus **kwargs) and the same `load_context=` position, which
+    # `aiida/manage/manager.py` and `processes/workchains/outline.py` both
+    # confirm.
+    substituteInPlace src/aiida_pythonjob/calculations/tasks.py \
+      --replace-fail \
+        'import plumpy
+    import plumpy.futures
+    import plumpy.persistence
+    import plumpy.process_states' \
+        'from aiida.engine.processes import persistence as plumpy_persistence
+    from aiida.engine.processes import states as plumpy_process_states
+    from aiida.engine.processes.generic import futures as plumpy_futures' \
+      --replace-fail 'plumpy.futures.' 'plumpy_futures.' \
+      --replace-fail 'plumpy.persistence.' 'plumpy_persistence.' \
+      --replace-fail 'plumpy.process_states.' 'plumpy_process_states.'
+
+    substituteInPlace src/aiida_pythonjob/calculations/pyfunction.py \
+      --replace-fail \
+        'import plumpy' \
+        'from aiida.engine.processes import persistence as plumpy_persistence
+    from aiida.engine.processes import states as plumpy_process_states' \
+      --replace-fail \
+        'plumpy.persistence.LoadSaveContext' \
+        'plumpy_persistence.CheckpointContext' \
+      --replace-fail 'plumpy.process_states.' 'plumpy_process_states.'
+
+    substituteInPlace src/aiida_pythonjob/data/deserializer.py \
+      --replace-fail \
+        'from plumpy.utils import AttributesFrozendict' \
+        'from aiida.common.extendeddicts import AttributesFrozendict'
+
     substituteInPlace pyproject.toml \
       --replace-fail 'addopts = "--pdbcls=IPython.terminal.debugger:TerminalPdb"' ""
 

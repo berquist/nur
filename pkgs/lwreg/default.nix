@@ -19,7 +19,7 @@
 
 buildPythonPackage {
   pname = "lwreg";
-  version = "0.2.0-unstable-2026-02-09";
+  version = "2024.08.1-unstable-2026-02-09";
   pyproject = true;
 
   src = fetchFromGitHub {

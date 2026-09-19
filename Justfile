@@ -294,6 +294,23 @@ build-flake pkg:
 demux-log +args:
     ./scripts/demux-build-log.sh {{ args }}
 
+# The other half of the same job.  `demux-log` untangles what a run printed;
+# this fetches what it did not — a `--keep-going` build that loses a dozen
+# derivations ends with a dozen `nix log /nix/store/…` lines, each a separate
+# command with a hash in it nobody can type:
+#
+#   just ci-build 2>&1 | tee log_ci
+#   just build-logs log_ci         # one log- file per failed derivation
+#   just build-logs -n log_ci      # print the commands instead
+#
+# `*args` rather than `+args`, because the script reads stdin with no argument:
+# `just ci-build 2>&1 | just build-logs` works too, at the cost of not keeping
+# the log itself.  Needs a nix-daemon, unlike demux-log.
+
+# Fetch the build log of every derivation a failed run pointed at.
+build-logs *args:
+    ./scripts/fetch-build-logs.sh {{ args }}
+
 # Builds qcportal against a channel's *default* interpreter rather than the
 # python313 the repo pins.
 #
@@ -329,6 +346,12 @@ repro-gh channel=default_channel:
 # from the table, then act on it without retyping thirty-odd attribute names.
 # Rows the scan marked `rejected` are deliberately not carried over — see the
 # version guards in scripts/update-packages.sh for what that status means.
+#
+# `update-scan` picks its own worker count; `update-from-scan` and `update-all`
+# take one, because theirs are real builds and how many of those a machine can
+# hold at once is not something this file can know — `just update-from-scan 4`.
+# The recipes that deliver take no such argument at all; see the header of
+# scripts/update-packages.sh for which pieces of state cannot be raced.
 # ---------------------------------------------------------------------------
 
 # Where `update-scan` leaves its machine-readable report and `update-from-scan`
@@ -341,9 +364,9 @@ update-scan *pkgs:
     mkdir -p .scratch
     ./scripts/update-packages.sh --scan --json={{ scan_report }} {{ pkgs }}
 
-# Bump everything the last scan called would-update. Hours of builds.
-update-from-scan:
-    ./scripts/update-packages.sh --from={{ scan_report }}
+# Bump everything the last scan called would-update, `jobs` at a time. Hours of builds.
+update-from-scan jobs="1":
+    ./scripts/update-packages.sh --from={{ scan_report }} --jobs={{ jobs }}
 
 # The same, one pull request each.
 update-from-scan-pr:
@@ -354,8 +377,8 @@ update +pkgs:
     ./scripts/update-packages.sh {{ pkgs }}
 
 # The same over every actionable package. Hours of builds; see the scan first.
-update-all:
-    ./scripts/update-packages.sh
+update-all jobs="1":
+    ./scripts/update-packages.sh --jobs={{ jobs }}
 
 # Bump named packages and open one pull request each.
 update-pr +pkgs:

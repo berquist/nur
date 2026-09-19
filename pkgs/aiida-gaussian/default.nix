@@ -31,8 +31,6 @@
   # tests
   pytestCheckHook,
   pytest-regressions,
-  pgtest,
-  postgresql,
 }:
 
 buildPythonPackage rec {
@@ -54,6 +52,19 @@ buildPythonPackage rec {
   # plugin in this repo needs this for the same reason.
   pythonRelaxDeps = [ "aiida-core" ];
 
+  # See ../aiida-cp2k for why this is a rewrite rather than a version bump, and
+  # why pgtest and postgresql left with it.
+  #
+  # The one package of the thirteen whose conftest could not be read back: it is
+  # `meta.broken` without cclib, so its source has never been fetched and is not
+  # in the store.  The path and the module string are what ../aiida-gaussian's
+  # own note recorded before this change, and `--replace-fail` is what will say
+  # so if either has moved.
+  postPatch = ''
+    substituteInPlace tests/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures'
+  '';
+
   dependencies = [
     aiida-core
     ase
@@ -64,13 +75,6 @@ buildPythonPackage rec {
   nativeCheckInputs = [
     pytestCheckHook
     pytest-regressions
-
-    # tests/conftest.py sets `pytest_plugins = ["aiida.manage.tests.pytest_fixtures"]`,
-    # the deprecated module, which builds its profile from config_psql_dos({})
-    # and therefore wants a real PostgreSQL.  pgtest supplies a throwaway
-    # cluster; see ../pgtest for why postgresql has to be listed alongside it.
-    pgtest
-    postgresql
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.

@@ -33,7 +33,7 @@
 # `7net-0` and friends work with no download.
 buildPythonPackage {
   pname = "sevenn";
-  version = "0.13.0-unstable-2026-07-22";
+  version = "0.13.1.cp-unstable-2026-07-22";
   pyproject = true;
   __structuredAttrs = true;
 

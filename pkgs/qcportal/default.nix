@@ -24,12 +24,12 @@
 
 buildPythonPackage rec {
   pname = "qcportal";
-  version = "0.65";
+  version = "0.70";
   pyproject = true;
 
   src = fetchPypi {
     inherit pname version;
-    hash = "sha256-fgY2i9HhLpUhsnK5nX6ovMVTj6QRKPTZtDVQv9OLoKw=";
+    hash = "sha256-sps7Ssi22WFZXHSBDhieBjb40efEqGfPMx7XxlUnhM4=";
   };
 
   build-system = [

@@ -73,7 +73,7 @@
 # there, no `__init__.py` on either side.
 buildPythonPackage (finalAttrs: {
   pname = "pymatgen-core";
-  version = "2026.8.13";
+  version = "2026.8.30";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -81,7 +81,7 @@ buildPythonPackage (finalAttrs: {
     owner = "materialsproject";
     repo = "pymatgen-core";
     tag = "v${finalAttrs.version}";
-    hash = "sha256-kq1mxaLjhuC+AWe/hZ4Rdtcw0M5dkKQ3pWtWV+Yhq2Y=";
+    hash = "sha256-7af04oBxPS27WeqaCvBeQukU23NYn3akHNxWr5Ay108=";
   };
 
   # `pmg` is not in this distribution and has not been since the split: the

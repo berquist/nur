@@ -36,7 +36,7 @@
 # ../../AGENTS.md).
 buildPythonPackage (finalAttrs: {
   pname = "matcalc";
-  version = "0.5.1-unstable-2026-09-03";
+  version = "0.5.1-unstable-2026-09-09";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -45,8 +45,8 @@ buildPythonPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "materialsvirtuallab";
     repo = "matcalc";
-    rev = "ce5e92cef1a3231e5a10dd9cff69a4264d5ad0c0";
-    hash = "sha256-Iyvt0OgfFsyBit1swp8o9Hzb8J6txbcXRwDm20WpCKA=";
+    rev = "b04715d37df27ff782f689f7a0ec36a66e08525c";
+    hash = "sha256-k9JhJq2WhSFMX4IlmAAxz8blB4WpmceN8tUDlSyM59Q=";
   };
 
   # `oldest-supported-numpy` is a build-time pin for C extensions (matcalc has
@@ -136,6 +136,12 @@ buildPythonPackage (finalAttrs: {
   // lib.optionalAttrs (lib.versionAtLeast phonopy.version "4") {
     phonon3 = [ phono3py ];
   };
+
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
 
   # The suite is not run.  `tests/conftest.py` imports `matgl` at module scope
   # and its `matpes_calculator` fixture calls `matcalc.load_fp(...)`, which

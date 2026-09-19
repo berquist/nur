@@ -174,7 +174,6 @@ let
     "aiida-phonopy"
     "aiida-pythonjob"
     "aiida-restapi"
-    "aiida-shell"
     "aiida-siesta"
     "aiida-submission-controller"
     "aiida-wannier90"

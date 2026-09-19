@@ -31,7 +31,7 @@
 # Not re-exported: it stays reachable through `python313Packages`.
 buildPythonPackage (finalAttrs: {
   pname = "mendeleev";
-  version = "1.2.0";
+  version = "1.3.0";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -39,7 +39,7 @@ buildPythonPackage (finalAttrs: {
     owner = "lmmentel";
     repo = "mendeleev";
     tag = "v${finalAttrs.version}";
-    hash = "sha256-/DNaQ/B3B0yHnOmbStKT5a2K+m3vnNjO4qd7vEKRQLA=";
+    hash = "sha256-uoUcN0ejAuKgtAPXVSF/ggTyqktMqaQal9YMAFSi5TQ=";
   };
 
   # `[tool.poetry] version = "v1.2.0"` — the leading `v` is not PEP 440, and

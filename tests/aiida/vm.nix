@@ -908,7 +908,6 @@ in
 
         services.aiida = {
           enable = true;
-          plugins = [ pkgs.python313Packages.aiida-shell ];
           extraPackages = [
             pkgs.which
             pkgs.xtb
@@ -939,7 +938,7 @@ in
 
         submitSort = pkgs.writeText "submit-shell-sort.py" ''
           from aiida import orm
-          from aiida_shell import launch_shell_job
+          from aiida.tools.shell import launch_shell_job
 
           # `submit=True` returns ({}, node) rather than the results dict --
           # the results cannot exist yet, since the daemon has not run the job.
@@ -973,7 +972,7 @@ in
         # anything else driven through aiida-shell here will want it too.
         submitXtb = pkgs.writeText "submit-shell-xtb.py" ''
           from aiida import orm
-          from aiida_shell import launch_shell_job
+          from aiida.tools.shell import launch_shell_job
 
           _results, node = launch_shell_job(
               "xtb",

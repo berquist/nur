@@ -68,6 +68,12 @@ buildPythonPackage (finalAttrs: {
     tqdm
   ];
 
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
+
   # Only `tests/featurizers` and `tests/utils`.  `tests/data_retrieval` and
   # `tests/datasets` talk to the Materials Project, MPDS, AFLOW, Citrine and MDF
   # APIs, none of which is reachable in a build.  dscribe backs the SOAP/ACSF

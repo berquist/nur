@@ -15,10 +15,6 @@
 
   # tests
   pytestCheckHook,
-  pgtest,
-  postgresql,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -82,6 +78,23 @@ buildPythonPackage rec {
   # knowing outside the tests: anyone driving this workchain from Python hits
   # the same collision, and the same dictionary is the way out.
   postPatch = ''
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    substituteInPlace tests/conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures'
+
+    # plumpy is not a package any more as far as AiiDA is concerned: aiida-core
+    # vendored it in 60aa10a4e and no longer depends on it, so `import plumpy`
+    # here is a ModuleNotFoundError rather than a version question.  Importing
+    # the standalone library back in would be worse than the error — two
+    # independent copies of the process machinery in one interpreter, and the
+    # `isinstance` checks that cross between them would start answering False.
+    # `AttributesFrozendict` moved to aiida.common.extendeddicts unchanged.
+    substituteInPlace aiida_optimize/_utils.py \
+      --replace-fail \
+        'from plumpy.utils import AttributesFrozendict' \
+        'from aiida.common.extendeddicts import AttributesFrozendict'
+
     substituteInPlace tests/conftest.py \
       --replace-fail '@pytest.mark.usefixtures("aiida_profile_clean")' "" \
       --replace-fail \
@@ -131,18 +144,8 @@ buildPythonPackage rec {
         )'
   '';
 
-  preCheck = lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
-  '';
-
   nativeCheckInputs = [
     pytestCheckHook
-
-    # tests/conftest.py names `aiida.manage.tests.pytest_fixtures`, the
-    # deprecated module, whose profile is a real PostgreSQL one.  See ../pgtest
-    # for why postgresql is listed alongside it.
-    pgtest
-    postgresql
   ];
 
   # See ../aiida-core/default.nix for why this is preBuild and not preCheck.

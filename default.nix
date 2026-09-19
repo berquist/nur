@@ -37,7 +37,7 @@ in
 
   # The overlaid 3.13 package set, exposed so that the twenty-odd dependencies
   # this repo carries but does not re-export at the top level — mdanalysis,
-  # griddataformats, lwreg, kiwipy, plumpy and the rest — have an attribute path
+  # griddataformats, lwreg, kiwipy and the rest — have an attribute path
   # something can point at:
   #
   #   nix run nixpkgs#nix-update -- --flake python313Packages.mdanalysis
@@ -148,14 +148,14 @@ in
   #     `trexio` binding in ./overlays/default.nix and the split in
   #     ./tests/chemtools/default.nix, which asserts this.
   #
-  # Three packages are outside the rule for reasons that are not collisions and
+  # Five packages are outside the rule for reasons that are not collisions and
   # are documented where they live: `tensorpotential` is unfree, and `just
   # ci-eval` forces drvPath over everything it can reach, so an unfree
   # derivation in any traversal is an evaluation error rather than a skipped
-  # package (see ci.nix); `monty` and `pycifrw` are guarded backports, so on a
-  # new enough channel the attribute is nixpkgs' own derivation and building it
-  # here would be CI populating a cache with packages it does not own.  All
-  # three stay reachable as `python313Packages.<name>`.
+  # package (see ci.nix); `monty`, `pycifrw`, `qcelemental` and `qcengine` are
+  # guarded backports, so on a new enough channel the attribute is nixpkgs' own
+  # derivation and building it here would be CI populating a cache with packages
+  # it does not own.  All five stay reachable as `python313Packages.<name>`.
   #
   # recurseIntoAttrs is the whole mechanism.  Both `nix-env -f . -qa '*'` (what
   # `just ci-eval` runs) and ci.nix's flattenPkgs descend into an attrset only
@@ -178,9 +178,10 @@ in
   # **Every Python package this repository defines is here**, the dependencies
   # carried for a single dependant included, because being a top-level attribute
   # is what makes ci.nix build a package in its own right.  The exceptions are
-  # named at internalPackages above, and there are five: two name collisions
-  # that live there, and `tensorpotential`, `monty` and `pycifrw`, which are
-  # reachable as `python313Packages.<name>` for reasons given at that note.
+  # named at internalPackages above, and there are seven: two name collisions
+  # that live there, and `tensorpotential`, `monty`, `pycifrw`, `qcelemental`
+  # and `qcengine`, which are reachable as `python313Packages.<name>` for
+  # reasons given at that note.
   #
   # Grouped by family, alphabetical within each group.
   inherit (py)
@@ -212,7 +213,6 @@ in
     aiida-pythonjob
     aiida-quantumespresso
     aiida-restapi
-    aiida-shell
     aiida-siesta
     aiida-submission-controller
     aiida-testing
@@ -230,7 +230,6 @@ in
     node-graph-widget
     pgsu
     pgtest
-    plumpy
     postopus
     profilehooks
     pyfirecrest

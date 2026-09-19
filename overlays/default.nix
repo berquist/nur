@@ -1182,7 +1182,6 @@ in
           pgsu = pself.callPackage ../pkgs/pgsu { };
           pytray = pself.callPackage ../pkgs/pytray { };
           kiwipy = pself.callPackage ../pkgs/kiwipy { };
-          plumpy = pself.callPackage ../pkgs/plumpy { };
           upf-to-json = pself.callPackage ../pkgs/upf-to-json { };
           pgtest = pself.callPackage ../pkgs/pgtest { };
 
@@ -1347,7 +1346,6 @@ in
           aiida-phonopy = pself.callPackage ../pkgs/aiida-phonopy { };
           aiida-pythonjob = pself.callPackage ../pkgs/aiida-pythonjob { };
           aiida-restapi = pself.callPackage ../pkgs/aiida-restapi { };
-          aiida-shell = pself.callPackage ../pkgs/aiida-shell { };
           aiida-siesta = pself.callPackage ../pkgs/aiida-siesta { };
           aiida-submission-controller = pself.callPackage ../pkgs/aiida-submission-controller { };
           aiida-wannier90 = pself.callPackage ../pkgs/aiida-wannier90 { };
@@ -1391,7 +1389,6 @@ in
       aiida-phonopy
       aiida-pythonjob
       aiida-restapi
-      aiida-shell
       aiida-siesta
       aiida-submission-controller
       aiida-wannier90
@@ -1407,37 +1404,104 @@ in
   # pself is the fixed point of the *extended* Python package set, so
   # pself.qcportal inside the qcfractal derivation resolves to the local
   # package automatically — no manual inherit threading needed.
-  qcfractal = final: prev: {
-    pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
-      (pself: _psuper: {
-        parsl = pself.callPackage ../pkgs/parsl { };
-        qcportal = pself.callPackage ../pkgs/qcportal { };
-        qcfractal = pself.callPackage ../pkgs/qcfractal { };
-        qcfractalcompute = pself.callPackage ../pkgs/qcfractalcompute { };
-        qcarchivetesting = pself.callPackage ../pkgs/qcarchivetesting { };
-      })
-    ];
+  qcfractal =
+    final: prev:
+    let
+      # **`lib.versionAtLeast` is not a PEP 440 comparison, and the difference
+      # decides both gates below.**  It splits on dots and then on digit/letter
+      # runs, so "0.50.0rc2" becomes 0 · 50 · 0 · rc · 2 and compares *greater*
+      # than "0.50" — the extra components break the tie in the candidate's
+      # favour.  Python reads the same two strings the other way round: a
+      # release candidate precedes its release, which is exactly why
+      # pythonRuntimeDepsCheckHook rejected 26.05's qcengine against `>=0.50`.
+      #
+      # So a gate written as `versionAtLeast version floor` alone would keep
+      # 26.05's candidate and fail the build in precisely the way the backport
+      # exists to prevent — silently, since there is no error until a wheel has
+      # been built.  Test the pre-release marker separately.
+      #
+      # The regex wants a PEP 440 pre-release segment: a `a`/`b`/`rc`/`dev`
+      # marker followed by its number.  Nothing in a normal version string
+      # matches it — neither "0.50.4" nor a date-shaped "2026.7.16" has a letter
+      # run at all — so this is a test for candidates, not a version comparison
+      # in disguise.
+      isPreRelease = version: builtins.match ".*(a|b|rc|dev)[0-9]+" version != null;
 
-    # Top-level aliases. These are the *same* derivations as the entries in
-    # python313Packages above (not rebuilds), and they are what
-    # lib.mkPackageOption pkgs "qcfractal" in the NixOS modules resolves
-    # against — without them, `services.qcfractal.package` fails with
-    # "qcfractal cannot be found in pkgs" the moment a VM node or a real
-    # system evaluates the module.
-    #
-    # python313 rather than python3: qcportal does not import on 3.14, which
-    # nixpkgs-unstable now defaults to.  See pkgs/qcportal/default.nix for the
-    # mechanism and ../default.nix for why following the default would break
-    # the NixOS modules and the VM tests outright.
-    #
-    # Keep this list, and the interpreter, in sync with the `inherit (py)` list
-    # in ../default.nix — the overlay-python-pin eval test asserts they agree.
-    inherit (final.python313Packages)
-      parsl
-      qcportal
-      qcfractal
-      qcfractalcompute
-      qcarchivetesting
-      ;
-  };
+      # A channel's package is new enough when it meets the floor *and* is a
+      # real release.  Both backports below gate on this.
+      newEnough = floor: version: final.lib.versionAtLeast version floor && !(isPreRelease version);
+    in
+    {
+      pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
+        (pself: psuper: {
+          # ../pkgs/qcportal declares `qcelemental>=0.50.2,<0.70a0`, and
+          # pythonRuntimeDepsCheckHook fails the wheel outright when the floor
+          # is not met — it is not a pin to relax, because
+          # qcportal/qcschema_v1.py imports from the private
+          # `qcelemental.models._v1v2`.  nixos-26.05 carries 0.50.0rc3.
+          #
+          # A backport, not a package of ours, so it is shaped like the
+          # `pycifrw` and `monty` bindings above: take the channel's qcelemental
+          # whenever it is new enough, and fall back to ../pkgs/qcelemental for
+          # the legs that are not.  Pinning ours unconditionally would
+          # *downgrade* a channel that has moved past 0.50.2 — the nixpkgs in
+          # ../flake.lock has 0.50.4.
+          #
+          # `psuper`, not `pself`, or the fallback test would refer to itself.
+          # And a fresh `callPackage` rather than an override of
+          # `psuper.qcelemental`: 26.05's derivation carries a
+          # `disabledTestPaths` list written for 0.50.0rc3, and a path in that
+          # list matching nothing aborts the build.  Replacing the derivation
+          # outright sidesteps that.
+          qcelemental =
+            if newEnough "0.50.2" psuper.qcelemental.version then
+              psuper.qcelemental
+            else
+              pself.callPackage ../pkgs/qcelemental { };
+
+          # The same arrangement for ../pkgs/qcfractalcompute's and
+          # ../pkgs/qcarchivetesting's `qcengine>=0.50,<0.70a0`, against
+          # 26.05's 0.50.0rc2.  This is the gate `newEnough` was written for:
+          # the floor here is met on a plain `versionAtLeast` and the package
+          # is still too old, which is a shape no other guard in this file has.
+          #
+          # Its qcelemental comes from the extension's own fixpoint, so on a
+          # leg that takes the backport above, qcengine is built against that
+          # rather than against the channel's candidate.
+          qcengine =
+            if newEnough "0.50" psuper.qcengine.version then
+              psuper.qcengine
+            else
+              pself.callPackage ../pkgs/qcengine { };
+
+          parsl = pself.callPackage ../pkgs/parsl { };
+          qcportal = pself.callPackage ../pkgs/qcportal { };
+          qcfractal = pself.callPackage ../pkgs/qcfractal { };
+          qcfractalcompute = pself.callPackage ../pkgs/qcfractalcompute { };
+          qcarchivetesting = pself.callPackage ../pkgs/qcarchivetesting { };
+        })
+      ];
+
+      # Top-level aliases. These are the *same* derivations as the entries in
+      # python313Packages above (not rebuilds), and they are what
+      # lib.mkPackageOption pkgs "qcfractal" in the NixOS modules resolves
+      # against — without them, `services.qcfractal.package` fails with
+      # "qcfractal cannot be found in pkgs" the moment a VM node or a real
+      # system evaluates the module.
+      #
+      # python313 rather than python3: qcportal does not import on 3.14, which
+      # nixpkgs-unstable now defaults to.  See pkgs/qcportal/default.nix for the
+      # mechanism and ../default.nix for why following the default would break
+      # the NixOS modules and the VM tests outright.
+      #
+      # Keep this list, and the interpreter, in sync with the `inherit (py)` list
+      # in ../default.nix — the overlay-python-pin eval test asserts they agree.
+      inherit (final.python313Packages)
+        parsl
+        qcportal
+        qcfractal
+        qcfractalcompute
+        qcarchivetesting
+        ;
+    };
 }

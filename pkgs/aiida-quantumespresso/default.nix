@@ -194,6 +194,48 @@ buildPythonPackage rec {
   # inside a double-quoted shell word is command substitution, and a lone
   # backslash in a Nix indented string is already literal.
   postPatch = ''
+    # `ProfileParamType(load_profile=True)` is no longer a thing aiida-core
+    # accepts: 9f3d98e45, "Load profile before verdi eager exits" (#7605), parses
+    # the top-level verdi arguments up front and loads the profile there, so the
+    # kwarg goes straight through to `object.__init__` and the CLI module dies at
+    # import —
+    #
+    #   TypeError: object.__init__() takes exactly one argument (the instance to
+    #   initialize)
+    #
+    # Dropping it gives up nothing: what it asked for is what upstream now does
+    # unconditionally.  ../aiida-pseudo carries the same one line.
+    substituteInPlace src/aiida_quantumespresso/cli/__init__.py \
+      --replace-fail \
+        '@options.PROFILE(type=types.ProfileParamType(load_profile=True), expose_value=False)' \
+        '@options.PROFILE(type=types.ProfileParamType(), expose_value=False)'
+
+    # aiida-core vendored plumpy in 60aa10a4e and dropped the dependency, so
+    # `from plumpy import ...` is a ModuleNotFoundError here.  See
+    # ../aiida-optimize for why the standalone library is not the answer:
+    # `ProcessState` is an Enum, and two copies compare unequal member for
+    # member, which is the quiet version of the same problem.
+    substituteInPlace \
+      tests/workflows/test_workflows.py \
+      tests/workflows/test_pdos.py \
+      tests/workflows/q2r/test_base.py \
+      tests/workflows/matdyn/test_base.py \
+      tests/workflows/bands/test_base.py \
+      tests/conftest.py \
+      --replace-fail \
+        'from plumpy import ProcessState' \
+        'from aiida.common.processes import ProcessState'
+
+    # `PortNamespace` maps to the *generic* module rather than to
+    # aiida.engine.processes.ports, whose PortNamespace is aiida's own subclass
+    # — `class PortNamespace(WithMetadata, WithNonDb, ports.PortNamespace)`.
+    # plumpy's was the base, so the base is what keeps isinstance answering the
+    # same way.
+    substituteInPlace src/aiida_quantumespresso/workflows/protocols/utils.py \
+      --replace-fail \
+        'from plumpy import PortNamespace' \
+        'from aiida.engine.processes.generic.ports import PortNamespace'
+
     substituteInPlace tests/tools/test_code_setup.py \
       --replace-fail \
         "'Error: the \`which\` command returned an empty output.'" \

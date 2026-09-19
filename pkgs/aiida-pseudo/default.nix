@@ -38,6 +38,24 @@ buildPythonPackage rec {
     hash = "sha256-DkEQ3sVMaKjES2U6oha6FdjgPGFLM80tyPIgEH7hR1U=";
   };
 
+  # `ProfileParamType(load_profile=True)` stopped being a thing aiida-core
+  # accepts.  9f3d98e45, "Load profile before verdi eager exits" (#7605), parses
+  # the top-level verdi arguments up front and loads the profile there, so the
+  # parameter type no longer pops a `load_profile` kwarg — it goes straight
+  # through to `object.__init__`, and every CLI module here dies at import:
+  #
+  #   TypeError: object.__init__() takes exactly one argument (the instance to
+  #   initialize)
+  #
+  # Five collection errors, all of them this one line.  Dropping the argument
+  # gives up nothing: what it asked for is what upstream now does unconditionally.
+  postPatch = ''
+    substituteInPlace src/aiida_pseudo/cli/params/options.py \
+      --replace-fail \
+        'core_options.PROFILE, type=core_types.ProfileParamType(load_profile=True), expose_value=False' \
+        'core_options.PROFILE, type=core_types.ProfileParamType(), expose_value=False'
+  '';
+
   build-system = [ flit-core ];
 
   # aiida-core here is a 2.10.0.dev0 snapshot, and a pre-release does not

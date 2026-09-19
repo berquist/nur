@@ -12,15 +12,11 @@
 
   # tests
   pytestCheckHook,
-  pgtest,
-  postgresql,
   bash,
   gromacs,
   plumed,
   procps,
   which,
-  stdenv,
-  glibcLocalesUtf8,
 }:
 
 buildPythonPackage rec {
@@ -51,7 +47,7 @@ buildPythonPackage rec {
   # pythonRelaxDeps cannot do this.  It rewrites the *distribution's* declared
   # dependencies in the built metadata, and this is a build-system requirement,
   # read from pyproject.toml before any of that exists.
-  # The second and third rewrites uncomment what upstream already wrote down,
+  # The two `-ntmpi` rewrites uncomment what upstream already wrote down,
   # and the reason is a property of the packaged PLUMED rather than of these
   # tests.  **nixpkgs' plumed is built without MPI support** — its derivation
   # takes blas and nothing else — so a PLUMED-patched mdrun works on exactly
@@ -95,6 +91,26 @@ buildPythonPackage rec {
   # replaces every occurrence — uncommenting it in the neighbouring test would
   # leave a stray argument after a `-ntmpi` that is still commented out.
   postPatch = ''
+    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
+    # and why pgtest, postgresql and the locale export left with it.
+    # The dropped fixtures as well as the module path; see ../aiida-diff for
+    # what `aiida_code_installed` replaced and why a bare executable name still
+    # resolves.
+    substituteInPlace conftest.py \
+      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
+      --replace-fail \
+        'def gromacs_code(aiida_local_code_factory):' \
+        'def gromacs_code(aiida_code_installed):' \
+      --replace-fail \
+        'aiida_local_code_factory(executable="gmx", entry_point="gromacs")' \
+        'aiida_code_installed(filepath_executable="gmx", default_calc_job_plugin="gromacs")' \
+      --replace-fail \
+        'def bash_code(aiida_local_code_factory):' \
+        'def bash_code(aiida_code_installed):' \
+      --replace-fail \
+        'aiida_local_code_factory(executable="bash", entry_point="gromacs")' \
+        'aiida_code_installed(filepath_executable="bash", default_calc_job_plugin="gromacs")'
+
     substituteInPlace pyproject.toml \
       --replace-fail 'requires = ["flit_core >=4,<5"]' 'requires = ["flit_core >=3.2,<5"]'
 
@@ -133,20 +149,10 @@ buildPythonPackage rec {
   preCheck = ''
     export PATH="$out/bin:$PATH"
     export PLUMED_KERNEL="${plumed}/lib/libplumedKernel.so"
-  ''
-  + lib.optionalString stdenv.hostPlatform.isLinux ''
-    export LOCALE_ARCHIVE="${glibcLocalesUtf8}/lib/locale/locale-archive"
   '';
 
   nativeCheckInputs = [
     pytestCheckHook
-
-    # conftest.py names `aiida.manage.tests.pytest_fixtures`, the deprecated
-    # module, whose profile is a real PostgreSQL one.  See ../pgtest for why
-    # postgresql is listed alongside it.
-    pgtest
-    postgresql
-
     # The suite runs GROMACS for real: `aiida.engine.run` on nine calculation
     # plugins, each through `aiida_local_code_factory(executable="gmx")`, which
     # resolves the name on PATH.  `bash` is the executable behind the second

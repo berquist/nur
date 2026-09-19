@@ -1,0 +1,63 @@
+Close pyplot figures between tests
+
+pydefect's Mpl plotters draw onto pyplot's *current* axes rather than onto one
+they create.  `SitePotentialMplPlotter.construct_plot` is the clearest case:
+
+    def construct_plot(self):
+        self._add_potentials()
+        ...
+
+    def _add_potentials(self):
+        ...
+        self.plt.scatter(distances, potentials, marker="o", color=color, ...)
+
+There is no `plt.figure()` anywhere in it, so `scatter` goes to whatever
+`gca()` returns.  That is the normal matplotlib scripting contract and is not a
+bug in the library — but nothing in the suite ever closes a figure, so one test
+inherits the axes the last one left behind.
+
+When the survivor is `chem_pot_diag/cpd_plotter.py`'s three-dimensional
+diagram, the next plotting test dies:
+
+    self = <Axes3D: title={'center': 'Chemical potential diagram of H-O-N'},
+            xlabel='Chemical potential of H', ...>
+    s = masked_array(data=[None], ..., dtype=object)
+    E   ValueError: s must be float, but has type object
+
+`Axes3D.scatter` declares `s=None` and forwards it to `Axes.scatter`, where a
+2-D axes would have substituted the rcParam default.  So the failure is not
+about marker sizes at all: it is a 3-D axes receiving a 2-D plot.
+
+This is order-dependent, which means it is also a lottery under pytest-xdist —
+which test lands on which worker decides whether it fires at all.  Closing
+every figure after each test removes the shared state rather than the symptom,
+and leaves each plotter to get the fresh 2-D axes it expects.
+
+--- a/pydefect/tests/conftest.py
++++ b/pydefect/tests/conftest.py
+@@ -5,6 +5,7 @@
+ from math import sqrt
+ from pathlib import Path
+ 
++import matplotlib.pyplot
+ import pytest
+ from pydefect.analyzer.defect_energy import DefectEnergies, DefectEnergy, \
+     DefectEnergySummary
+@@ -24,6 +25,17 @@
+ # Need the following to share the fixture
+ 
+ 
++@pytest.fixture(autouse=True)
++def _close_pyplot_figures():
++    """Leave no figure current for the next test.
++
++    The Mpl plotters draw onto ``plt.gca()``, so a figure surviving one test is
++    inherited by the one after it.
++    """
++    yield
++    matplotlib.pyplot.close("all")
++
++
+ @pytest.fixture(scope="session")
+ def test_data_files():
+     return Path(__file__).parent / "test_data_files"

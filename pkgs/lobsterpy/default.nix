@@ -60,6 +60,12 @@ buildPythonPackage (finalAttrs: {
     featurizer = [ mendeleev ];
   };
 
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
+
   # The featurizer extra is a check input because `tests/featurize/` exercises
   # `FeaturizeCharges`, which raises rather than skipping when mendeleev is
   # absent.

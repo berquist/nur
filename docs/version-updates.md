@@ -270,6 +270,7 @@ which are out for reasons given at `default.nix`.
 just update-scan                  # what would move; nothing built, nothing written
 just update-scan qcportal         # one package
 just update-from-scan             # bump everything the last scan called would-update
+just update-from-scan 4           # the same, four builds at a time
 just update-from-scan-pr          # the same, one pull request each
 just update qcportal              # rewrite + build + fix hashes; leaves the tree dirty
 just update-all                   # every actionable package
@@ -291,10 +292,39 @@ per-package path:
 | `--no-src` in scan mode | `nix-update` rewrites a hash by building the fetcher with `outputHash = ""` and reading the right answer out of the *failure*, which leaves nothing in the store — so every moving package was downloading its source and discarding it, for a value the scan then restored |
 | `--jobs`, defaulting to one per core capped at 8 | the work is forge round-trips, and a serial scan spent 79% of its wall clock waiting |
 
-`--jobs` is refused outside scan mode: `--deliver` drives git and `--limit` is a
-running count, and neither survives being raced.  Two attributes pointing at one
-file would race their snapshots, so the driver checks for that and drops back to
-a single worker rather than letting one bump vanish.
+Two attributes pointing at one file would race their snapshots, so the driver
+checks for that and drops back to a single worker rather than letting one bump
+vanish.
+
+### What `--jobs` is allowed to race
+
+The apply path takes `--jobs` too, and wants it: its cost is builds, and a
+serial run leaves the daemon idle between them whenever a build is smaller than
+the machine.  `just update-from-scan 4` is the shape.
+
+It is refused for exactly the two pieces of state that are not per-package.
+`--deliver=commit` and `--deliver=pr` drive git, which does not take two writers
+— a commit stages the index and `forge-pr.sh` switches branches, so a second
+worker doing either at once produces a commit holding somebody else's file.  And
+`--limit` is a running count over the whole run, so racing it means the packages
+that stop the run are whichever ones answered first, which is nobody's decision.
+
+Unlike the scan, the apply path does **not** default above one worker.  These
+are real builds, and how many concurrent pytest suites a machine can hold is a
+memory question only the person running it can answer.
+
+One thing moves when workers race: `prek` keeps a shared hook cache and is not
+written to be run twice at once, so under `--jobs>1` the driver skips it
+per-file and runs it once over every changed file at the end.  `nixfmt` is
+per-file and stays where it is.
+
+### Progress
+
+Every package announces itself on stderr as `[n/total] attr: <status>`, and the
+paths that build announce a `start` line as well — that is where the long
+silence is, since `nix-update`'s own output is captured rather than streamed
+(the report wants the last three lines of a failure, not a build log on the
+terminal).  It is stderr, so `--json` and the final table are unaffected.
 
 `update-scan` always writes `.scratch/update-scan.json`, and `update-from-scan`
 reads its `would-update` rows back.  The scan's entire product is that list, and

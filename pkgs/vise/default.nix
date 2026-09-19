@@ -69,6 +69,32 @@ buildPythonPackage {
 
     substituteInPlace setup.py \
       --replace-fail 'from distutils.extension import Extension' ""
+
+    # pymatgen renamed `Orbital.dx2` to `Orbital.dx2_y2`, and its compatibility
+    # shim only covers the lookup: `Orbital.dx2` and `Orbital['dx2']` still
+    # resolve, with a DeprecationWarning, until 2027-08-17.  The reverse — the
+    # member's *name* — moved with no shim, and `Orbital.__str__` returns
+    # `self.name`, so the one line below started producing a key vise has no
+    # field for:
+    #
+    #     TypeError: PDos.__init__() got an unexpected keyword argument 'dx2_y2'
+    #
+    # Two failures and five collection errors, all of them this.
+    #
+    # Normalising the key back is the small end of the change.  Renaming vise's
+    # own field would be the other, and it is wrong here: `PDos` is `MSONable`
+    # with a `ToJsonFileMixIn`, so `dx2` is vise's serialised format, and its
+    # own tests construct `PDos(dx2=...)` and read `orbitals["dx2"]` directly.
+    # Every other member of the enum — s, px, py, pz, dxy, dyz, dxz, dz2 and the
+    # seven f orbitals — still matches vise's field names exactly; `dx2_y2` is
+    # the only one that moved.
+    #
+    # `vise/analyzer/vasp/dos_data.py` is the only place in the package that
+    # turns an `Orbital` into a string, so this one line is the whole fix.
+    substituteInPlace vise/analyzer/vasp/dos_data.py \
+      --replace-fail \
+        'pdos_kwargs[str(orbital)]' \
+        'pdos_kwargs[str(orbital).replace("dx2_y2", "dx2")]'
   '';
 
   build-system = [ setuptools ];
@@ -108,6 +134,20 @@ buildPythonPackage {
     tabulate
     tqdm
   ];
+
+  # matplotlib wants a writable config directory and there is no HOME in a build
+  # sandbox, so it falls back with
+  #
+  #   mkdir -p failed for path /homeless-shelter/.config/matplotlib
+  #
+  # and rebuilds its font cache into a temporary directory on every import.
+  # Same treatment as ../strainjedi and ../aiida-core, and in preBuild rather
+  # than preCheck for the same reason: pythonImportsCheckPhase hits it too.
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
 
   # pytest-mock supplies the `mocker` fixture that thirty-seven tests want.
   nativeCheckInputs = [
