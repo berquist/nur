@@ -8,7 +8,12 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
 `nur-packages-template`. It holds five unrelated bodies of work:
 
 - the **QCArchive/QCFractal ecosystem** — Python packages (`qcportal`, `qcfractal`,
-  `qcfractalcompute`, `qcarchivetesting`, `parsl`) plus two NixOS service modules.
+  `qcfractalcompute`, `qcarchivetesting`, `parsl`) plus two NixOS service modules. Two more
+  packages, `qcelemental` and `qcengine`, are guarded backports rather than ours: nixpkgs has
+  both, but 26.05 ships a release *candidate* of each — below the floors `qcportal` and
+  `qcfractalcompute` declare. See the `internalPackages` note below for the shape, which they
+  share with `monty` and `pycifrw`, and the `newEnough` binding in `overlays/default.nix` for
+  why a candidate needs a gate that `lib.versionAtLeast` cannot express.
 - the **AiiDA ecosystem** — `aiida-core`, twenty plugins, the thirty-odd dependencies of those
   that nixpkgs does not carry, and one NixOS service module. Six wrap a quantum chemistry or
   materials program (`aiida-cp2k`, `aiida-gaussian`, `aiida-orca`, `aiida-octopus`,
@@ -279,6 +284,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `sisl` set `dontUseCmakeConfigure` while still listing `cmake`? | `pkgs/sisl/default.nix` (`nativeBuildInputs`) |
 | Why is `aiida-optimize`'s license a two-entry list, and what is the GPLv3 mention about? | `pkgs/aiida-optimize/default.nix` (`meta.license`) |
 | Why is `pycifrw` carried here when nixpkgs has one, and when should it be deleted? | `pkgs/pycifrw/default.nix` (the header), `overlays/default.nix` (the `pycifrw` binding) |
+| Why is `qcelemental` carried here when nixpkgs has one, and why can qcportal's floor not be relaxed? | `pkgs/qcelemental/default.nix` (the header), `overlays/default.nix` (the `qcelemental` binding) |
+| Why is `qcengine` carried here too, when the channel's version looks like it meets the floor? | `pkgs/qcengine/default.nix` (the header), `overlays/default.nix` (the `newEnough` binding) |
+| Why can a version gate here not be `lib.versionAtLeast` alone, and which package proved it? | `overlays/default.nix` (the `newEnough` binding in the qcfractal overlay) |
+| What catches a channel whose `qcelemental` or `qcengine` is too old, before a full build does? | `tests/qcarchive/default.nix` (`overlay-molssi-floors-satisfied`) |
 | Why are the two `mosquito` overrides guarded, and why does 26.05 not need them? | `overlays/default.nix` (the `hasMetadataCheck` binding in the `aiida` extension) |
 | Why do the two cp2k-\*-tools packages rewrite their build backend? | `pkgs/cp2k-output-tools/default.nix` (`postPatch`) |
 | Why does `mrcfile` patch eight `.dtype` assignments instead of pinning NumPy? | `pkgs/mrcfile/default.nix` (`postPatch`) |
@@ -570,7 +579,7 @@ is reserved in `overlay.nix` alone**. Being skipped by `ci.nix` is what the pred
 for, and skipping that one would defeat its whole purpose; both files carry the reasoning at
 their own copy.
 
-**Every package this repository defines is a top-level attribute**, with five named exceptions.
+**Every package this repository defines is a top-level attribute**, with seven named exceptions.
 That is the rule, and the reason for it is that being top-level is what makes `ci.nix` build a
 package in its own right: a package nothing builds is a package nobody finds out is broken.
 `pkgs/sevenn` sat green-by-omission for months because it was reachable only through an
@@ -580,11 +589,11 @@ package in its own right: a package nothing builds is a package nobody finds out
 **two**, and only because their names are already taken at the top level by different derivations:
 `chemfiles` (the C++ library) and `trexio` (nixpkgs' C library), both of which
 `tests/chemtools/default.nix` asserts. It still carries `recurseIntoAttrs`, which is exactly what
-`python313Packages` below must not. Three more packages are outside the rule for reasons that are
+`python313Packages` below must not. Five more packages are outside the rule for reasons that are
 not collisions, and stay reachable as `python313Packages.<name>`: `tensorpotential` (unfree, and
-`just ci-eval` forces `drvPath` over everything it can reach) and the guarded backports `monty`
-and `pycifrw` (nixpkgs' own derivations on a new enough channel, which CI has no business
-building as ours). See the note at the attribute itself.
+`just ci-eval` forces `drvPath` over everything it can reach) and the guarded backports `monty`,
+`pycifrw`, `qcelemental` and `qcengine` (nixpkgs' own derivations on a new enough channel, which
+CI has no business building as ours). See the note at the attribute itself.
 
 `scripts/update-universe.nix` is what keeps this honest: it reads `pkgs/` with `builtins.readDir`
 and fails if any directory has no attribute path. That check is what found `graphrc`, which was
@@ -615,7 +624,7 @@ new package needs:
 **All three steps, for every package.** They used to be "steps 2 and 3 are for public packages
 only", and the dependencies carried for one dependant each — `kiwipy`, `plumpy`,
 `disk-objectstore`, `pgsu`, `mdanalysis`, `colour-science`, `lwreg` and the rest — stopped at step
-1. They no longer do; see the `internalPackages` note above for why, and for the five packages
+1. They no longer do; see the `internalPackages` note above for why, and for the seven packages
 that still stop short. `tests/aiida/default.nix` spells out the public AiiDA list in
 `exportedPackages`, a fourth hand-written copy that exists so the other three cannot drift apart
 silently.

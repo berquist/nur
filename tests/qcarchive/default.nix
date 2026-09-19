@@ -163,6 +163,39 @@ lib.fix (self: {
     && nur.qcportal == overlaidPkgs.qcportal
   );
 
+  # The two MolSSI floors the QCArchive family declares, asserted rather than
+  # assumed.  They are the reason ../../pkgs/qcelemental and ../../pkgs/qcengine
+  # exist, and the only thing that catches a channel too old to satisfy them
+  # before a build does: both are checked by pythonRuntimeDepsCheckHook, which
+  # runs *after* the wheel is built, so nixos-26.05's 0.50.0rc3 and 0.50.0rc2
+  # each cost a full build to discover.
+  #
+  # **The comparison cannot be `lib.versionAtLeast` alone.**  Both channel
+  # versions are release *candidates*, and nix reads "0.50.0rc2" as newer than
+  # "0.50" where Python reads it as older — so the obvious assertion passes on
+  # exactly the channel it exists to fail.  `isRelease` is the same test the
+  # `newEnough` gate in ../../overlays/default.nix makes, spelled out here
+  # independently: an assertion that shares its subject's helper asserts
+  # nothing.
+  #
+  # Written as the constraint rather than as an equality, so both keep passing —
+  # and both packages become deletable — the day every channel ships something
+  # new enough.  The ceilings are asserted too: relaxing `<0.70a0` is what an
+  # unattended bump of either backport would amount to.
+  overlay-molssi-floors-satisfied = check "overlay-molssi-floors-satisfied" (
+    let
+      isRelease = version: builtins.match ".*(a|b|rc|dev)[0-9]+" version == null;
+      within =
+        floor: ceiling: version:
+        isRelease version && lib.versionAtLeast version floor && lib.versionOlder version ceiling;
+      inherit (overlaidPkgs) python313Packages;
+    in
+    # qcportal: qcelemental>=0.50.2,<0.70a0
+    within "0.50.2" "0.70a0" python313Packages.qcelemental.version
+    # qcfractalcompute: qcengine>=0.50,<0.70a0
+    && within "0.50" "0.70a0" python313Packages.qcengine.version
+  );
+
   # Both modules invoke the package via lib.getExe, which falls back to the
   # package *name* when meta.mainProgram is unset — and neither console script
   # is named after its package.
