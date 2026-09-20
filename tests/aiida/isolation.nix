@@ -61,7 +61,7 @@
 let
   inherit (pkgs) lib;
 
-  aiida-core = pkgs.python313Packages.aiida-core;
+  aiida-core = pkgs.python3Packages.aiida-core;
 in
 aiida-core.overridePythonAttrs (old: {
   pname = "aiida-core-isolation";

@@ -128,7 +128,7 @@ buildPythonPackage {
   # and these two do too.  When a future aiida-core changes the submit script
   # again, test_broken_code will fail alone once more, and
   #
-  #     nix build -L --keep-failed .#python313Packages.aiida-testing
+  #     nix build -L --keep-failed .#python3Packages.aiida-testing
   #     ls <kept build dir>/source/tests/mock_code/data
   #
   # names the replacement.  `mv` rather than a copy, so a digest that has moved

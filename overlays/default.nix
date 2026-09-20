@@ -8,14 +8,14 @@
 # them all via lib.composeManyExtensions.
 let
   # nixpkgs carries `disabled = pythonAtLeast "3.13"` on pymatgen, so
-  # `pkgs.python313Packages.pymatgen` throws at evaluation rather than merely
+  # `pkgs.python3Packages.pymatgen` throws at evaluation rather than merely
   # failing to build.  That gate is upstream nixpkgs being conservative about an
   # interpreter it has not tested, not pymatgen refusing to run: lifting it
-  # instantiates and its whole closure evaluates on 3.13 unchanged.
+  # instantiates and its whole closure evaluates unchanged.
   #
   # It cannot simply be dropped instead.  aiida-quantumespresso depends on
   # `aiida_core[atomic_tools]`, pymatgen is in that extra, and the alternative —
-  # pinning that whole family to 3.12 — would put a third interpreter in the
+  # pinning that whole family to 3.12 — would put a second interpreter in the
   # repo for the sake of one nixpkgs annotation.
   #
   # **A function returning a `let`-bindable value, never a member of a package
@@ -133,10 +133,9 @@ in
 {
   # dotdrop is a standalone CLI application — nothing here imports it as a
   # library — so it is a plain top-level package rather than a
-  # pythonPackagesExtensions entry, and it follows the default `python3`
-  # instead of the 3.13 pin the QCArchive set is stuck on.  Keeping it in its
-  # own overlay is what lets a consumer take `overlays.dotdrop` without
-  # dragging in qcportal and its closure.
+  # pythonPackagesExtensions entry.  Keeping it in its own overlay is what lets
+  # a consumer take `overlays.dotdrop` without dragging in qcportal and its
+  # closure.
   dotdrop = final: _prev: {
     dotdrop = final.python3Packages.callPackage ../pkgs/dotdrop { };
   };
@@ -158,6 +157,12 @@ in
   # So `python3Packages` never sees cclib, `callPackage` silently leaves the
   # defaulted argument at null, and the result is a harmonwig that is
   # meta.broken even on the flake path — with nothing to say so.
+  #
+  # **This got more dangerous, not less, when the repo dropped its python313
+  # pin.**  `final.python3Packages` is now the correct spelling for every other
+  # family here, so the wrong answer for this one is a single character away
+  # from the right answer everywhere else, and it fails silently.  The
+  # cheminformatics-cclib-resolves eval test is what catches it.
   harmonwig = final: _prev: {
     harmonwig = final.python3.pkgs.callPackage ../pkgs/harmonwig { };
   };
@@ -243,13 +248,18 @@ in
         };
 
         # nixpkgs builds OpenImageIO's Python binding already — `enablePython`
-        # defaults to true — but against `python3Packages.pybind11`, and
-        # `python3` is 3.14 on the channels here.  The module therefore installs
-        # to `lib/python3.14/site-packages` and is invisible to every 3.13 set,
-        # which is the *only* reason ../pkgs/colour-science could not import it:
-        # there was nothing wrong with the derivation, it was aimed at the wrong
-        # interpreter.  Adding nixpkgs' attribute to a check input would have
-        # changed nothing.
+        # defaults to true — but against `python3Packages.pybind11`, so the
+        # module installs to whatever `lib/pythonX.Y/site-packages` the *default*
+        # interpreter names and is invisible to every other set.  That is the
+        # *only* reason ../pkgs/colour-science could not import it: there was
+        # nothing wrong with the derivation, it was aimed at one interpreter.
+        # Adding nixpkgs' attribute to a check input would have changed nothing.
+        #
+        # This stayed necessary when the repo dropped its python313 pin.  The
+        # default set now happens to be the one nixpkgs already aimed at, but
+        # the extension below is injected into *every* `pythonX.pkgs`, and in
+        # any set that is not the default the unrepaired binding is still
+        # missing.
         #
         # Handing it `pself` retargets it at whichever interpreter this
         # extension is being applied to, which is what makes it correct in every
@@ -271,7 +281,7 @@ in
         # throws "should use `buildPythonPackage` or `toPythonModule`" on
         # anything without a `pythonModule` passthru.  The guard is lazy enough
         # that `pself.openimageio.out` slipped past it while a plain
-        # `python313Packages.openimageio` did not — the worst of both, since the
+        # `python3Packages.openimageio` did not — the worst of both, since the
         # build would have worked and the attribute path would still have
         # thrown.
         openimageio = pself.toPythonModule (
@@ -330,14 +340,14 @@ in
       })
     ];
 
-    # Top-level aliases for the two public packages, on the same python313 pin
-    # the rest of this repo uses.  Keep in sync with the `inherit (py)` list in
-    # ../default.nix.
+    # Top-level aliases for the two public packages, from the same default
+    # interpreter the rest of this repo follows.  Keep in sync with the
+    # `inherit (py)` list in ../default.nix.
     #
     # qmzyme is reachable here rather than in cheminformatics-cclib because its
     # cclib use is test-only and lazy — see ../pkgs/qmzyme/default.nix.  It
     # builds on both paths; the flake path additionally runs one more test.
-    inherit (final.python313Packages)
+    inherit (final.python3Packages)
       dough
       morfeus-ml
       qmzyme
@@ -350,10 +360,10 @@ in
   # pythonPackagesExtensions entries, exactly like harmonwig above, and for the
   # same reason: cclib's overlay overrides the top-level `python3` and nothing
   # else, so `final.python3.pkgs` is the only package set in which cclib
-  # exists.  `final.python313Packages` — which every other family here uses —
-  # is a *different* set that cclib's overlay never touches, so aliasing these
-  # from there would silently yield the broken build.  See harmonwig above for
-  # why it must not be spelled `final.python3Packages` either.
+  # exists.  `final.python3Packages` — which every other family here uses — is
+  # nixpkgs' alias to the *versioned* set, which cclib's overlay never touches,
+  # so aliasing these from there would silently yield the broken build.  One
+  # character, no error; see harmonwig above.
   #
   # Nothing in this repo imports any of them as a library, so none of them
   # needs to be in a Python package set at all.  Their own non-cclib
@@ -381,7 +391,7 @@ in
     #
     # Nothing but xyzrender wants it, so by the convention in ../AGENTS.md it
     # should stop at a `pythonPackagesExtensions` entry and never become a
-    # top-level attribute.  But it needs cclib, and `final.python313Packages` —
+    # top-level attribute.  But it needs cclib, and `final.python3Packages` —
     # the set that extension feeds — is precisely the set cclib's overlay never
     # touches.  So it must be a top-level `final.python3.pkgs.callPackage` like
     # its neighbours here, while still not being re-exported from
@@ -466,12 +476,11 @@ in
     #   error: moltui should use `buildPythonPackage` or `toPythonModule` if it
     #   is to be part of the Python packages set.
     #
-    # Same arrangement as dotdrop and harmonwig at the top of this file,
-    # including following the default `python3` rather than the 3.13 pin.
+    # Same arrangement as dotdrop and harmonwig at the top of this file.
     moltui = final.python3Packages.callPackage ../pkgs/moltui { };
 
     # Keep in sync with the `inherit (py)` list in ../default.nix.
-    inherit (final.python313Packages)
+    inherit (final.python3Packages)
       wignernj
       strainjedi
       sella
@@ -611,7 +620,7 @@ in
         mp-api = pself.callPackage ../pkgs/mp-api { };
 
         # Dependencies of one package each, so they stop here rather than
-        # being re-exported: they stay reachable as python313Packages.*
+        # being re-exported: they stay reachable as python3Packages.*
         # without ci.nix building them in their own right.
         #
         # mongomock-persistence is fireworks'.  mongomock-ng is maggma's, and
@@ -655,7 +664,7 @@ in
         # ../default.nix's attributes are what `just ci-eval` walks with
         # `nix-env -qa --drv-path`, and forcing an unfree derivation's drvPath
         # there is an evaluation error rather than a skip.  Reachable as
-        # `python313Packages.tensorpotential`, which is the same arrangement the
+        # `python3Packages.tensorpotential`, which is the same arrangement the
         # twenty-odd internal dependencies here already use.
         #
         # Gated on `matscipy` for the reason `sevenn` above is: a real
@@ -929,7 +938,7 @@ in
     # nixpkgs has no top-level `monty` to shadow; adding one would only give
     # ci.nix another thing to build.  `pymatgen` and `pymatgen-core` are here
     # for the opposite reason — they are the deliverable.
-    inherit (final.python313Packages)
+    inherit (final.python3Packages)
       atomate2
       custodian
       emmet-core
@@ -1298,7 +1307,7 @@ in
           #
           # `jq` is threaded in for a different reason: name collision.  Inside
           # a Python package set the name resolves to the *binding*,
-          # python3.13-jq, and pself wins over final, so a defaulted `jq`
+          # python3.14-jq, and pself wins over final, so a defaulted `jq`
           # argument in the derivation quietly yields a package with no bin/jq.
           # PATH is then unchanged, and the one test that needs the program —
           # tests/calculations/test_stash.py, which writes a shell script that
@@ -1360,12 +1369,12 @@ in
     # lib.mkPackageOption pkgs "aiida-core" in ../nixos-modules/aiida.nix
     # resolves against the top level of pkgs, not a python package set.
     #
-    # python313, the same interpreter the QCArchive set is pinned to, so the
-    # repo carries two Python versions rather than three.  aiida-psi4 imports
-    # qcelemental's v1 models, which become placeholder classes on 3.14 — see
-    # ../pkgs/qcportal/default.nix for the mechanism — so following the default
-    # python3 is not an option for this family either.  The one thing that did
-    # not fit on 3.13 is pymatgen, handled at its callPackage site above.
+    # The channel's default interpreter, like every other family here.  This
+    # used to be a python313 pin held in place by aiida-psi4, which instantiates
+    # a qcelemental v1 model and so cannot run on 3.14; that is now marked at
+    # ../pkgs/aiida-psi4 rather than holding twenty other plugins back.  The one
+    # thing the default interpreter does not fit is pymatgen, handled at its
+    # callPackage site above.
     #
     # Keep this list and the interpreter in sync with the `inherit (py)` list in
     # ../default.nix; the aiida-overlay-python-pin eval test asserts they agree.
@@ -1373,7 +1382,7 @@ in
     # The plugins are aliased for the same reason as aiida-core: they are what
     # `services.aiida.plugins` is given, and a NixOS configuration reaches them
     # as `pkgs.aiida-cp2k`, not through a Python package set.
-    inherit (final.python313Packages)
+    inherit (final.python3Packages)
       aiida-core
       aiida-ase
       aiida-cp2k
@@ -1483,20 +1492,20 @@ in
       ];
 
       # Top-level aliases. These are the *same* derivations as the entries in
-      # python313Packages above (not rebuilds), and they are what
+      # python3Packages above (not rebuilds), and they are what
       # lib.mkPackageOption pkgs "qcfractal" in the NixOS modules resolves
       # against — without them, `services.qcfractal.package` fails with
       # "qcfractal cannot be found in pkgs" the moment a VM node or a real
       # system evaluates the module.
       #
-      # python313 rather than python3: qcportal does not import on 3.14, which
-      # nixpkgs-unstable now defaults to.  See pkgs/qcportal/default.nix for the
-      # mechanism and ../default.nix for why following the default would break
-      # the NixOS modules and the VM tests outright.
+      # The channel's default interpreter.  This was python313 for as long as
+      # qcportal was pydantic v1 and could not be imported on 3.14; 0.70 is
+      # pydantic v2 and carries no gate, so there is nothing left to pin.  See
+      # ../pkgs/qcportal/default.nix.
       #
       # Keep this list, and the interpreter, in sync with the `inherit (py)` list
       # in ../default.nix — the overlay-python-pin eval test asserts they agree.
-      inherit (final.python313Packages)
+      inherit (final.python3Packages)
         parsl
         qcportal
         qcfractal

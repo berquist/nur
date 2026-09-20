@@ -1377,7 +1377,7 @@ buildPythonPackage rec {
     # cannot work without it.
     #
     # It must be passed in explicitly by ../../overlays/default.nix, because
-    # `jq` in a Python package set is the *binding*, python3.13-jq, which ships
+    # `jq` in a Python package set is the *binding*, python3.14-jq, which ships
     # no bin/jq.  Taking the defaulted argument put that in the closure and left
     # PATH exactly as it was.  See the callPackage site for the whole story.
     jq

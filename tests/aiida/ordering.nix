@@ -85,7 +85,7 @@
 let
   inherit (pkgs) lib;
 
-  aiida-core = pkgs.python313Packages.aiida-core;
+  aiida-core = pkgs.python3Packages.aiida-core;
 
   # Shared by the two pairs whose victim is the same test.
   #

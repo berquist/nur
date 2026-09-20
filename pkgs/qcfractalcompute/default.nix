@@ -1,7 +1,6 @@
 {
   lib,
   buildPythonPackage,
-  pythonAtLeast,
   fetchPypi,
   setuptools,
   versioningit,
@@ -64,8 +63,6 @@ buildPythonPackage rec {
   pythonImportsCheck = [ "qcfractalcompute" ];
 
   meta = with lib; {
-    # Inherited from qcportal; see the note in ../qcportal/default.nix.
-    broken = pythonAtLeast "3.14";
     description = "QCFractalCompute - compute manager / worker for QCFractal";
     homepage = "https://github.com/MolSSI/QCFractal";
     # The console script is qcfractal-compute-manager, not qcfractalcompute;

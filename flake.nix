@@ -120,11 +120,11 @@
 
         # Overlays
         #
-        # Our Python packages (pkgs.python313Packages.qcfractal, etc.):
+        # Our Python packages (pkgs.python3Packages.qcfractal, etc.):
         #   inputs.nur-berquist.overlays.qcfractal
         #
         # aiida-core, its five plugins and their dependencies
-        # (pkgs.aiida-core, pkgs.python313Packages.aiida-cp2k, …):
+        # (pkgs.aiida-core, pkgs.python3Packages.aiida-cp2k, …):
         #   inputs.nur-berquist.overlays.aiida
         #
         # dotdrop (pkgs.dotdrop):
@@ -135,7 +135,7 @@
         #   inputs.nur-berquist.overlays.harmonwig
         #
         # morfeus, QMzyme and the cheminformatics dependencies nixpkgs lacks
-        # (pkgs.morfeus-ml, pkgs.python313Packages.mdanalysis, …):
+        # (pkgs.morfeus-ml, pkgs.python3Packages.mdanalysis, …):
         #   inputs.nur-berquist.overlays.cheminformatics
         #
         # DBSTEP, aqme, ccreg and digichem (pkgs.dbstep, …) — like harmonwig,
@@ -185,12 +185,12 @@
           # QC program *into the worker process*, so a program built for any
           # other Python is unusable — nixos-modules/qcfractal-compute.nix
           # asserts on exactly that.  Programs follow the worker rather than the
-          # other way round, because the worker's Python is this repo's pin and
-          # is shared with the whole QCArchive family, while a QC program is one
-          # package that can be rebuilt.
+          # other way round, because the worker's Python is the one the whole
+          # QCArchive family is built against, while a QC program is one package
+          # that can be rebuilt.
           #
-          # Read off the package instead of spelling "python313" a fourth time,
-          # so the two cannot drift.
+          # Read off the package rather than named, so this cannot drift from
+          # whatever interpreter ./default.nix is following.
           workerPython = pkgs'.qcfractalcompute.pythonModule;
 
           # ...and the attribute naming the *same version* inside nixpkgs-qchem.
@@ -208,12 +208,15 @@
           # was populated from.  Any *further* deviation (our nixpkgs, or a
           # missing config.qchem-config) changes the derivation hash again.
           #
-          # The interpreter override is a deviation, and it is not free: while
-          # the worker's pin and nixpkgs-qchem's default `python3` disagree,
-          # Psi4 and its Python closure miss the cache and build from source.
-          # That is the price of the invariant, and it is temporary in the
-          # obvious way — the override becomes a no-op the moment the two agree
-          # again, and the cache comes back with it.
+          # The interpreter override is a deviation, and while it bites it is
+          # expensive: with the worker's interpreter and nixpkgs-qchem's default
+          # `python3` in disagreement, Psi4 and its Python closure miss the
+          # cache and build from source.  **On the locked input it is currently
+          # a no-op** — dropping this repository's python313 pin is what made it
+          # one, since nixpkgs-qchem defaults to the same interpreter — so the
+          # cache is live again.  It stays here because the two can part company
+          # any time either pin moves, and then it is load-bearing rather than
+          # an eval error nobody notices.
           #
           # Do NOT simplify this to `nixos-qchem.packages.${system}.psi4`.  That
           # output is a filterAttrs over the *entire* qchem set, so selecting a
@@ -231,7 +234,7 @@
           # pkgs' and take Psi4 from there.  Not because the overlay would
           # disturb anything — it would not; every attribute it writes is
           # namespaced under cfg.prefix, which defaults to "qchem", and the
-          # python3 it overrides is qchem.python3, so python313Packages and both
+          # python3 it overrides is qchem.python3, so python3Packages and both
           # our families are untouched by it.  The reason is the one above:
           # pkgs' is built from *our* nixpkgs with no qchem-config, and Psi4
           # built against those is a different derivation from the one the cache
@@ -285,11 +288,12 @@
           # anything, and it costs it once.
           #
           # cclib's overlay overrides the *top-level* python3 rather than
-          # pythonPackagesExtensions, so it cannot perturb python313Packages and
-          # the QCArchive and AiiDA families are untouched.  Note it lands on
-          # the python3 the override above installed, so these five follow the
-          # worker's interpreter too — which is what the repo's python313 pin
-          # wanted of them anyway.
+          # pythonPackagesExtensions, so the QCArchive and AiiDA families are
+          # untouched: `python3Packages` is nixpkgs' alias to the *versioned*
+          # set, which that override never reaches.  That is the same asymmetry
+          # the cclib callPackages in ./overlays depend on, read from the other
+          # side.  Note it lands on the python3 the override above installed, so
+          # these five follow the worker's interpreter too.
           #
           # The three overlays taken from ./overlays are exactly those whose
           # packages resolve cclib.  `cheminformatics` is included not because
@@ -356,11 +360,11 @@
           # nothing in the closure depends on packmol, so this rebuilds
           # fairchem-data-oc and nothing else.  It is also the only place in the
           # repository that builds fairchem-data-oc at all — it is internal, and
-          # ci.nix does not descend into python313Packages; see the standing item
+          # ci.nix does not descend into python3Packages; see the standing item
           # in ./docs/TODO.md.
           fairchemDataOc =
             if packmol != null then
-              pkgs'.python313Packages.fairchem-data-oc.override { inherit packmol; }
+              pkgs'.python3Packages.fairchem-data-oc.override { inherit packmol; }
             else
               null;
 
@@ -371,7 +375,7 @@
           # ci.nix takes it), and the override buys exactly the one test; the
           # rest of `tests/common` runs on every path.
           atomate2WithPackmol =
-            if packmol != null then pkgs'.python313Packages.atomate2.override { inherit packmol; } else null;
+            if packmol != null then pkgs'.python3Packages.atomate2.override { inherit packmol; } else null;
 
           # ...and the same shape for AmberTools, which thirteen of pkgs/parmed's
           # tests gate on and which nixpkgs has no spelling of.
@@ -393,11 +397,11 @@
           #   nix build .#legacyPackages.x86_64-linux.parmed-ambertools
           #
           # Without the tarball that command prints NixOS-QChem's own
-          # instructions; `python313Packages.parmed` on the ordinary path keeps
+          # instructions; `python3Packages.parmed` on the ordinary path keeps
           # `ambertools = null` and skips the thirteen.
           parmedWithAmbertools =
             if system == "x86_64-linux" then
-              pkgs'.python313Packages.parmed.override { ambertools = qchemPkgs.qchem.ambertools; }
+              pkgs'.python3Packages.parmed.override { ambertools = qchemPkgs.qchem.ambertools; }
             else
               null;
 
@@ -423,7 +427,7 @@
           # -------------------------------------------------------------------
           # Legacy packages (NUR convention: all top-level derivations, flat).
           # Driven by default.nix, which applies our overlays internally so that
-          # the derivations here are identical to what python313.withPackages
+          # the derivations here are identical to what python3.withPackages
           # returns.
           #
           # Plus two attributes that are not from default.nix.

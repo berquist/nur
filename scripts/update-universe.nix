@@ -67,7 +67,7 @@ let
     "homeModules"
     "darwinModules"
     "flakeModules"
-    "python313Packages"
+    "python3Packages"
     "internalPackages"
   ];
 
@@ -85,11 +85,11 @@ let
   extras = {
     "internalPackages.chemfiles" = nur.internalPackages.chemfiles;
     "internalPackages.trexio" = nur.internalPackages.trexio;
-    "python313Packages.monty" = nur.python313Packages.monty;
-    "python313Packages.pycifrw" = nur.python313Packages.pycifrw;
-    "python313Packages.qcelemental" = nur.python313Packages.qcelemental;
-    "python313Packages.qcengine" = nur.python313Packages.qcengine;
-    "python313Packages.tensorpotential" = nur.python313Packages.tensorpotential;
+    "python3Packages.monty" = nur.python3Packages.monty;
+    "python3Packages.pycifrw" = nur.python3Packages.pycifrw;
+    "python3Packages.qcelemental" = nur.python3Packages.qcelemental;
+    "python3Packages.qcengine" = nur.python3Packages.qcengine;
+    "python3Packages.tensorpotential" = nur.python3Packages.tensorpotential;
     # Reachable as `nix build .#graphrc` only — see ../flake.nix.
     inherit (pkgs') graphrc;
   };

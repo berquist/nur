@@ -1,7 +1,6 @@
 {
   lib,
   buildPythonPackage,
-  pythonAtLeast,
   fetchPypi,
   setuptools,
   versioningit,
@@ -18,8 +17,8 @@
   tqdm,
   pandas,
   pyjwt,
-  dateutils,
-  pytz,
+  packaging,
+  python-dateutil,
 }:
 
 buildPythonPackage rec {
@@ -37,6 +36,10 @@ buildPythonPackage rec {
     versioningit
   ];
 
+  # 0.70 moved four of these: `dateutils` became `python-dateutil` — a different
+  # distribution, not a rename of the same one — `pytz` was dropped, and
+  # `packaging` added.  The old list kept importing anyway, because pandas pulls
+  # both of the right ones in transitively, so nothing failed to say so.
   dependencies = [
     numpy
     msgpack
@@ -51,28 +54,23 @@ buildPythonPackage rec {
     tqdm
     pandas
     pyjwt
-    dateutils
-    pytz
+    packaging
+    python-dateutil
   ];
 
   pythonImportsCheck = [ "qcportal" ];
 
+  # No interpreter gate, and that is the whole reason ../../default.nix follows
+  # the channel's default python3 rather than pinning 3.13.  Until 0.70 this
+  # carried `broken = pythonAtLeast "3.14"`: 0.65 was pydantic v1 throughout,
+  # and qcelemental replaces every QCSchema v1 name with a placeholder class on
+  # 3.14 (see _make_placeholder in qcelemental/models/v1/__init__.py), one of
+  # which is the `Array` that dataset_models.py subscripts as `index: Array[str]`.
+  # 0.70 asks for pydantic>=2.11, declares requires-python = ">=3.10" with no
+  # ceiling, and reaches qcelemental.models._v1v2 rather than the v1 shim, so
+  # the mechanism cannot fire.  ../aiida-psi4 is the one package here that still
+  # instantiates a v1 model, and carries the marking on its own account.
   meta = with lib; {
-    # qcportal 0.65 is built on pydantic v1 throughout, and qcelemental refuses
-    # to provide QCSchema v1 on Python 3.14+: _use_real_if_possible() in
-    # qcelemental/models/v1/__init__.py returns False for sys.version_info >=
-    # (3, 14), replacing every v1 name with a placeholder class.  One of those
-    # names is Array, which dataset_models.py subscripts as
-    #
-    #   index: Array[str]
-    #
-    # The placeholder has an ordinary metaclass, so pydantic v1 resolving that
-    # annotation dies with "TypeError: type 'Array' is not subscriptable" and
-    # pythonImportsCheck turns it into a build failure.  Nothing here can patch
-    # around it, and there is no release to move to: 0.65 is the newest, and
-    # upstream's pydantic v2 migration is unreleased.  Drop this (and the
-    # python313 pin in ../../default.nix) once that lands.
-    broken = pythonAtLeast "3.14";
     description = "Python client for QCFractal / QCArchive servers";
     homepage = "https://github.com/MolSSI/QCFractal";
     license = lib.licenses.bsd3;

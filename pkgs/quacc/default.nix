@@ -274,7 +274,7 @@ buildPythonPackage (finalAttrs: {
   #
   # `psi4_recipes` — one test, gated on importing the `psi4` *module*.  Psi4 is
   # in NixOS-QChem, but a Python extension from that input is built against its
-  # interpreter rather than this repository's python313 pin, which is the whole
+  # interpreter rather than the one this repository follows, which is the whole
   # subject of the `qchemPkgs` note in ../../flake.nix.
   #
   # `torchsim_recipes` — torch-sim, whose core dependency
@@ -375,7 +375,7 @@ buildPythonPackage (finalAttrs: {
   # anyway — it is also the only thing in this repository that builds
   # fairchem-core, the three data distributions, clusterscope and
   # ase-db-backends at all (they are internal, and `ci.nix` does not descend
-  # into `python313Packages`; see the standing item in ../../docs/TODO.md),
+  # into `python3Packages`; see the standing item in ../../docs/TODO.md),
   # and torch arriving does *not* wake the checkpoint tests.
   #
   # That last point is the one to check before touching this.  Four

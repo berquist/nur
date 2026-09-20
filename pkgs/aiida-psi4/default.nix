@@ -1,6 +1,7 @@
 {
   lib,
   buildPythonPackage,
+  pythonAtLeast,
   fetchFromGitHub,
 
   # build-system
@@ -104,7 +105,7 @@ buildPythonPackage {
   # with "true" quoted, because YAML reads it as a boolean otherwise and the
   # config is validated against a voluptuous schema that wants a str.  Then
   #
-  #     nix build -L --keep-failed .#python313Packages.aiida-psi4
+  #     nix build -L --keep-failed .#python3Packages.aiida-psi4
   #     ls <kept build dir>/source/tests/data
   #
   # The example_01 hunk is what makes that digest hold on more than one channel
@@ -289,6 +290,25 @@ buildPythonPackage {
   ];
 
   meta = {
+    # The last package here that QCSchema v1 still blocks.  ../qcportal shed
+    # its own marking when 0.70 moved to pydantic v2, and ../../default.nix
+    # dropped the python313 pin with it; this one could not follow.
+    #
+    # aiida_psi4/data/__init__.py does `from qcelemental import models` and
+    # `schema = models.AtomicInput`.  qcelemental/models/__init__.py is
+    # `from .v1 import *`, and on 3.14 `pydantic.v1` is unavailable, so
+    # _make_placeholder in qcelemental/models/v1/__init__.py substitutes a class
+    # whose __init__ raises RuntimeError for every v1 name.  Importing is
+    # therefore fine — pythonImportsCheck passes — and AtomicInput.validate(),
+    # which instantiates `self.schema`, raises.  The failure is in the check
+    # phase, not at import, which is why nothing about this shows up in an
+    # evaluation.
+    #
+    # The fix is a port to qcelemental.models.v2 (or the _v1v2 shim qcportal
+    # 0.70 uses), and it drags the recorded mock-psi4 fixture digests with it:
+    # those hash a provenance string naming `qcelemental.models.v1.results`.
+    # See docs/TODO.md.
+    broken = pythonAtLeast "3.14";
     description = "AiiDA plugin for the Psi4 quantum chemistry package";
     homepage = "https://github.com/ltalirz/aiida-psi4";
     license = lib.licenses.mit;

@@ -88,7 +88,7 @@ let
   );
 
   # Everything the cheminformatics overlay lifts to the top level and
-  # ../../default.nix re-exports through python313Packages.  Deliberately not
+  # ../../default.nix re-exports through python3Packages.  Deliberately not
   # derived from either file — the point is that the hand-written lists agree.
   exportedPackages = [
     "dough"
@@ -120,7 +120,7 @@ let
   ];
 
   # The dependencies that stop at the pythonPackagesExtensions step: reachable
-  # through python313Packages, never top-level attributes, so that ci.nix does
+  # through python3Packages, never top-level attributes, so that ci.nix does
   # not build each of them in its own right.
   internalDependencies = [
     "basis-set-exchange"
@@ -141,11 +141,11 @@ lib.fix (self: {
   # Overlay contract
   # ==========================================================================
 
-  # The top-level aliases and python313Packages must be the same derivation,
+  # The top-level aliases and python3Packages must be the same derivation,
   # or every consumer of the overlay builds the closure twice.
   cheminformatics-toplevel-packages = check "cheminformatics-toplevel-packages" (
     lib.all (
-      name: overlaidPkgs ? ${name} && overlaidPkgs.${name} == overlaidPkgs.python313Packages.${name}
+      name: overlaidPkgs ? ${name} && overlaidPkgs.${name} == overlaidPkgs.python3Packages.${name}
     ) exportedPackages
   );
 
@@ -162,7 +162,7 @@ lib.fix (self: {
   # Dependencies stay reachable but stay out of the top level.
   cheminformatics-dependencies-are-internal = check "cheminformatics-dependencies-are-internal" (
     lib.all (
-      name: overlaidPkgs.python313Packages ? ${name} && !(overlaidPkgs ? ${name})
+      name: overlaidPkgs.python3Packages ? ${name} && !(overlaidPkgs ? ${name})
     ) internalDependencies
   );
 
@@ -173,7 +173,7 @@ lib.fix (self: {
   # build time, for a reason that points at the wrong package.
   #
   # Three sets rather than one, because the dependants disagree about where
-  # they look.  qmzyme finds rdkit through python313Packages; aqme and
+  # they look.  qmzyme finds rdkit through python3Packages; aqme and
   # digichem-core are `final.python3.pkgs.callPackage`s, and on the flake path
   # that is the set cclib's overlay has rebuilt — the same "which set am I in"
   # trap the cclib tests below exist for.
@@ -183,7 +183,7 @@ lib.fix (self: {
   # an inequality would pass whether the repair applied or not.
   cheminformatics-rdkit-repair-applies = check "cheminformatics-rdkit-repair-applies" (
     lib.all (set: lib.hasInfix ".dist-info" (set.rdkit.postInstall or "")) [
-      overlaidPkgs.python313Packages
+      overlaidPkgs.python3Packages
       overlaidPkgs.python3.pkgs
       cclibPkgs.python3.pkgs
     ]

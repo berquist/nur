@@ -30,14 +30,14 @@ let
   #   * `internalPackages` as a single target, because its `filterAttrs` forces
   #     every member while the attrset is being built, so an abort there lands
   #     on the attribute itself rather than on anything under it;
-  #   * `python313Packages.<name>` for every directory under ../pkgs the set
+  #   * `python3Packages.<name>` for every directory under ../pkgs the set
   #     actually has.  Most of this repository is reachable no other way —
   #     about sixty packages are internal dependencies with no top-level alias,
   #     and `deepmd-kit`, which cost a CI round, is one of them.
   #
   # Intersecting the third list with `attrNames` is what keeps it honest.  A
   # directory name is not always the attribute — ../pkgs/chemfiles-python is
-  # `python313Packages.chemfiles` — and probing a name the set does not have
+  # `python3Packages.chemfiles` — and probing a name the set does not have
   # would report a gap that is really a spelling.
 
   # The same list ../overlay.nix and ../ci.nix filter on, for the same reason:
@@ -49,7 +49,7 @@ let
     "homeModules"
     "darwinModules"
     "flakeModules"
-    "python313Packages"
+    "python3Packages"
     "internalPackages"
   ];
 
@@ -60,8 +60,8 @@ let
   targets =
     lib.subtractLists reserved (builtins.attrNames root)
     ++ [ "internalPackages" ]
-    ++ map (name: "python313Packages.${name}") (
-      builtins.filter (name: root.python313Packages ? ${name}) ourDirectories
+    ++ map (name: "python3Packages.${name}") (
+      builtins.filter (name: root.python3Packages ? ${name}) ourDirectories
     );
 
   # ---------------------------------------------------------------------------

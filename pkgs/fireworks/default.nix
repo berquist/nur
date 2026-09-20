@@ -230,11 +230,25 @@ buildPythonPackage (finalAttrs: {
   # ServerStore.__init__ opens it for reading unconditionally once the variable
   # is set, so an absent path is a FileNotFoundError rather than an empty
   # database.  Seeding it with `{}` is what upstream's own test does.
+  #
+  # The conftest is the fourth thing, and it is the other half of that mock.
+  # Upstream ships none at all; this one forces the `fork` start method, which
+  # Python 3.14 stopped defaulting to on Linux (gh-84559).  `test_tracker_mlaunch`
+  # is what noticed, and the failure reports nothing — the launcher returns
+  # cleanly, logs nothing, raises nothing, and runs no rockets.  The reason is
+  # this mock rather than FireWorks: `DataServer.setup()` pickles the LaunchPad
+  # into its manager process, which is right against a real server and wrong
+  # against mongomock, whose "server" is memory local to the process that made
+  # it.  See the conftest's own header for the measurements.
+  #
+  # Copied rather than written inline because the explanation is the bulk of it
+  # and belongs next to the code it governs.
   preCheck = ''
     export HOME="$(mktemp -d)"
     export MPLBACKEND=Agg
     export MONGOMOCK_SERVERSTORE_FILE="$(mktemp -d)/mongodb.json"
     echo '{}' > "$MONGOMOCK_SERVERSTORE_FILE"
+    cp ${./conftest.py} conftest.py
   '';
 
   # What the mock cannot reach, deselected the way upstream says to.  Its own

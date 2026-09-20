@@ -95,7 +95,7 @@ let
   # The two tests below are contracts for that one overlay, and
   # aiida-overlay-pymatgen-override-is-local is meaningless against a full
   # composition: `overlays.materials` replaces pymatgen with the 2026 split
-  # deliberately, so `python313Packages.pymatgen` is buildable there no matter
+  # deliberately, so `python3Packages.pymatgen` is buildable there no matter
   # how local the aiida overlay's repair is.  It reported that as a leak.
   #
   # This is why the failure showed up in `just check` and not `just tests`:
@@ -152,11 +152,11 @@ let
   # Everything the aiida overlay lifts to the top level of pkgs and
   # ../../default.nix re-exports.  Deliberately not derived from either file:
   # the point of the two tests below is that three hand-written lists — this
-  # one, the `inherit (final.python313Packages)` in ../../overlays/default.nix
+  # one, the `inherit (final.python3Packages)` in ../../overlays/default.nix
   # and the `inherit (py)` in ../../default.nix — say the same thing.
   #
   # The tier-1 to tier-3 dependencies are absent on purpose.  They stay
-  # reachable through python313Packages and are not top-level attributes, so
+  # reachable through python3Packages and are not top-level attributes, so
   # ci.nix does not build them in their own right.
   exportedPackages = [
     "aiida-core"
@@ -206,13 +206,13 @@ lib.fix (self: {
   # ==========================================================================
 
   # mkPackageOption in the module resolves against the *top level* of pkgs, not
-  # python313Packages.  The plugins are aliased for the same reason: a NixOS
+  # python3Packages.  The plugins are aliased for the same reason: a NixOS
   # configuration writes `services.aiida.plugins = [ pkgs.aiida-cp2k ]`.
   aiida-overlay-toplevel-packages = check "aiida-overlay-toplevel-packages" (
     lib.all (
       name:
       brokenOverlaidPkgs ? ${name}
-      && brokenOverlaidPkgs.${name} == brokenOverlaidPkgs.python313Packages.${name}
+      && brokenOverlaidPkgs.${name} == brokenOverlaidPkgs.python3Packages.${name}
     ) exportedPackages
   );
 
@@ -254,9 +254,9 @@ lib.fix (self: {
   # The overlay must not disturb the QCArchive family, which shares the
   # interpreter: the pymatgen override is a `let` binding inside the package-set
   # extension, threaded by hand into the two packages that need it, precisely so
-  # that it cannot leak into python313Packages generally.
+  # that it cannot leak into python3Packages generally.
   aiida-overlay-pymatgen-override-is-local = check "aiida-overlay-pymatgen-override-is-local" (
-    !(builtins.tryEval overlaidPkgs.python313Packages.pymatgen.drvPath).success
+    !(builtins.tryEval overlaidPkgs.python3Packages.pymatgen.drvPath).success
   );
 
   # ==========================================================================

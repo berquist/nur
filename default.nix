@@ -3,7 +3,7 @@
 # NUR entry point. Applies our overlays to a local pkgs' so that:
 #   nix-build -A qcportal                works
 #   nix-build -A qcfractal               works
-#   python313.withPackages (p: [...])    works (same store paths, no duplication)
+#   python3.withPackages (p: [...])      works (same store paths, no duplication)
 #
 # overlay.nix (the NUR template file) derives itself from this file by
 # filtering reserved names, so it continues to work unchanged.
@@ -18,58 +18,71 @@ let
   # Compose all overlays in overlays/ into one and apply it.
   pkgs' = pkgs.extend (pkgs.lib.composeManyExtensions (builtins.attrValues overlays));
 
-  # Pinned rather than python3Packages: nixpkgs-unstable has moved python3 to
-  # 3.14, where qcportal cannot even be imported (see pkgs/qcportal/default.nix
-  # for the qcelemental mechanism).  Following the default interpreter would
-  # mean this repo ships nothing at all on unstable, and would take every VM
-  # test in `nix flake check` down with it the moment flake.lock is bumped past
-  # the switch.  Revert to python3Packages once upstream releases its pydantic
-  # v2 migration.
+  # The channel's default interpreter, deliberately, and not a pinned version.
+  # This was `python313Packages` for as long as qcportal was pydantic v1: on
+  # 3.14 qcelemental replaces every QCSchema v1 name with a placeholder and
+  # qcportal could not be imported at all, so following the default would have
+  # meant shipping no QCArchive half on unstable.  qcportal 0.70 is pydantic v2
+  # and the gate is gone; see pkgs/qcportal/default.nix.
+  #
+  # What following the default means in practice: **the CI matrix now spans two
+  # interpreters, where the pin gave it one.**  nixpkgs-unstable and
+  # nixos-unstable are 3.14.7; nixos-26.05 is 3.13.15.  A channel that moves its
+  # python3 moves this repository with it, and nothing here names a version for
+  # that to disagree with.
+  #
+  # So a per-interpreter failure is now a *per-leg* failure, and `just ci
+  # nixos-26.05` is no longer the same build as `just ci nixpkgs-unstable` with
+  # older dependencies — it is a different interpreter as well.  pkgs/aiida-psi4
+  # is the worked example: `broken = pythonAtLeast "3.14"` means it builds on
+  # the 26.05 leg and is skipped on the other two.  That is the shape to expect
+  # from anything else 3.14 turns out to break — mark it, do not re-pin.
   #
   # Keep in sync with the top-level aliases in overlays/default.nix; the
   # overlay-python-pin eval test asserts the two agree.
-  py = pkgs'.python313Packages;
+  py = pkgs'.python3Packages;
 in
 {
   # Reserved keys — not lifted into the nixpkgs overlay by overlay.nix.
   nixosModules = import ./nixos-modules;
   inherit overlays;
 
-  # The overlaid 3.13 package set, exposed so that the twenty-odd dependencies
-  # this repo carries but does not re-export at the top level — mdanalysis,
-  # griddataformats, lwreg, kiwipy and the rest — have an attribute path
-  # something can point at:
+  # The overlaid default package set, exposed so that the twenty-odd
+  # dependencies this repo carries but does not re-export at the top level —
+  # mdanalysis, griddataformats, lwreg, kiwipy and the rest — have an attribute
+  # path something can point at:
   #
-  #   nix run nixpkgs#nix-update -- --flake python313Packages.mdanalysis
+  #   nix run nixpkgs#nix-update -- --flake python3Packages.mdanalysis
   #
   # Without it those packages are reachable only from inside a derivation, and
   # nothing can be automated against them.
   #
-  # **Reserved, and it must stay that way.**  Lifting a `python313Packages` key
-  # into a nixpkgs overlay would replace the consumer's own python313Packages
+  # **Reserved, and it must stay that way.**  Lifting a `python3Packages` key
+  # into a nixpkgs overlay would replace the consumer's own python3Packages
   # with this one — computed from *our* pkgs', with our overlays already baked
   # in.  The isReserved predicate is spelled out in both ./overlay.nix and
   # ./ci.nix; adding a reserved key means editing both.
   #
-  # dontRecurseIntoAttrs is the other half.  This is the *whole* 3.13 set, some
-  # ten thousand packages, and both `nix-env -f . -qa '*'` (what `just ci-eval`
-  # runs) and ci.nix's flattenPkgs descend into an attrset only when it carries
-  # recurseForDerivations.  Clearing it keeps a named lookup working while
-  # keeping every traversal out — otherwise CI would try to build all of
+  # dontRecurseIntoAttrs is the other half.  This is the *whole* default set,
+  # some ten thousand packages, and both `nix-env -f . -qa '*'` (what `just
+  # ci-eval` runs) and ci.nix's flattenPkgs descend into an attrset only when it
+  # carries recurseForDerivations.  Clearing it keeps a named lookup working
+  # while keeping every traversal out — otherwise CI would try to build all of
   # nixpkgs' Python packages, and the eval pass would force the broken ones.
-  python313Packages = pkgs'.lib.dontRecurseIntoAttrs py;
+  python3Packages = pkgs'.lib.dontRecurseIntoAttrs py;
 
   # Python *applications*: reached through the overlay rather than
   # callPackage'd here, so that pkgs.dotdrop and this attribute are the same
-  # derivation.  Built against the default python3, not the 3.13 pin below.
+  # derivation.  They are applications rather than modules, which is why they
+  # are top-level attributes instead of members of `py` below — nixpkgs rejects
+  # a non-module in a Python package set.
   #
   # harmonwig is here too, but on the bare NUR path it carries meta.broken:
   # its cclib comes from a flake input that ./overlays cannot reach.  See
   # pkgs/harmonwig/default.nix, and flake.nix for the working instantiation.
-  #
-  # moltui is a third: a TUI application rather than a library, so it is a
-  # buildPythonApplication and could not sit in python313Packages even if the
-  # pin were wanted — nixpkgs rejects a non-module in a Python package set.
+  # It is also the one of the three built from `final.python3.pkgs` rather than
+  # `final.python3Packages`, which is not the same set once cclib's overlay has
+  # rebuilt python3; see the note at that callPackage in overlays/default.nix.
   inherit (pkgs') dotdrop harmonwig moltui;
 
   # anilist-mal-sync: a Go CLI, not Python at all, reached through the
@@ -104,7 +117,7 @@ in
   # There is deliberately no top-level alias for the *Python* binding, which is
   # also called `chemfiles`: one name cannot be both, and this is the split both
   # halves of the audience expect.  `pkgs.chemfiles` is the shared library, the
-  # way every other distribution spells it; `python313Packages.chemfiles` is the
+  # way every other distribution spells it; `python3Packages.chemfiles` is the
   # module, the way pip spells it.  See the callPackage site in
   # overlays/default.nix for how the two are kept from resolving to each other.
   inherit (pkgs') chemfiles;
@@ -155,32 +168,32 @@ in
   # package (see ci.nix); `monty`, `pycifrw`, `qcelemental` and `qcengine` are
   # guarded backports, so on a new enough channel the attribute is nixpkgs' own
   # derivation and building it here would be CI populating a cache with packages
-  # it does not own.  All five stay reachable as `python313Packages.<name>`.
+  # it does not own.  All five stay reachable as `python3Packages.<name>`.
   #
   # recurseIntoAttrs is the whole mechanism.  Both `nix-env -f . -qa '*'` (what
   # `just ci-eval` runs) and ci.nix's flattenPkgs descend into an attrset only
-  # when it carries recurseForDerivations, which is exactly why python313Packages
-  # above clears it — that one is the whole 3.13 set and descending would mean
-  # all of nixpkgs.  This one is ours and bounded, so it takes the flag.
+  # when it carries recurseForDerivations, which is exactly why python3Packages
+  # above clears it — that one is the whole default set and descending would
+  # mean all of nixpkgs.  This one is ours and bounded, so it takes the flag.
   #
   # **Reserved in overlay.nix and deliberately not in ci.nix**, which is the one
   # asymmetry between those two copies of the predicate.  Lifting an
   # `internalPackages` key into a consumer's nixpkgs would be as wrong as
-  # lifting python313Packages; having ci.nix skip it would defeat the point of
+  # lifting python3Packages; having ci.nix skip it would defeat the point of
   # the attribute.  Both files say so at their own predicate.
   internalPackages = pkgs'.lib.recurseIntoAttrs {
     inherit (py) chemfiles trexio;
   };
 
-  # Python packages, reached through the extended python313Packages so that
-  # these derivations are identical to what python313.withPackages returns.
+  # Python packages, reached through the extended python3Packages so that
+  # these derivations are identical to what python3.withPackages returns.
   #
   # **Every Python package this repository defines is here**, the dependencies
   # carried for a single dependant included, because being a top-level attribute
   # is what makes ci.nix build a package in its own right.  The exceptions are
   # named at internalPackages above, and there are seven: two name collisions
   # that live there, and `tensorpotential`, `monty`, `pycifrw`, `qcelemental`
-  # and `qcengine`, which are reachable as `python313Packages.<name>` for
+  # and `qcengine`, which are reachable as `python3Packages.<name>` for
   # reasons given at that note.
   #
   # Grouped by family, alphabetical within each group.

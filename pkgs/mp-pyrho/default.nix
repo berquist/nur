@@ -20,7 +20,7 @@
 # like).  The distribution is `mp-pyrho`, the import is `pyrho`.  Carried for
 # `pymatgen-analysis-defects`, which lists `mp-pyrho>=0.4.4` — and through it for
 # `emmet-core`'s defects tests.  Not re-exported: its one dependant here reaches
-# it through `python313Packages`.
+# it through `python3Packages`.
 buildPythonPackage (finalAttrs: {
   pname = "mp-pyrho";
   version = "0.5.1-unstable-2026-05-11";

@@ -53,61 +53,89 @@ own `contrib` wrappers still set that attribute by hand.  That is a pull request
 on yellowbrick; it exists to unblock `fairchem-applications-ocx`, which is itself unpackaged and
 wanted by nothing here.  Thirty modules are excluded and 606 tests run.
 
-## Allow Python 3.14
+## Port aiida-psi4 off QCSchema v1
 
-**Want:** `default.nix`'s `py = pkgs'.python313Packages` to become `python3Packages` again, so
-this repository follows the channel's default interpreter instead of pinning one behind it.
+**Want:** `pkgs/aiida-psi4` buildable on Python 3.14.  It is the **only** package here still
+blocked by qcelemental's v1 shim, and the last remnant of the python313 pin described in the
+item below.
 
-**One package blocks it, and the other three follow it.**  `rg -l 'pythonAtLeast "3.14"' pkgs/`
-returns exactly four, and they are the QCArchive family: `qcportal`, and `qcfractal`,
-`qcfractalcompute` and `qcarchivetesting`, which each carry their own marking because
-`meta.broken` does not propagate to dependants.  Everything else in the repository — 137
-packages — has no 3.14 gate at all and has simply never been evaluated against it.
+`aiida_psi4/data/__init__.py` does `from qcelemental import models` and
+`schema = models.AtomicInput`.  `qcelemental/models/__init__.py` is `from .v1 import *`, and on
+3.14 `pydantic.v1` is unavailable, so `_make_placeholder` in `qcelemental/models/v1/__init__.py`
+substitutes a class whose `__init__` raises `RuntimeError` for every v1 name.  **The import
+succeeds** — `pythonImportsCheck` is green — and `AtomicInput.validate()`, which instantiates
+`self.schema`, raises.  So this fails in the check phase and is invisible to any evaluation,
+which is why it was missed when the pin came off; `broken = pythonAtLeast "3.14"` is the
+placeholder marking, not the fix.
 
-**The mechanism is written out at `pkgs/qcportal/default.nix`'s `meta`** and is worth reading
-before planning anything, because it is not a deprecation that a patch can paper over.
-qcportal 0.65 is pydantic v1 throughout; `qcelemental`'s
-`_use_real_if_possible()` returns `False` for `sys.version_info >= (3, 14)` and replaces every
-QCSchema v1 name with a placeholder class; one of those names is `Array`, which
-`dataset_models.py` subscripts as `index: Array[str]`; the placeholder has an ordinary metaclass,
-so pydantic v1 dies with `TypeError: type 'Array' is not subscriptable`.  `just repro-gh`
-reproduces it in one command.
+**The target exists and is a one-line import change on the face of it.** Both
+`qcelemental.models.v2.AtomicInput` and `qcelemental.models._v1v2.AtomicInput` are present in
+0.50.4.  The `_v1v2` shim is what qcportal 0.70 reaches for and is the more conservative choice,
+since it accepts either schema version.
 
-**Upstream's pydantic v2 migration has since been released, and the blocker is a version bump.**
-Read out of `wc/QCFractal` on 2026-09-13, at tag `v0.70` (2026-08-17):
+**Expect the fixtures to be the work, not the import.**  The recorded `mock-psi4-*` directories
+are named after a digest of the calculation inputs, and `example_01` already overwrites two
+`provenance.version` strings for exactly this reason — see the long note above `postPatch` in
+`pkgs/aiida-psi4/default.nix`.  One of those provenance strings is
+`"routine": "qcelemental.models.v1.results"`, which v2 changes, so every digest moves with the
+port and the directories have to be renamed.  That note also records how to obtain the new
+digests.  The `pydantic.v1.error_wrappers` rewrite in `postPatch` goes at the same time: under
+v2 the exception the test wants is pydantic v2's own `ValidationError`.
 
-- `qcportal/pyproject.toml` asks for `pydantic>=2.11`, so the v1 half is gone;
-- `requires-python = ">=3.10"`, with no upper bound, so nothing declares a 3.14 gate;
-- there is **no `Array[` anywhere** in `qcportal/`, and no `qcelemental.models.v1` import — it
-  reaches `qcelemental.models._v1v2` instead, so the placeholder mechanism cannot fire;
-- its two version bounds are already satisfied by the locked nixpkgs: `qcelemental>=0.50.2,<0.70a0`
-  against 0.50.4, and `qcengine>=0.50,<0.70a0` against 0.50.0 for the other three packages.
+## Follow the channel's default interpreter
 
-Four dependency lines also move: `dateutils` → `python-dateutil`, `pytz` dropped, `packaging`
-added, `pyjwt>=2.10` and `apsw>=3.42` floored.  Expect the bump to be the easy part and the
-0.65 → 0.70 API delta across `pkgs/qcfractal`, `pkgs/qcfractalcompute` and the two NixOS modules
-to be the work.  `just update-scan qcportal` is the first thing to run.
+**Done.**  `default.nix`'s `py` is `pkgs'.python3Packages`, the exposed attribute is
+`python3Packages`, and the five `inherit (final.python3Packages)` lists in `overlays/default.nix`
+follow.  Recorded because the reasoning took two separate blockers with it and because the
+*measurement* is reusable.
 
-**So this is a waiting game with a preparation half, and the preparation is the useful part.**
-Nobody knows what *else* would break, because the pin has meant nothing here is ever built on
-3.14.  Two things worth doing before the blocker lifts:
+**What unblocked it.**  qcportal 0.65 was pydantic v1 throughout, and `qcelemental` replaces
+every QCSchema v1 name with a placeholder class on 3.14; one of those names is `Array`, which
+`dataset_models.py` subscripted as `index: Array[str]`, and pydantic v1 resolving that
+annotation died with `TypeError: type 'Array' is not subscriptable`.  0.70 (2026-08-17) asks for
+`pydantic>=2.11`, declares `requires-python = ">=3.10"` with no ceiling, contains no `Array[`
+anywhere, and reaches `qcelemental.models._v1v2` rather than the v1 shim.  All four QCArchive
+packages were already at 0.70 when the pin came off; only their `broken = pythonAtLeast "3.14"`
+markings were left behind.
 
-1. **Measure.**  Evaluate `default.nix` against a 3.14 package set and see how many of the 137
-   ungated packages even evaluate — nixpkgs' own 3.14 set is missing packages that the 3.13 one
-   has, which is the `e3nn` failure mode again and is an evaluation error rather than a build
-   one.  This costs nothing and can be done from the sandbox.
-2. **Decide what "allow" means.**  There are two different goals here and they need different
-   work: *following* the channel default (one line in `default.nix`, everything moves at once,
-   QCArchive disappears from the repository on unstable until upstream releases), versus
-   *supporting* 3.14 alongside 3.13 (both sets exposed, `python314Packages` beside
-   `python313Packages`, and a second copy of every list in `AGENTS.md`'s "three edits" section).
-   The first is what the comment in `default.nix` assumes; the second is what a consumer on
-   unstable actually wants today.
+**The 0.70 dependency delta had never been applied**, because the updater bumps a version and a
+hash and nothing else.  `pkgs/qcportal` was still declaring `dateutils` and `pytz` where
+upstream asks for `python-dateutil` and `packaging` — and `dateutils` is a *different*
+distribution, not a rename.  It imported anyway, because pandas pulls the right ones in
+transitively.  Worth remembering the next time a bump looks clean: **`just update` does not read
+`pyproject.toml`.**
 
-**Do not drop the pin before qcportal is fixed.**  The note at `default.nix` says why: the whole
-QCArchive half of this repository, both NixOS modules included, would ship nothing on unstable,
-and `nix flake check` would take every VM test down with it the moment `flake.lock` moved past
-the switch.
+**The measurement, which cost nothing and should be redone rather than trusted.**  Every
+directory under `pkgs/` was probed against `python314Packages` with all overlays composed, in
+one `nix eval --store dummy://`, forcing `drvPath` on anything not broken or unfree.  121
+attributes came back clean; the rest were the four QCArchive gates, `aiida-gaussian` (cclib, by
+design), `tensorpotential` (unfree), and names that are top-level or `python3.pkgs` attributes
+rather than members of a Python set.  **No evaluation gaps at all** — which had been the stated
+fear, on the strength of the `e3nn` experience.  Builds were a separate question and are not
+answered by this.
+
+**The Psi4 cache came back.**  `flake.nix`'s `qchemPkgs` rewrites nixpkgs-qchem's `python3` to
+whatever interpreter the worker runs, and while that disagreed with nixpkgs-qchem's own default
+it cost a from-source Psi4 on every build.  The locked `nixpkgs-qchem` is 26.11pre-git with
+`python3 = 3.14.7`, so the override is now a no-op and `nix-qchem.cachix.org` is live again.
+The override stays: either pin can move and part them again.
+
+**The CI matrix now spans two interpreters, and that is the part to plan around.**
+nixpkgs-unstable and nixos-unstable are 3.14.7; **nixos-26.05 is 3.13.15**.  Under the pin all
+three legs built the same interpreter and differed only in their dependencies, so a build
+failure was a dependency failure.  It no longer is: `just ci nixos-26.05` is a different
+interpreter as well, and a 3.14 regression will show on two legs out of three while 26.05 stays
+green.  Read a matrix failure that way before reaching for `pythonRelaxDeps`.
+
+`pkgs/aiida-psi4` is the worked example and the pattern to copy — `broken = pythonAtLeast
+"3.14"` builds it on 26.05 and skips it elsewhere.  **Mark the package, do not re-pin the
+repository.**
+
+**Not done, deliberately:** *supporting* 3.13 and 3.14 side by side — both sets exposed,
+`python314Packages` beside `python313Packages`, and a second copy of every list in `AGENTS.md`'s
+"three edits" section.  Following the default was chosen instead, so there is exactly one
+exposed set and one copy of each list, and the two interpreters come from the channels rather
+than from anything written here.
 
 ## Fill in gpulite's hash, and build vesin
 
@@ -474,6 +502,15 @@ made measuring the above possible at all.
 
 ## Stop missing `nix-qchem.cachix.org`
 
+**Resolved by option 1, and by accident rather than by force — but re-read this before assuming
+it stays resolved.**  Dropping this repository's python313 pin moved the worker's interpreter to
+the channel default, and the locked `nixpkgs-qchem` is 26.11pre-git with `python3 = 3.14.7`, so
+the `qchemPkgs` override described below rewrites `python3` to the interpreter it already was.
+The rewrite is a no-op, the derivation hashes match NixOS-QChem's own, and the cache is live.
+**Nothing enforces that.**  Either pin can move independently and put the two back out of step,
+at which point this item is live again and the rest of it applies unchanged.  Option 3 is still
+the only answer that does not depend on coincidence.
+
 **Want:** the packages this repository takes from NixOS-QChem to come out of NixOS-QChem's own
 binary cache, instead of being rebuilt from source.
 
@@ -496,10 +533,11 @@ expensive one, and CFOUR would be if anything here wanted it.
 
 **Options, none of them costed yet:**
 
-1. *Move this repository's Python pin to whatever `nixpkgs-qchem` calls `python3`.*  The comment
-   at `qchemPkgs` already says the override "becomes a no-op the moment the two agree again".
-   The pin is `python313` and NixOS-QChem's list carries `qchem.python312`, so today they do not
-   agree.  Cheapest if the versions ever line up on their own; not something to force.
+1. *Move this repository's Python pin to whatever `nixpkgs-qchem` calls `python3`.*  **This is
+   what happened**, though not for this reason: the pin was dropped so the repository follows
+   the channel default, and nixpkgs-qchem's nixpkgs happens to default to the same interpreter.
+   Cheapest, and it was never something to force — note that it now holds by coincidence, since
+   neither side is pinned to the other.
 2. *Take Psi4 from `nixos-qchem.packages.${system}.psi4` — their built output — and drop the
    interpreter invariant for it.*  Rejected once already, and the note at `psi4` says why: that
    output is a `filterAttrs` over the entire qchem set, so selecting one package forces the
@@ -578,11 +616,11 @@ from the first failure.
 The rest of this entry is the reasoning that produced the change, kept because the trade-offs in
 it are still the ones to weigh if the shape needs revisiting.
 
-`ci.nix` walks `default.nix` and skips `python313Packages` — deliberately, and the note there
+`ci.nix` walks `default.nix` and skips `python3Packages` — deliberately, and the note there
 explains why: it is the whole 3.13 set, so descending would try to build all of nixpkgs.  The
 consequence was not thought through.  Of the 138 packages this repository defines, 68 are
 re-exported as top-level attributes and **70 are internal**, reachable only through
-`python313Packages`.
+`python3Packages`.
 
 Most of those 70 are still built, as build-time dependencies of something re-exported —
 `plumpy` and `kiwipy` come along with `aiida-core`, `doped` and `pydefect` with `shakenbreak`.
@@ -622,7 +660,7 @@ A green `ci-matrix` said nothing about it either way.
 **Options, roughly in order of preference:**
 
 1. Give `default.nix` a second exposed set — say `internalPackages`, carrying
-   `recurseForDerivations` where `python313Packages` carries `dontRecurseIntoAttrs` — holding
+   `recurseForDerivations` where `python3Packages` carries `dontRecurseIntoAttrs` — holding
    exactly the packages this repo defines but does not re-export.  `ci.nix` then picks it up
    without any risk of descending into nixpkgs.  Costs a fourth hand-maintained list, which
    `tests/*/default.nix` already shows the shape of.
@@ -722,7 +760,7 @@ what decides, not the test files.
 opt in, while `just ci-matrix` keeps building and caching the CPU closure only.
 
 Nothing here is CPU-only by choice.  `config.cudaSupport` is `false` — nixpkgs' default — so
-`python313Packages.torch.cudaSupport` is false and every torch dependant in this repo follows.
+`python3Packages.torch.cudaSupport` is false and every torch dependant in this repo follows.
 `pkgs/deepmd-kit` is the one place a CPU decision is written down (`DP_VARIANT = "cpu"`), and
 that is downstream of the same fact: building CUDA kernels against a CPU-only torch is wasted
 work.  If this goes ahead, that line is the one to revisit.
@@ -761,7 +799,7 @@ the distribution at all — Warp kernels are ordinary Python functions that warp
 *run* time, and nixpkgs builds warp-lang with `standaloneSupport = true`, its LLVM CPU backend,
 which it exercises in its own sandbox as `warp-lang.passthru.tests.cpu`.  So this is a pure
 Python package with two dependencies, and it is packaged: `pkgs/nvalchemi-toolkit-ops`, internal,
-reachable as `python313Packages.nvalchemi-toolkit-ops` and built by `internalPackages`.
+reachable as `python3Packages.nvalchemi-toolkit-ops` and built by `internalPackages`.
 
 **What remains, in order:**
 

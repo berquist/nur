@@ -18,7 +18,7 @@ let
   # Keep in sync with the same predicate in ./overlay.nix — with one deliberate
   # exception, named below.
   #
-  # python313Packages is the whole 3.13 set, exposed so that nix-update can
+  # python3Packages is the whole default set, exposed so that nix-update can
   # reach the dependencies ./default.nix does not re-export.  It carries
   # dontRecurseIntoAttrs, so flattenPkgs below would skip it anyway; naming it
   # here says so on purpose rather than by accident.
@@ -39,7 +39,7 @@ let
     || n == "homeModules"
     || n == "darwinModules"
     || n == "flakeModules"
-    || n == "python313Packages";
+    || n == "python3Packages";
   isDerivation = p: isAttrs p && p ? type && p.type == "derivation";
 
   # Two halves, and the second one is not what it looks like.
@@ -65,7 +65,7 @@ let
   # The repository does now carry one unfree package, and the way it is arranged
   # is worth reading beside this.  ../pkgs/tensorpotential is under a
   # non-commercial licence, and it is reachable only as
-  # `python313Packages.tensorpotential` — not re-exported by ./default.nix at
+  # `python3Packages.tensorpotential` — not re-exported by ./default.nix at
   # all.  That is not this filter's doing: `just ci-eval` never comes through
   # here, and `nix-env -qa --drv-path` over an unfree top-level attribute would
   # fail before ci-build ever ran.  Keeping it out of the top level is what

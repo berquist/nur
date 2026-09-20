@@ -25,7 +25,7 @@
 let
   inherit (pkgs) lib;
 
-  py = pkgs.python313Packages;
+  py = pkgs.python3Packages;
   inherit (py) aiida-core;
 
   # The 0.x-format archives, which is where `testing1`..`testing4` live — the
