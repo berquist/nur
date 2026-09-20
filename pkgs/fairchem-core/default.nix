@@ -38,7 +38,6 @@
 
   # tests
   pytestCheckHook,
-  pytest-xdist,
   filelock,
   omegaconf,
   scikit-learn,
@@ -200,20 +199,11 @@ buildPythonPackage (finalAttrs: {
 
   # Upstream's `test` requirements, less what is already a dependency above.
   #
-  # `pytest-xdist` is here, which is the exception to the rule ../doped and
-  # ../fireworks set.  Those suites were never written for parallel workers;
-  # this one is.  Upstream's CI runs `pytest -n auto` over everything except
-  # three markers and a separate serial pass for one of them — see `pytestFlags`
-  # and `postCheck` below, which reproduce that split.  A serial run of
-  # `tests/core` takes 1221 s, and the machine it was measured on peaked at
-  # 9.64 GB of 125 GB, so the memory headroom for workers is ample.
-  #
   # `syrupy` is the snapshot plugin several of the model tests assert through;
   # without it they fail at fixture resolution rather than skipping.  The rest
   # are ordinary imports scattered through `tests/core`.
   nativeCheckInputs = [
     pytestCheckHook
-    pytest-xdist
     filelock
     omegaconf
     scikit-learn
@@ -319,16 +309,6 @@ buildPythonPackage (finalAttrs: {
     # `assert False is True` with the cause only in a logged traceback.  pytest's
     # own cache warnings are the same problem, and are the easier tell.
     chmod -R u+w .
-
-    # min(2, NIX_BUILD_CORES); see dontUsePytestXdist above for why this is not
-    # simply an entry in pytestFlags.  NIX_BUILD_CORES can be 0, meaning "all",
-    # in which case the cap is the whole answer.
-    workers=2
-    if [ "''${NIX_BUILD_CORES:-0}" -gt 0 ] && [ "$NIX_BUILD_CORES" -lt "$workers" ]; then
-      workers="$NIX_BUILD_CORES"
-    fi
-    echo "pytest-xdist: $workers workers (NIX_BUILD_CORES=''${NIX_BUILD_CORES:-unset})"
-    appendToVar pytestFlags "--numprocesses=$workers"
   '';
 
   # `tests/core` only.  The sibling trees test the other twelve distributions of
