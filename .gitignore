@@ -24,3 +24,5 @@ result-*
 # `just update-scan`'s report, read back by `just update-from-scan`.  A working
 # note about what upstream happens to hold today, rewritten whole by every scan.
 /.scratch/update-scan.json
+log-*
+log_*
