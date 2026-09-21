@@ -243,6 +243,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why do three packages rewrite a `default-version` in `postPatch`? | `pkgs/mda-xdrlib/default.nix` (`postPatch`) |
 | Why does MDAnalysis run no tests, and why is that not `doCheck = false`? | `pkgs/mdanalysis/default.nix` (the note above `pythonImportsCheck`) |
 | Why does the AiiDA eval suite need a second, broken-allowing package set? | `tests/aiida/default.nix` (`brokenPkgs`) |
+| Why can that set not be the one that says *which* packages are broken? | `tests/aiida/default.nix` (the note above `aiida-overlay-broken-set`), `tests/cheminformatics/default.nix` (the note above `strictPkgs`) |
+| Why is `aiida-psi4` expected to be broken on some channels and not others? | `tests/aiida/default.nix` (`brokenExportedPackages`), `pkgs/aiida-psi4/default.nix` (`meta.broken`) |
 | Why do eight packages come from a git tag rather than PyPI? | `pkgs/kiwipy/default.nix` (the `src` comment) |
 | Why is there no `aiida-shell` package any more, and where did its five names go? | `pkgs/aiida-workgraph/default.nix` (the note above `postPatch`), `pkgs/aiida-core/default.nix` (the vendored-shell note) |
 | Why does the shell VM test install no plugin at all now? | `tests/aiida/vm.nix` (`plugin-shell`) |

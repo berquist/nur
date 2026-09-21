@@ -104,9 +104,17 @@ let
   # gate, so the assertion held by accident.  The same trap as
   # `fullyOverlaidBrokenPkgs` below, from the other direction: that binding
   # needs the full composition, this one needs none of it.
+  #
+  # `allowBroken = false` explicitly rather than inherited from the caller,
+  # because aiida-overlay-broken-set below reads meta.broken out of this set and
+  # that flag is now what decides whether the attribute says anything at all;
+  # see the note there.  A caller carrying allowBroken in its own config would
+  # otherwise turn that assertion into one that cannot fail.
   pristinePkgs = import pkgs.path {
     inherit (pkgs.stdenv.hostPlatform) system;
-    inherit (pkgs) config;
+    config = pkgs.config // {
+      allowBroken = false;
+    };
   };
 
   overlaidPkgs = pristinePkgs.extend (import ../../overlays).aiida;
@@ -114,12 +122,15 @@ let
   # The same, but with broken packages allowed.  aiida-gaussian carries
   # meta.broken on every path this repo offers — its cclib comes from a flake
   # input that ../../overlays cannot reach; see
-  # ../../pkgs/aiida-gaussian/default.nix — and nixpkgs' checkMeta throws on any
-  # attribute access to a broken derivation, so the two contract tests below
-  # cannot even look at it through `overlaidPkgs`.  They still have to: those
-  # tests are about the aliases being present and pointing at the same
-  # derivation, which is exactly what rots silently, and buildability is
-  # ci.nix's job rather than theirs.
+  # ../../pkgs/aiida-gaussian/default.nix — and nixpkgs' checkMeta throws as soon
+  # as a broken derivation is *forced*, which comparing two derivations does.
+  # So the two contract tests that compare aliases cannot look at it through
+  # `overlaidPkgs`.  They still have to: those tests are about the aliases being
+  # present and pointing at the same derivation, which is exactly what rots
+  # silently, and buildability is ci.nix's job rather than theirs.
+  #
+  # Reading `meta` is the opposite case and needs no flag — it needs the flag to
+  # be *off*.  aiida-overlay-broken-set below says why.
   #
   # Re-imported from `pkgs.path` with `pkgs.config` carried over, rather than
   # from <nixpkgs>, so that a caller passing its own package set still gets that
@@ -185,7 +196,18 @@ let
   # so carries meta.broken.  Spelled out rather than derived, so that a package
   # becoming broken by accident shows up as a failing test rather than as a
   # quietly shrinking build set — see aiida-overlay-broken-set below.
-  brokenExportedPackages = [ "aiida-gaussian" ];
+  #
+  # aiida-gaussian is unconditional: the cclib it needs comes from a flake input
+  # on every channel.  aiida-psi4 is not, and the condition is taken from
+  # ../../pkgs/aiida-psi4/default.nix rather than restated — it is broken on
+  # 3.14 alone, where `pydantic.v1` is gone and qcelemental's v1 models become
+  # placeholders that raise.  It became true here when ../../default.nix dropped
+  # the python313 pin, and a flat list would fail on a channel whose python3 is
+  # older, for a package that is fine there.
+  brokenExportedPackages = [
+    "aiida-gaussian"
+  ]
+  ++ lib.optional (overlaidPkgs.python3.pythonAtLeast "3.14") "aiida-psi4";
 
   # aiida-init's ExecStart is a writeShellScript derivation; the daemon's is a
   # plain string.  `.text` rather than builtins.readFile: reading the store path
@@ -220,9 +242,19 @@ lib.fix (self: {
   # built and cached.  Assert the set exactly, in both directions: a new broken
   # package that nobody recorded, and a package that stopped being broken
   # without the list being updated, are both worth a failing test.
+  #
+  # Against `overlaidPkgs` rather than `brokenOverlaidPkgs`, and that is the
+  # whole of what this test can see.  nixpkgs' meta.broken is no longer the
+  # value a derivation declared: check-meta.nix computes it as
+  # `hasProblemKind "broken"`, and problems.nix generates that problem only when
+  # the configuration says no — `if allowBroken then attrs: false`.  Under the
+  # allowBroken set every package here therefore reads `broken = false`,
+  # aiida-gaussian included, and this assertion failed for a reason that had
+  # nothing to do with any package.  The set that allows broken packages is
+  # exactly the set that cannot tell which ones are.
   aiida-overlay-broken-set = check "aiida-overlay-broken-set" (
     lib.all (
-      name: (brokenOverlaidPkgs.${name}.meta.broken or false) == (lib.elem name brokenExportedPackages)
+      name: (overlaidPkgs.${name}.meta.broken or false) == (lib.elem name brokenExportedPackages)
     ) exportedPackages
   );
 
