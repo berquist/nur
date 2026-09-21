@@ -32,6 +32,12 @@ buildPythonPackage rec {
   # "'NoneType' object has no attribute 'isatty'".  See the header of the
   # patch, which redirects into StringIO objects instead, as the comment on
   # the line above it already claims it does.
+  #
+  # The patch adds `import io` as well, and that hunk is not optional: the
+  # module imports only json, sys and contextlib, so rewriting the `with` line
+  # alone trades the AttributeError for a NameError at the same place, which
+  # the server records as the same kind of failed calculation.  The
+  # qcfractal-compute-nwchem-singlepoint VM test is what distinguishes them.
   patches = [ ./qcengine-compute-stdout.patch ];
 
   build-system = [

@@ -23,17 +23,31 @@ import.
 
 Redirecting into throwaway StringIO objects keeps the real stdout clean, which
 is all this block is for, and is what the comment on the line above already
-describes ("the string io objects").  `io` is imported at the top of the file
-and otherwise unused, which suggests it is what was meant.
+describes ("the string io objects").
+
+The `import io` is the second hunk here rather than something upstream already
+provides, and leaving it out is a trap worth naming.  The module imports only
+`json`, `sys` and `contextlib`, so a lone rewrite of the `with` line swaps one
+failure for an identical-looking one: `NameError: name 'io' is not defined`,
+raised at the same place, reported through the same RuntimeError, and
+indistinguishable in the server's record from a calculation that genuinely
+went wrong.  The qcfractal-compute-nwchem-singlepoint VM test is what catches
+it — the record errors in under a second and the test times out waiting for a
+status it will never reach.
 
 --- a/qcfractalcompute/run_scripts/qcengine_compute.py
 +++ b/qcfractalcompute/run_scripts/qcengine_compute.py
-@@ -44,7 +44,7 @@
+@@ -1,3 +1,4 @@
++import io
+ import json
+ import sys
+ from contextlib import redirect_stdout, redirect_stderr
+@@ -44,7 +45,7 @@
          function_kwargs = json.load(f)
  
      # Redirect stdout/stderr to the string io objects. This can cause issues with how we return our json
 -    with redirect_stdout(None), redirect_stderr(None):
 +    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
          if "procedure" in function_kwargs:
-             ret = qcengine.compute_procedure(**function_kwargs)
-         else:
+             function_kwargs["program"] = function_kwargs.pop("procedure")
+ 
