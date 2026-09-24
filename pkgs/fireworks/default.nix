@@ -75,8 +75,21 @@ buildPythonPackage (finalAttrs: {
   # path and reads the same file through the same window; a consumer that hits
   # it gets a silently failed recovery, since the JSONDecodeError is swallowed
   # and reported as a launch that could not be recovered.  Worth sending
-  # upstream — the patch is four lines and changes no behaviour anyone relies
-  # on.  See ../../docs/TODO.md.
+  # upstream — the patch changes no behaviour anyone relies on.  See
+  # ../../docs/TODO.md.
+  #
+  # The same three facts say there are *two* writers at that moment, which the
+  # first version of this patch missed: `Rocket.run` calls `do_ping` itself
+  # right after `stop_backgrounds`, so its call and the ping thread's last one
+  # overlap.  Writing through one fixed temporary name turned the reader's
+  # JSONDecodeError into the loser's
+  #
+  #   FileNotFoundError: 'FW_ping.json.tmp' -> 'FW_ping.json'
+  #
+  # raised out of `Rocket.run`, which is worse than what it replaced — the
+  # offline launch completes and is recorded FIZZLED, and the test sees
+  # `assert 'FIZZLED' == 'COMPLETED'` rather than an intermittent skip.  The
+  # temporary name therefore carries the pid and thread id; see the patch.
   patches = [ ./atomic-ping-write.patch ];
 
   # monty 2026.7.16 made zopen's `mode` a required positional argument and
