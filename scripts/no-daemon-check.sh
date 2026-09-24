@@ -140,8 +140,9 @@ done
 
 # Reported after the first suite rather than next to NIX_PATH above, because
 # reading anything out of <nixpkgs> needs the store seeded first.  Worth a line:
-# the python313 pin is about this number, and if it is not what flake.lock says,
-# this run is not checking what CI checks.
+# the repository follows this interpreter rather than pinning one, so it is the
+# number every derivation here is built against — and if it is not what
+# flake.lock says, this run is not checking what CI checks.
 default_python=$(nix_eval --eval --expr '(import <nixpkgs> { }).python3.version' 2>/dev/null | tr -d '"')
 echo
 echo "<nixpkgs> default python3 = ${default_python:-unknown}"

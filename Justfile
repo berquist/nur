@@ -311,20 +311,6 @@ demux-log +args:
 build-logs *args:
     ./scripts/fetch-build-logs.sh {{ args }}
 
-# Builds qcportal against a channel's *default* interpreter rather than the
-# python313 the repo pins.
-#
-# With the pin and the meta.broken marking in place this now stops at "Package
-# is marked as broken". Set NIXPKGS_ALLOW_BROKEN=1 to push past that and see
-# the original "TypeError: type 'Array' is not subscriptable" out of
-# pythonImportsCheck — see pkgs/qcportal/default.nix for why.
-
-# Reproduce the Python 3.14 build failure from gh_log.
-repro-gh channel=default_channel:
-    NIX_PATH=nixpkgs={{ nixpkgs_url }}/{{ channel }}.tar.gz \
-      nix-build --no-out-link --show-trace \
-        -E 'with import <nixpkgs> { overlays = [ (import ./overlays).qcfractal ]; }; python3Packages.qcportal'
-
 # ---------------------------------------------------------------------------
 # Version updates
 #

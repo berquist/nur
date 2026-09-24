@@ -61,7 +61,27 @@ buildPythonPackage {
   # handles.  Applying it removes the `__del__` failures from the build log
   # entirely; it is not, on its own, enough to make upstream's LMDB tests pass,
   # for which see `disabledTestPaths` below.
-  patches = [ ./close-must-not-reopen.patch ];
+  #
+  # The second is a test bug rather than a library one, and it is the first
+  # thing this repository's move off the python313 pin turned up.
+  # `test_aselmdb_concurrent_random_reads` skips itself unless the start method
+  # is fork, but asks with `get_start_method(allow_none=True)` and treats the
+  # `None` that returns — meaning "nobody has chosen" — as fork.  Python 3.14
+  # moved the Linux default to `forkserver` (gh-84559), so the guard still sees
+  # `None`, still declines to skip, and the workers no longer inherit the
+  # module-level handle:
+  #
+  #     AssertionError: Global DB handle not set in worker
+  #
+  # Skipping on 3.14 would be the small fix and the wrong one — this is the
+  # only test that exercises reinitialising the LMDB environment in a forked
+  # child, which is what the `close()` patch above is about. The patch asks for
+  # a fork context explicitly instead, so the Pool keeps using fork whatever
+  # the default becomes. Both are upstream defects; see each patch header.
+  patches = [
+    ./close-must-not-reopen.patch
+    ./fork-context-not-default.patch
+  ];
 
   # Upstream asks for `psycopg2-binary`, which is the same source as psycopg2
   # published as a self-contained wheel with its own vendored libpq.  That

@@ -18,11 +18,13 @@
 #      happens to carry.
 #
 # Prefer 1.  The registry copy trails the lock, and the gap is not cosmetic:
-# with the registry at python3 = 3.13 and the lock at 3.14, everything that
-# hinges on the default interpreter — the python313 pin, the meta.broken
-# markings on the qcportal dependants, any `pkgs.python3.withPackages` in a
-# test — passes locally and fails in `nix flake check`.  That is exactly how
-# tests/qcarchive/vm.nix's compute-singlepoint slipped through.
+# this repository follows whatever `python3` its nixpkgs calls default, so with
+# the registry one interpreter behind the lock, *every* derivation here is
+# built against the wrong one and anything that hinges on the version — a
+# meta.broken marking like pkgs/aiida-psi4's, a `pkgs.python3.withPackages` in
+# a test — passes locally and fails in `nix flake check`.  That is exactly how
+# tests/qcarchive/vm.nix's compute-singlepoint slipped through, back when the
+# repository pinned 3.13 and only the QCArchive half was at stake.
 #
 # A flake input is added to the store as a fixed-output path (recursive
 # sha256, name "source"), so its location is a pure function of the narHash

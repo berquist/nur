@@ -20,7 +20,7 @@
 #   (no flag)   table of contents, then every section in full
 #   -l          table of contents only
 #   -o NAME     one section's lines, unprefixed and with no header; NAME may
-#               be a substring, so `-o postopus` finds python3.13-postopus
+#               be a substring, so `-o postopus` finds python3.14-postopus
 #
 # FILE defaults to stdin.
 

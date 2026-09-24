@@ -140,12 +140,12 @@ lib.fix (self: {
   # ==========================================================================
 
   # mkPackageOption in both modules resolves against the *top level* of pkgs,
-  # not python313Packages.
+  # not python3Packages.
   overlay-toplevel-packages = check "overlay-toplevel-packages" (
     overlaidPkgs ? qcfractal
     && overlaidPkgs ? qcfractalcompute
-    && overlaidPkgs.qcfractal == overlaidPkgs.python313Packages.qcfractal
-    && overlaidPkgs.qcfractalcompute == overlaidPkgs.python313Packages.qcfractalcompute
+    && overlaidPkgs.qcfractal == overlaidPkgs.python3Packages.qcfractal
+    && overlaidPkgs.qcfractalcompute == overlaidPkgs.python3Packages.qcfractalcompute
   );
 
   # The interpreter the QCArchive packages are pinned to is spelled out twice —
@@ -188,12 +188,12 @@ lib.fix (self: {
       within =
         floor: ceiling: version:
         isRelease version && lib.versionAtLeast version floor && lib.versionOlder version ceiling;
-      inherit (overlaidPkgs) python313Packages;
+      inherit (overlaidPkgs) python3Packages;
     in
     # qcportal: qcelemental>=0.50.2,<0.70a0
-    within "0.50.2" "0.70a0" python313Packages.qcelemental.version
+    within "0.50.2" "0.70a0" python3Packages.qcelemental.version
     # qcfractalcompute: qcengine>=0.50,<0.70a0
-    && within "0.50" "0.70a0" python313Packages.qcengine.version
+    && within "0.50" "0.70a0" python3Packages.qcengine.version
   );
 
   # Both modules invoke the package via lib.getExe, which falls back to the

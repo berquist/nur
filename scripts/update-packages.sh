@@ -45,8 +45,8 @@
 # in `flake.packages.${system}` and then in the flake's own root — never in
 # `legacyPackages`.  So exactly the attributes that are not top-level
 # derivations could not be resolved at all: `internalPackages.chemfiles`,
-# `internalPackages.trexio`, `python313Packages.monty` and
-# `python313Packages.tensorpotential` were reported as `failed` with a bare
+# `internalPackages.trexio`, `python3Packages.monty` and
+# `python3Packages.tensorpotential` were reported as `failed` with a bare
 # CalledProcessError.  ../default.nix has all four.
 #
 # The price is that `<nixpkgs>` is no longer pinned by flake.lock, so NIX_PATH

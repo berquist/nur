@@ -367,7 +367,7 @@ in
           enable = true;
           # The plugin goes in `plugins`, so it lands in the same Python
           # environment as aiida-core and its entry points become visible.
-          plugins = [ pkgs.python313Packages.aiida-cp2k ];
+          plugins = [ pkgs.python3Packages.aiida-cp2k ];
           # The program goes in `extraPackages`, so it lands on the daemon's
           # PATH — a different thing entirely, and the distinction the two
           # options exist to make.
@@ -377,7 +377,7 @@ in
 
     testScript =
       let
-        exampleFiles = "${pkgs.python313Packages.aiida-cp2k.src}/examples/files";
+        exampleFiles = "${pkgs.python3Packages.aiida-cp2k.src}/examples/files";
 
         submitDft = pkgs.writeText "submit-cp2k-dft.py" ''
           import ase.io
@@ -494,7 +494,7 @@ in
       # plugin and pulls in aiida.tools.pytest_fixtures, so the interpreter
       # running the suite needs the same set ../../pkgs/aiida-core/default.nix
       # lists in nativeCheckInputs — not merely aiida-core.
-      pythonEnv = pkgs.python313.withPackages (ps: [
+      pythonEnv = pkgs.python3.withPackages (ps: [
         ps.aiida-core
         ps.pytest
         ps.pytest-asyncio
@@ -515,7 +515,7 @@ in
       # tests out of $out — so it comes from the same src the derivation built
       # from.  Taking it from the package rather than re-fetching is what keeps
       # the two from drifting to different revisions.
-      testSrc = pkgs.python313Packages.aiida-core.src;
+      testSrc = pkgs.python3Packages.aiida-core.src;
 
       # Upstream's addopts wants pytest-cov and pytest-instafail and writes
       # coverage outside the build; cleared for the same reason the package

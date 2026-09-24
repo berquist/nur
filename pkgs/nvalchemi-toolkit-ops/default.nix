@@ -88,10 +88,27 @@ buildPythonPackage (finalAttrs: {
   # `prefactor` off the calculators and onto the potentials, and these tests
   # were written against 0.3.x.  See the patch's own header for why removing the
   # argument is exact rather than approximate.
+  #
+  # The fourth is an out-of-bounds read that had been getting away with it, and
+  # it is the one to read before trusting a green run of this suite.  Three
+  # `TestBatchedCalculations` tests declare two batches and supply one cell, and
+  # the kernel indexes `cell[batch_idx[atom_i]]` — so half the atoms read past
+  # the end of a length-1 array, which warp does not bounds-check in release
+  # mode.  The cell reaches the arithmetic only through `cell_t * unit_shifts`,
+  # and those shifts are all zero, so the wrong cell costs nothing while the
+  # garbage decodes as an ordinary double and costs a NaN when it does not.
+  # `test_two_independent_batches` drew the second case here; the other two drew
+  # the first.  **Not an interpreter or platform bug** — it depends on what
+  # happens to sit past the end of a tensor, so it can flip on any leg, and it
+  # was flipped by moving off the python313 pin only in the sense of being
+  # reshuffled.  `test_batch_momentum_conservation` beside them already supplies
+  # a cell per batch; this makes the other three match.  Worth sending upstream,
+  # along with the observation that nothing validates the two shapes agree.
   patches = [
     ./torchpme-import-guard.patch
     ./cuda-gating.patch
     ./torchpme-prefactor-moved.patch
+    ./batched-cell-out-of-bounds.patch
   ];
 
   # Five modules pick a CUDA device in the test body rather than through a
@@ -275,8 +292,13 @@ buildPythonPackage (finalAttrs: {
   #
   # One genuine defect rather than a missing device: the test calls `cell_list()`
   # with a `shift_range_per_dimension` keyword that the function does not take at
-  # v0.4.1, so it fails with a TypeError on any machine.  It is the only failure
-  # in the whole 8129-item suite that a CUDA device would not have fixed.
+  # v0.4.1, so it fails with a TypeError on any machine.
+  #
+  # It was for a while the only failure a CUDA device would not have fixed, and
+  # that is no longer true: the batched-cell out-of-bounds read described above
+  # `patches` is a second.  The difference is why only this one is deselected —
+  # that one is a test the suite should be running, and a patch makes it run
+  # correctly, where this one asks for an API that does not exist at this tag.
   disabledTests = [ "test_suggest_then_run_under_torch_compile" ];
 
   pythonImportsCheck = [

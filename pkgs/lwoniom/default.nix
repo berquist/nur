@@ -59,7 +59,7 @@ buildPythonPackage (finalAttrs: {
   # interpreter building the wheel — not the programs on PATH.  And the
   # top-level packages carry setup hooks that would seize the configure, build
   # and install phases for a project whose real build is driven from
-  # `build_py`.  They are different derivations; `python313Packages.meson` is
+  # `build_py`.  They are different derivations; `python3Packages.meson` is
   # the module, `pkgs.meson` is the wrapped program.
   build-system = [
     meson

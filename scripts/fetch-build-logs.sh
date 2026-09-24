@@ -6,7 +6,7 @@
 # like
 #
 #   For full logs, run:
-#     nix log /nix/store/ziqxz1…-python3.13-aiida-lammps-1.0.2-unstable-2025-01-07.drv
+#     nix log /nix/store/ziqxz1…-python3.14-aiida-lammps-1.0.2-unstable-2025-01-07.drv
 #
 # and each of those is a separate command to type, with a 32-character hash in
 # it that cannot be typed from memory.  This runs them all and writes each one
@@ -16,12 +16,12 @@
 # The filename is the derivation's own name with its hash moved from the front
 # to the back:
 #
-#   /nix/store/ziqxz1…-python3.13-aiida-lammps-1.0.2-unstable-2025-01-07.drv
-#   log-python3.13-aiida-lammps-1.0.2-unstable-2025-01-07-ziqxz1…
+#   /nix/store/ziqxz1…-python3.14-aiida-lammps-1.0.2-unstable-2025-01-07.drv
+#   log-python3.14-aiida-lammps-1.0.2-unstable-2025-01-07-ziqxz1…
 #
 # Same three parts, reordered so the useful one is first.  A store path sorts
 # and tab-completes by its hash, which is noise; this sorts by package, so a
-# directory of them groups by family and `log-python3.13-aiida-<TAB>` narrows to
+# directory of them groups by family and `log-python3.14-aiida-<TAB>` narrows to
 # what you meant.  Keeping the version and the hash is what makes each file
 # distinct: two builds of one package — a rebuild after a fix, or the same
 # package on two channels — land side by side rather than one overwriting the

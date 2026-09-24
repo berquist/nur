@@ -7,9 +7,9 @@ let
   # Keep in sync with the same predicate in ./ci.nix — with one deliberate
   # exception, named below.
   #
-  # python313Packages is ours rather than part of the NUR template's list, and
+  # python3Packages is ours rather than part of the NUR template's list, and
   # is the one that would do real damage if it leaked: it would replace the
-  # consumer's python313Packages with the one ./default.nix builds from its own
+  # consumer's python3Packages with the one ./default.nix builds from its own
   # pkgs'.  See the comment at that attribute.
   #
   # internalPackages is ours too, and is the exception: it is reserved *here*
@@ -25,7 +25,7 @@ let
     || n == "homeModules"
     || n == "darwinModules"
     || n == "flakeModules"
-    || n == "python313Packages"
+    || n == "python3Packages"
     || n == "internalPackages";
   nameValuePair = n: v: {
     name = n;

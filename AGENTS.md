@@ -29,9 +29,8 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   That module offers both of aiida-core's read-write storage plugins: `core.psql_dos` by
   default, and `core.sqlite_dos` — which needs no service at all — behind
   `services.aiida.storage.backend`.
-  Together with QCArchive this is the bulk of the repo. It shares the `python313` pin with
-  QCArchive and nothing else; the two overlays are separate so that a consumer can take one
-  without the other's closure.
+  Together with QCArchive this is the bulk of the repo. The two overlays are separate so that a
+  consumer can take one without the other's closure.
 - the **cheminformatics family** — `morfeus-ml`, `qmzyme`, `dough`, `dbstep`, `aqme`, `ccreg`,
   `digichem-core`, `metallogen`, `xyzrender`, plus the dependencies of those that
   nixpkgs lacks (`mdanalysis`, `griddataformats`, `mda-xdrlib`, `mrcfile`, `basis-set-exchange`,
@@ -40,8 +39,7 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   `graphrc` is the awkward one: a dependency that cclib forces to be a top-level attribute
   anyway, so it is the sole member of `cclibDependencies` in `tests/cheminformatics`.
 - **dotdrop** — a standalone dotfile-manager CLI, not in nixpkgs. It shares nothing with the
-  above and is deliberately kept separate: its own overlay, its own test subdirectory, and the
-  default `python3` rather than the 3.13 pin.
+  above and is deliberately kept separate: its own overlay and its own test subdirectory.
 - **harmonwig** — likewise a standalone CLI.
 - the **chemtools family** — `wignernj`, `strainjedi`, `sella`, `molara`, `moltui`, and the
   `chemfiles` C++ library with its Python binding, plus three packages carried for a dependant
@@ -112,22 +110,25 @@ the list; keep this table in step with it:
 The first seven are `meta.broken` on the NUR path and replaced in `flake.nix`'s `packages` by the
 ones from `cclibPkgs`. `graphrc` carries the same `broken = cclib == null;` but is not in that
 override, because `default.nix` never re-exports it — it reaches the flake through
-`legacyPackages` and `python313Packages` alone. `qmzyme` is the one dependant with no
+`legacyPackages` and `python3Packages` alone. `qmzyme` is the one dependant with no
 `meta.broken` at all; it skips a test instead. And `aiida-gaussian` is broken everywhere: a plugin
 must come from the same package set as its `aiida-core`, and putting the `aiida` overlay into
 `cclibPkgs` would rebuild that whole closure against NixOS-QChem's nixpkgs rather than ours.
 
 Note that cclib's overlay overrides the **top-level `python3` attribute** and nothing else, so
-`final.python3.pkgs` is the only set that has it. Two traps follow, and both are silent — a
-`callPackage` whose `cclib` argument is defaulted just leaves it `null`:
+`final.python3.pkgs` is the only set that has it. The trap that follows is silent — a
+`callPackage` whose `cclib` argument is defaulted just leaves it `null` — and it is one
+character wide:
 
-- `final.python313Packages`, which every other family here uses, is a different set that never
-  sees cclib. So `overlays.cheminformatics-cclib` and `overlays.harmonwig` are top-level
-  `callPackage`s rather than `pythonPackagesExtensions` members.
 - **`final.python3Packages` is not `final.python3.pkgs`.** nixpkgs defines
   `python3Packages = dontRecurseIntoAttrs python314Packages` — an alias to the *versioned* set,
   which cclib's overlay does not touch. Spelling it `python3Packages` yields a package that is
   `meta.broken` even on the flake path, with nothing to say so. Always `final.python3.pkgs`.
+- `final.python3Packages` is exactly what every other family here uses, which is why
+  `overlays.cheminformatics-cclib` and `overlays.harmonwig` are top-level `callPackage`s
+  rather than `pythonPackagesExtensions` members, and why the wrong spelling here looks like
+  the house style. `tests/cheminformatics`' `cheminformatics-cclib-resolves` is the assertion
+  that catches it; nothing else will.
 
 The `nixos-qchem` flake input supplies quantum-chemistry programs as `pkgs.qchem.*` and is
 re-exported as `overlays.qchem`.
@@ -186,7 +187,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why are `aiida-phonopy`'s two workflow tests deselected when the rest of its suite runs? | `pkgs/aiida-phonopy/default.nix` (`disabledTestPaths`) |
 | Why is `aiida-phonopy`'s `phonopy~=4.0` relaxed, and what does 26.05's phonopy 3.5.1 still get wrong? | `pkgs/aiida-phonopy/default.nix` (`pythonRelaxDeps`) |
 | Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
-| Why `python313` and not `python3`? What is `meta.broken` protecting? | `pkgs/qcportal/default.nix` (`meta`), `default.nix` |
+| Why is there no pinned interpreter, when there used to be a `python313` one? | `pkgs/qcportal/default.nix` (`meta`), `default.nix` (the `py` binding), `docs/TODO.md` |
+| Which package is still stuck on QCSchema v1, and why does no evaluation notice? | `pkgs/aiida-psi4/default.nix` (`meta.broken`), `docs/TODO.md` |
 | Why is Psi4 taken from a hand-pinned `nixpkgs-qchem`, and why not `nixos-qchem.packages.*`? | `flake.nix` (the `nixpkgs-qchem` input, and `qchemPkgs` in `perSystem`) |
 | Why does `qchemPkgs` rewrite `python3` before the qchem overlay, and what does that cost? | `flake.nix` (`workerPython` and the first entry in `qchemPkgs`' `overlays`) |
 | Why does the compute unit set `PYTHONPATH`, and why per-program envs? | `nixos-modules/qcfractal-compute.nix` |
@@ -241,6 +243,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why do three packages rewrite a `default-version` in `postPatch`? | `pkgs/mda-xdrlib/default.nix` (`postPatch`) |
 | Why does MDAnalysis run no tests, and why is that not `doCheck = false`? | `pkgs/mdanalysis/default.nix` (the note above `pythonImportsCheck`) |
 | Why does the AiiDA eval suite need a second, broken-allowing package set? | `tests/aiida/default.nix` (`brokenPkgs`) |
+| Why can that set not be the one that says *which* packages are broken? | `tests/aiida/default.nix` (the note above `aiida-overlay-broken-set`), `tests/cheminformatics/default.nix` (the note above `strictPkgs`) |
+| Why is `aiida-psi4` expected to be broken on some channels and not others? | `tests/aiida/default.nix` (`brokenExportedPackages`), `pkgs/aiida-psi4/default.nix` (`meta.broken`) |
 | Why do eight packages come from a git tag rather than PyPI? | `pkgs/kiwipy/default.nix` (the `src` comment) |
 | Why is there no `aiida-shell` package any more, and where did its five names go? | `pkgs/aiida-workgraph/default.nix` (the note above `postPatch`), `pkgs/aiida-core/default.nix` (the vendored-shell note) |
 | Why does the shell VM test install no plugin at all now? | `tests/aiida/vm.nix` (`plugin-shell`) |
@@ -353,7 +357,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `profilehooks` here at all, and why does it keep upstream's `addopts`? | `pkgs/profilehooks/default.nix` |
 | Why does `pgsu` need `glibcLocalesUtf8` and a `LOCALE_ARCHIVE` export? | `pkgs/pgsu/default.nix` (`preCheck`) |
 | Why is the pymatgen interpreter lift a shared `pymatgenFor` function, and why must it never join a package set? | `overlays/default.nix` (the `pymatgenFor` binding at the top) |
-| Why does `pkgs.chemfiles` mean the C++ library while `python313Packages.chemfiles` means the binding? | `default.nix` (the `inherit (pkgs') chemfiles` note), `overlays/default.nix` (the `chemtools` callPackage) |
+| Why does `pkgs.chemfiles` mean the C++ library while `python3Packages.chemfiles` means the binding? | `default.nix` (the `inherit (pkgs') chemfiles` note), `overlays/default.nix` (the `chemtools` callPackage) |
 | Why does `chemfiles-python` refuse to fetch its own submodule, and what does `postInstall` assert? | `pkgs/chemfiles-python/default.nix` (`src`, `postInstall`) |
 | Why does `chemfiles-python` run `unittest discover` instead of `pytestCheckHook`? | `pkgs/chemfiles-python/default.nix` (`checkPhase`) |
 | How does the chemfiles C++ suite get its test data with no network, and why `ctest` rather than a check target? | `pkgs/chemfiles/default.nix` (the note above `preConfigure`, and `checkPhase`) |
@@ -369,7 +373,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `xyzrender` need neither `vmol` nor `shelxfile`, which nixpkgs lacks? | `pkgs/xyzrender/default.nix` (`nativeCheckInputs`) |
 | Where do `metallogen`'s tests come from, when upstream ships none? | `pkgs/metallogen/tests/test_examples.py` (the module docstring), `pkgs/metallogen/default.nix` (the note above `preCheck`) |
 | Why does `wignernj` delete its own source directory before the check phase? | `pkgs/wignernj/default.nix` (`preCheck`) |
-| Why is `moltui` a top-level attribute rather than a `python313Packages` member? | `overlays/default.nix` (the `moltui` binding in `chemtools`), `tests/chemtools/default.nix` (`applicationPackages`) |
+| Why is `moltui` a top-level attribute rather than a `python3Packages` member? | `overlays/default.nix` (the `moltui` binding in `chemtools`), `tests/chemtools/default.nix` (`applicationPackages`) |
 | Why does `sella` derive `SETUPTOOLS_SCM_PRETEND_VERSION` from `version` instead of repeating it? | `pkgs/sella/default.nix` (the `env` note) |
 | Why does `custodian` take pymatgen as a *check* input, and why does that need the gate lifted? | `pkgs/custodian/default.nix` (`nativeCheckInputs`) |
 | Why does `sella` delete its own source directory before the check phase? | `pkgs/sella/default.nix` (the note above `preCheck`), `pkgs/wignernj/default.nix` (the same trap, silent) |
@@ -572,7 +576,7 @@ overlays itself, so `legacyPackages` must use it as-is. The separate `pkgs'` in 
 overlaid set, and is what the eval and VM tests need.
 
 **Reserved keys** (`lib`, `overlays`, `nixosModules`, `homeModules`, `darwinModules`,
-`flakeModules`, `python313Packages`, `internalPackages`) are attrs in `default.nix` that must not
+`flakeModules`, `python3Packages`, `internalPackages`) are attrs in `default.nix` that must not
 be lifted into a nixpkgs overlay. The `isReserved` predicate is duplicated in both `overlay.nix`
 and `ci.nix` — adding a new reserved key means editing both, **except `internalPackages`, which
 is reserved in `overlay.nix` alone**. Being skipped by `ci.nix` is what the predicate there is
@@ -589,8 +593,8 @@ package in its own right: a package nothing builds is a package nobody finds out
 **two**, and only because their names are already taken at the top level by different derivations:
 `chemfiles` (the C++ library) and `trexio` (nixpkgs' C library), both of which
 `tests/chemtools/default.nix` asserts. It still carries `recurseIntoAttrs`, which is exactly what
-`python313Packages` below must not. Five more packages are outside the rule for reasons that are
-not collisions, and stay reachable as `python313Packages.<name>`: `tensorpotential` (unfree, and
+`python3Packages` below must not. Five more packages are outside the rule for reasons that are
+not collisions, and stay reachable as `python3Packages.<name>`: `tensorpotential` (unfree, and
 `just ci-eval` forces `drvPath` over everything it can reach) and the guarded backports `monty`,
 `pycifrw`, `qcelemental` and `qcengine` (nixpkgs' own derivations on a new enough channel, which
 CI has no business building as ours). See the note at the attribute itself.
@@ -599,11 +603,11 @@ CI has no business building as ours). See the note at the attribute itself.
 and fails if any directory has no attribute path. That check is what found `graphrc`, which was
 reachable from nothing at all until `flake.nix` started exposing it.
 
-`python313Packages` is the one that is ours rather than the NUR template's, and the one where
-getting it wrong does real damage: it is the whole overlaid 3.13 set, exposed so that the
+`python3Packages` is the one that is ours rather than the NUR template's, and the one where
+getting it wrong does real damage: it is the whole overlaid default set, exposed so that the
 twenty-odd dependencies this repo carries but does not re-export have an attribute path —
-`nix-update --flake python313Packages.mdanalysis`. Leaking it into the overlay would replace a
-consumer's `python313Packages` with the one `default.nix` builds from its own `pkgs'`. It also
+`nix-update --flake python3Packages.mdanalysis`. Leaking it into the overlay would replace a
+consumer's `python3Packages` with the one `default.nix` builds from its own `pkgs'`. It also
 carries `dontRecurseIntoAttrs`, which is what keeps `nix-env -f . -qa '*'` and `ci.nix`'s
 `flattenPkgs` from descending into ten thousand nixpkgs packages; both honour
 `recurseForDerivations`, and neither would otherwise stop.
@@ -613,12 +617,12 @@ carries `dontRecurseIntoAttrs`, which is what keeps `nix-env -f . -qa '*'` and `
 The `qcfractal`, `aiida` and `cheminformatics` overlays in `overlays/default.nix` each inject
 their Python packages into `pythonPackagesExtensions`, so they land in *every* `pythonX.pkgs`
 set, **and** re-export the public ones as top-level `pkgs.*` aliases. `default.nix` then
-re-exports the same names from `pkgs'.python313Packages`. All three routes are the *same*
+re-exports the same names from `pkgs'.python3Packages`. All three routes are the *same*
 derivation, which the `overlay-python-pin` and `aiida-overlay-python-pin` eval tests assert. So a
 new package needs:
 
 1. the `pself.callPackage` line in `overlays/default.nix`,
-2. the top-level `inherit (final.python313Packages)` list in the same file,
+2. the top-level `inherit (final.python3Packages)` list in the same file,
 3. the `inherit (py)` list in `default.nix`.
 
 **All three steps, for every package.** They used to be "steps 2 and 3 are for public packages
@@ -632,7 +636,7 @@ silently.
 **A cclib dependant is the exception to all of this.** It is a top-level
 `final.python3.pkgs.callPackage` in `overlays/default.nix` — one edit, not three — plus a line
 in `default.nix`'s `inherit (pkgs')` list and one in `flake.nix`'s `packages` override. It is not a
-`pythonPackagesExtensions` member because `python313Packages` is precisely the set that never has
+`pythonPackagesExtensions` member because `python3Packages` is precisely the set that never has
 cclib. `aiida-gaussian` breaks that rule and pays for it by being unbuildable; see the cclib split
 above.
 
@@ -698,7 +702,7 @@ before blaming the derivation hashes.
 `wc/` holds upstream clones of the projects packaged here, and of several that are not yet.
 This section records why the remainder are not, so the survey does not have to be redone. All
 availability claims were probed against the locked nixpkgs with
-`nix-instantiate --eval --store dummy://` over `python313Packages`, `python3.pkgs` and the top
+`nix-instantiate --eval --store dummy://` over `python3Packages`, `python3.pkgs` and the top
 level.
 
 **The materials-project chain.** `atomate2`, `matcalc` and `quacc` are all packaged — the chain
@@ -731,7 +735,7 @@ every package here is a top-level attribute now bar the five named at `internalP
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
 | `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `amset`. `tests/{vasp,ase,lobster,common,aims,cp2k,jdftx,lammps,qchem}` run in full — the last six mock the run, so none of them needs the program its name mentions — and `test_magnetic_orderings` is included since `enumlib` landed |
 | `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3` (phonopy-4 channels only), `benchmark`, `grace` (unfree — see `tensorpotential` below), `maml`, `matgl`, `mace` (unstable only), `sevennet`, `deepmd`, `fairchem`. Missing: none but `orb`/`mattersim`/`petmad`, which are NVIDIA-blocked (see below) |
-| `tensorpotential` | `matcalc[grace]` | **done**; `pkgs/tensorpotential` (repo `ICAMS/grace-tensorpotential`) — **the one unfree package here.** Academic Software Licence: GPLv2 with a non-commercial clause, "not an open-source licence" by its own preamble. Reachable as `python313Packages.tensorpotential` only, deliberately not a top-level attribute — see `ci.nix` and the overlay binding |
+| `tensorpotential` | `matcalc[grace]` | **done**; `pkgs/tensorpotential` (repo `ICAMS/grace-tensorpotential`) — **the one unfree package here.** Academic Software Licence: GPLv2 with a non-commercial clause, "not an open-source licence" by its own preamble. Reachable as `python3Packages.tensorpotential` only, deliberately not a top-level attribute — see `ci.nix` and the overlay binding |
 | `mp-api` | `maml`, atomate2 `mp` | **done**; `pkgs/mp-api` — `doCheck = false` (every test drives a live MPRester). Dist `mp-api`, import `mp_api` |
 | `maml` | `matcalc[maml]` | **done**; `pkgs/maml`, internal — `doCheck = false` (TensorFlow / matgl-model tests, `apps/pes` needs external fitting binaries) |
 | `deepmd-kit` | `matcalc[deepmd]` | **done**; `pkgs/deepmd-kit`, internal — and it was on the *blocked* list for no better reason than never having been surveyed. Core dependencies are ordinary; `dargs` was the only gap. Built with `DP_ENABLE_TENSORFLOW=0` and `DP_ENABLE_PYTORCH=0`, which skips the CMake-against-libtorch op library — optional, see the derivation. `doCheck = false` |
@@ -848,14 +852,14 @@ deprecated APIs, so this one may not be cosmetic.
 strength of a package's reputation rather than its `pyproject.toml`, and all three turned out to
 need one or two ordinary packages; all three are packaged now, and none of them needed anything
 the survey had not already read. The cost of checking is one `nix-instantiate --eval` over
-`python313Packages`; the cost of not checking was months of a chain sitting closed.
+`python3Packages`; the cost of not checking was months of a chain sitting closed.
 
 | Not packaged | Blocker |
 |---|---|
 | `torch-sim` | `nvalchemi-toolkit-ops` — **no longer a blocker.** It is packaged (`pkgs/nvalchemi-toolkit-ops`, internal): Apache-2.0, hatchling, and its only dependencies are `numpy` and `warp-lang`, which nixpkgs has at 1.15.0. What is left is torch-sim's *own* dependency list, which has never been read; it is not in `wc/`. See `docs/TODO.md` |
 | `orb-models`, `mattersim`, `pet-mad` | the "NVIDIA wall" these were written off for was `nvalchemi-toolkit-ops`, and it was never surveyed — see the row above. `orb-models` asks for `nvalchemi-toolkit-ops[torch]>=0.4.1,<0.5`, which is exactly the version packaged, so its remaining gaps are its other core dependencies alone; `mattersim` and `pet-mad` reach it through `torch-sim-atomistic`, so they wait on that. These are the matcalc `orb` / `mattersim` / `petmad` extras |
 | `openff-toolkit`, `openff-interchange`, `openff-qcsubmit`, `proteinbenchmark` | conda-first, and re-checked against clones in `wc/` on 2026-09-12: `openff-toolkit`, `openff-interchange`, `openff-nagl`, `openff-forcefields`, `openff-qcsubmit` and `openff-utilities` still declare **no** `dependencies` at all, and `openff-toolkit`'s `devtools/conda-envs/conda.yaml` names the conda meta-package `openff-toolkit-examples` rather than a list. Still seven packages nixpkgs lacks — but **the bottom two of the seven are leaves and packageable today**: `openff-utilities` declares nothing, and `openff-units` declares `numpy`, `openff-utilities>=0.1.3` and `pint>=0.24,<0.26`, which nixpkgs satisfies at pint 0.25.3. `openmm`, `rdkit`, `qcelemental`, `qcengine` and `nglview` are all in nixpkgs; `openeye-toolkits` is not, and is proprietary, which is what the `conda_oe.yaml` / `test_env_no_openeye.yaml` split is about. **AmberTools is not a blocker** — it is a Python package in the existing `nixos-qchem` input (`pkgs/python-by-name/ambertools`), which carries no `openff-*` of its own. Coming from a flake input does put it under the cclib constraint, though: `overlays/` cannot reach it, so a dependant needs a defaulted argument and `meta.broken`, as `pkgs/harmonwig` does |
-| `RMG-Py` | `python_requires >=3.9,<3.12` against this repo's 3.13/3.14 pins; large Cython build; Julia/ReactionMechanismSimulator at runtime |
+| `RMG-Py` | `python_requires >=3.9,<3.12` against the channel default this repo follows, which is 3.14; large Cython build; Julia/ReactionMechanismSimulator at runtime |
 | `fairchem-applications-*`, `fairchem-demo-ocpapi`, `fairchem-lammps` | **not blocked, and no longer gated either**, though nothing downstream here asks for them. The remaining nine distributions of the monorepo. The two packages that stood between them and buildable — `p-tqdm` for `fastcsp`, `yellowbrick` for `ocx` — are packaged (`pkgs/p-tqdm`, `pkgs/yellowbrick`, both internal), so what is left is the distributions themselves, each a `sourceRoot` copy of `pkgs/fairchem-core` at its own tag. See `docs/TODO.md` |
 | `PsiDataViz` | uv workspace, never released, includes a React/TS frontend; only `packages/psidata` is plausible |
 | ~~`crest`~~ | **Not a gap, and never was.** NixOS-QChem has it as `qchem.crest`, and `pkgs/aqme` has been reaching it through `final.crest or final.qchem.crest or null` all along. This row said "not in nixpkgs, feasible, just different work" and was reasoning from nixpkgs alone — check `package_list.json` in the nixos-qchem checkout before writing another row like it. See "Reusing NixOS-QChem" above |

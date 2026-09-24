@@ -28,7 +28,7 @@
 # A Pythonic periodic table: element properties served out of a bundled SQLite
 # database.  Carried for `lobsterpy[featurizer]`, whose `FeaturizeCharges`
 # raises without it — so this restores `lobsterpy`'s `tests/featurize/` suite.
-# Not re-exported: it stays reachable through `python313Packages`.
+# Not re-exported: it stays reachable through `python3Packages`.
 buildPythonPackage (finalAttrs: {
   pname = "mendeleev";
   version = "1.3.0";

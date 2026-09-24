@@ -1,6 +1,6 @@
 --- a/fireworks/core/rocket.py
 +++ b/fireworks/core/rocket.py
-@@ -48,8 +48,23 @@
+@@ -48,8 +48,40 @@
      if launchpad:
          launchpad.ping_launch(launch_id)
      else:
@@ -10,7 +10,7 @@
 +        # "w")` truncates first, so between that call and the write the file is
 +        # present and empty -- and something does read it in exactly that
 +        # window.  `LaunchPad.recover_offline` loads FW_ping.json;
-+        # `stop_backgrounds` only sets the stop event and never joins this
++        # `stop_backgrounds` only sets the stop event and never joins the ping
 +        # thread; and `stop_event.wait()` returns as soon as the event is set,
 +        # after which `ping_launch` calls this function once more before
 +        # re-checking the loop condition.  So the final ping is still being
@@ -19,10 +19,27 @@
 +        # `recover_offline` swallows and reports as a launch that could not be
 +        # recovered.  `os.replace` is atomic, so a reader sees either the
 +        # previous ping or this one, never a half-written file.
++        #
++        # The temporary name carries the pid and the thread id because there
++        # are two writers as well as a reader, and they race with each other.
++        # The same shutdown described above lets the ping thread run one last
++        # `do_ping` while `Rocket.run` is running its own, and nothing joins
++        # the thread in between.  With one fixed temporary name, whichever
++        # writer renames first takes the other's file out from under it and the
++        # loser raises
++        #
++        #   FileNotFoundError: [Errno 2] No such file or directory:
++        #     'FW_ping.json.tmp' -> 'FW_ping.json'
++        #
++        # from `Rocket.run`, so an offline launch that ran to completion is
++        # recorded FIZZLED.  A name per writer makes the two renames
++        # independent: each replaces its own file, either order leaves a
++        # complete ping behind, and nothing is left over.
 +        ping_time = datetime.datetime.now(datetime.timezone.utc).isoformat()
-+        with open("FW_ping.json.tmp", "w") as f:
++        tmp_path = f"FW_ping.json.{os.getpid()}.{current_thread().ident}.tmp"
++        with open(tmp_path, "w") as f:
 +            f.write(f'{{"ping_time": "{ping_time}"}}')
-+        os.replace("FW_ping.json.tmp", "FW_ping.json")
++        os.replace(tmp_path, "FW_ping.json")
  
  
  def ping_launch(launchpad: LaunchPad, launch_id: int, stop_event: Event, master_thread: Thread) -> None:

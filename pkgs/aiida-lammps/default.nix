@@ -217,7 +217,7 @@ buildPythonPackage rec {
     #
     # This has to be threaded in from `final` by the overlay, and is the same
     # trap as aiida-core's `jq` — see the callPackage sites in
-    # ../../overlays/default.nix.  nixpkgs has a `python313Packages.lammps`,
+    # ../../overlays/default.nix.  nixpkgs has a `python3Packages.lammps`,
     # the Python binding, and pself wins over final inside a package-set
     # callPackage, so a defaulted argument here yields a package with no
     # bin/lmp.  The failure is not an evaluation error but

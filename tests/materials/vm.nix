@@ -38,7 +38,7 @@ let
   # ../../pkgs/ase-db-backends: that test runs a nine-stage `ase` pipeline under
   # `shell=True` and never checks the return code, so an absent CLI shows up
   # only as a much later `KeyError: 'no match'`.
-  pythonEnv = pkgs.python313.withPackages (ps: [
+  pythonEnv = pkgs.python3.withPackages (ps: [
     ps.ase-db-backends
     ps.pytest
   ]);

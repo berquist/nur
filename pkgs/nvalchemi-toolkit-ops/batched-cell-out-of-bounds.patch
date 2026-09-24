@@ -1,0 +1,86 @@
+Give the batched Coulomb tests one cell per batch.
+
+Three tests in `TestBatchedCalculations` declare two batches and supply one
+cell:
+
+    cell      = torch.tensor([[[100., 0, 0], [0, 100., 0], [0, 0, 100.]]])
+    batch_idx = torch.tensor([0, 0, 1, 1])
+
+The kernel indexes the cell per atom -- `coulomb.py`, in each of the four
+batched variants:
+
+    system_id = batch_idx[atom_i]
+    cell_t = wp.transpose(cell[system_id])
+
+so atoms 2 and 3 read `cell[1]` of a length-1 array.  Warp does not
+bounds-check in release mode, and the read runs off the end of the allocation.
+
+**Whether that is visible is luck**, which is why this sat unnoticed.  The
+cell reaches the arithmetic only through the periodic shift:
+
+    shift_vec = cell_t * type(ri)(unit_shifts[edge_idx])
+    r_ij = ri - rj - shift_vec
+
+and every `unit_shift` in these three tests is zero.  `0 * garbage` is `0`
+while the garbage decodes as an ordinary double, so the wrong cell costs
+nothing and the test passes.  When those bytes decode as NaN or inf it is
+`0 * NaN`, and from there `r = NaN`, the guard `if r >= cutoff or r < 1e-10`
+is False for NaN, and the NaN lands in the force accumulator:
+
+    assert torch.allclose(forces[0], forces[2], rtol=1e-10)
+    E   where forces[0] = tensor([1., 0., 0.])
+    E     and forces[2] = tensor([nan, nan, nan])
+
+Batch 0 is right because `cell[0]` is real; batch 1 is NaN because `cell[1]`
+is not.  Only `test_two_independent_batches` has been seen to fail, under
+pytest-xdist with 32 workers; the other two make the same out-of-bounds read
+and have so far been lucky.  Nothing about this is specific to an interpreter
+version or a platform -- it depends on what happens to sit past the end of a
+tensor.
+
+`test_batch_momentum_conservation`, in the same class and also two batches,
+already passes a cell per batch.  This makes the other three match it.
+
+Worth a second look upstream: nothing validates `cell.shape[0]` against
+`batch_idx.max()`, so a caller making this mistake in earnest gets silent
+corruption rather than an error.  That is a library change rather than a test
+one, and is not attempted here.
+
+--- a/test/interactions/electrostatics/bindings/torch/test_coulomb.py
++++ b/test/interactions/electrostatics/bindings/torch/test_coulomb.py
+@@ -774,7 +774,10 @@
+             [1.0, -1.0, 1.0, -1.0], dtype=torch.float64, device=device
+         )
+         cell = torch.tensor(
+-            [[[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]]],
++            [
++                [[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]],
++                [[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]],
++            ],
+             dtype=torch.float64,
+             device=device,
+         )
+@@ -889,7 +892,10 @@
+             [1.0, -1.0, 1.0, -1.0], dtype=torch.float64, device=device
+         )
+         cell = torch.tensor(
+-            [[[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]]],
++            [
++                [[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]],
++                [[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]],
++            ],
+             dtype=torch.float64,
+             device=device,
+         )
+@@ -1306,7 +1312,10 @@
+             [1.0, -1.0, 1.0, -1.0], dtype=torch.float64, device=device
+         )
+         cell = torch.tensor(
+-            [[[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]]],
++            [
++                [[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]],
++                [[100.0, 0.0, 0.0], [0.0, 100.0, 0.0], [0.0, 0.0, 100.0]],
++            ],
+             dtype=torch.float64,
+             device=device,
+         )

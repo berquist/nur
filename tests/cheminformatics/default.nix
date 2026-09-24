@@ -34,11 +34,19 @@ let
 
   ours = import ../../overlays;
 
-  # nixpkgs' checkMeta throws on any attribute access to a broken derivation,
-  # and four of the six packages under test are broken by design here.  Rather
-  # than tiptoe around that, every set below allows broken packages; whether a
-  # package *is* broken is then something to assert rather than something that
-  # aborts the suite.
+  # nixpkgs' checkMeta throws as soon as a broken derivation is *forced*, which
+  # comparing two of them does, and most of the packages under test are broken
+  # by design here.  Rather than tiptoe around that, the identity assertions
+  # below run against a set that allows broken packages.
+  #
+  # What that set cannot then do is say which packages are broken.  nixpkgs'
+  # meta.broken is computed rather than declared: check-meta.nix defines it as
+  # `hasProblemKind "broken"`, and problems.nix generates that problem only when
+  # the configuration says no — `if allowBroken then attrs: false`.  So every
+  # package here reads `broken = false` through `basePkgs` whatever it declared,
+  # which is not merely a wrong answer: it turned cheminformatics-cclib-resolves,
+  # which asserts the negative, into a test that could not fail.  The three cclib
+  # assertions therefore read through `strictPkgs` below.
   #
   # Re-imported from `pkgs.path` with `pkgs.config` carried over, rather than
   # from <nixpkgs>, so that a caller passing its own package set still gets that
@@ -50,13 +58,27 @@ let
     };
   };
 
-  overlaidPkgs = basePkgs.extend (
-    lib.composeManyExtensions [
-      ours.cheminformatics
-      ours.cheminformatics-cclib
-      ours.harmonwig
-    ]
-  );
+  # The same nixpkgs with the flag the other way, and set explicitly rather than
+  # inherited: a caller whose own config allows broken packages would otherwise
+  # take those three assertions straight back to reading `false` for everything.
+  strictPkgs = import pkgs.path {
+    inherit (pkgs.stdenv.hostPlatform) system;
+    config = pkgs.config // {
+      allowBroken = false;
+    };
+  };
+
+  # The overlays under test, as one extension rather than a list repeated at
+  # each of the four sets below, so that the strict and allowBroken halves of a
+  # pair cannot drift apart.
+  ourOverlays = lib.composeManyExtensions [
+    ours.cheminformatics
+    ours.cheminformatics-cclib
+    ours.harmonwig
+  ];
+
+  overlaidPkgs = basePkgs.extend ourOverlays;
+  strictOverlaidPkgs = strictPkgs.extend ourOverlays;
 
   # A stand-in for cclib's own overlay, reproducing the one thing about its
   # shape that matters here: it overrides the top-level `python3` attribute
@@ -78,17 +100,16 @@ let
     });
   };
 
-  cclibPkgs = basePkgs.extend (
-    lib.composeManyExtensions [
-      cclibStubOverlay
-      ours.cheminformatics
-      ours.cheminformatics-cclib
-      ours.harmonwig
-    ]
-  );
+  ourOverlaysWithCclib = lib.composeManyExtensions [
+    cclibStubOverlay
+    ourOverlays
+  ];
+
+  cclibPkgs = basePkgs.extend ourOverlaysWithCclib;
+  strictCclibPkgs = strictPkgs.extend ourOverlaysWithCclib;
 
   # Everything the cheminformatics overlay lifts to the top level and
-  # ../../default.nix re-exports through python313Packages.  Deliberately not
+  # ../../default.nix re-exports through python3Packages.  Deliberately not
   # derived from either file — the point is that the hand-written lists agree.
   exportedPackages = [
     "dough"
@@ -120,7 +141,7 @@ let
   ];
 
   # The dependencies that stop at the pythonPackagesExtensions step: reachable
-  # through python313Packages, never top-level attributes, so that ci.nix does
+  # through python3Packages, never top-level attributes, so that ci.nix does
   # not build each of them in its own right.
   internalDependencies = [
     "basis-set-exchange"
@@ -141,11 +162,11 @@ lib.fix (self: {
   # Overlay contract
   # ==========================================================================
 
-  # The top-level aliases and python313Packages must be the same derivation,
+  # The top-level aliases and python3Packages must be the same derivation,
   # or every consumer of the overlay builds the closure twice.
   cheminformatics-toplevel-packages = check "cheminformatics-toplevel-packages" (
     lib.all (
-      name: overlaidPkgs ? ${name} && overlaidPkgs.${name} == overlaidPkgs.python313Packages.${name}
+      name: overlaidPkgs ? ${name} && overlaidPkgs.${name} == overlaidPkgs.python3Packages.${name}
     ) exportedPackages
   );
 
@@ -162,7 +183,7 @@ lib.fix (self: {
   # Dependencies stay reachable but stay out of the top level.
   cheminformatics-dependencies-are-internal = check "cheminformatics-dependencies-are-internal" (
     lib.all (
-      name: overlaidPkgs.python313Packages ? ${name} && !(overlaidPkgs ? ${name})
+      name: overlaidPkgs.python3Packages ? ${name} && !(overlaidPkgs ? ${name})
     ) internalDependencies
   );
 
@@ -173,7 +194,7 @@ lib.fix (self: {
   # build time, for a reason that points at the wrong package.
   #
   # Three sets rather than one, because the dependants disagree about where
-  # they look.  qmzyme finds rdkit through python313Packages; aqme and
+  # they look.  qmzyme finds rdkit through python3Packages; aqme and
   # digichem-core are `final.python3.pkgs.callPackage`s, and on the flake path
   # that is the set cclib's overlay has rebuilt — the same "which set am I in"
   # trap the cclib tests below exist for.
@@ -183,7 +204,7 @@ lib.fix (self: {
   # an inequality would pass whether the repair applied or not.
   cheminformatics-rdkit-repair-applies = check "cheminformatics-rdkit-repair-applies" (
     lib.all (set: lib.hasInfix ".dist-info" (set.rdkit.postInstall or "")) [
-      overlaidPkgs.python313Packages
+      overlaidPkgs.python3Packages
       overlaidPkgs.python3.pkgs
       cclibPkgs.python3.pkgs
     ]
@@ -196,7 +217,7 @@ lib.fix (self: {
   # Without cclib every dependant must say so, because that is what keeps
   # ci.nix and `just ci-build` from trying to build something that cannot work.
   cheminformatics-cclib-broken-without-cclib = check "cheminformatics-cclib-broken-without-cclib" (
-    lib.all (name: overlaidPkgs.${name}.meta.broken or false) cclibPackages
+    lib.all (name: strictOverlaidPkgs.${name}.meta.broken or false) cclibPackages
   );
 
   # ...and with cclib present, every one of them must stop saying so.
@@ -208,15 +229,20 @@ lib.fix (self: {
   # right spelling and is not, because nixpkgs defines it as an alias to
   # python314Packages rather than as `python3.pkgs`, and cclib's overlay
   # overrides `python3`.  Nothing but an assertion catches that.
+  #
+  # And nothing caught it for a while: through `cclibPkgs` this reads `false`
+  # for every package whether cclib resolved or not, because that set allows
+  # broken packages.  See the note at `strictPkgs`.
   cheminformatics-cclib-resolves = check "cheminformatics-cclib-resolves" (
-    lib.all (name: !(cclibPkgs.${name}.meta.broken or false)) cclibPackages
+    lib.all (name: !(strictCclibPkgs.${name}.meta.broken or false)) cclibPackages
   );
 
   # The cclib dependencies get both halves of the same treatment, since they are
   # built the same way and would break in the same silent manner.
   cheminformatics-cclib-dependencies-resolve = check "cheminformatics-cclib-dependencies-resolve" (
     lib.all (
-      name: (overlaidPkgs.${name}.meta.broken or false) && !(cclibPkgs.${name}.meta.broken or false)
+      name:
+      (strictOverlaidPkgs.${name}.meta.broken or false) && !(strictCclibPkgs.${name}.meta.broken or false)
     ) cclibDependencies
   );
 

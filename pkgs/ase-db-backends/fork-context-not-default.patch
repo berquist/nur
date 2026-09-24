@@ -1,0 +1,78 @@
+Ask for the 'fork' start method rather than assuming it is the default.
+
+`test_aselmdb_concurrent_random_reads` shares one LMDB handle with eight
+subprocesses through copy-on-write, so it is only meaningful under `fork`.  It
+guarded itself like this:
+
+    if mp.get_start_method(allow_none=True) not in (None, "fork"):
+        pytest.skip(...)
+
+`allow_none=True` returns `None` when nothing has set a start method
+*explicitly*; it does not resolve what the default would be.  So `None` was
+never "fork" -- it was "nobody has chosen", and treating it as fork was only
+correct for as long as fork happened to be the platform default.
+
+Python 3.14 ended that.  gh-84559 moved the Linux default to `forkserver`, and
+CPython's own `multiprocessing/context.py` says so:
+
+    # gh-84559: We changed everyones default to a thread safeish one in 3.14.
+    if reduction.HAVE_SEND_HANDLE and sys.platform != 'darwin':
+        _default_context = DefaultContext(_concrete_contexts['forkserver'])
+
+Nothing in the test sets a method, so the guard still sees `None`, still reads
+it as fork, and no longer skips -- but `mp.Pool()` now builds forkserver
+workers, which are fresh interpreters that never inherit the module-level `DB`:
+
+    AssertionError: Global DB handle not set in worker
+
+The test's own skip condition is what broke here, not the code under test.
+
+Skipping on 3.14 would be the small fix and the wrong one: this is the only
+test that exercises reinitialising the LMDB environment in a forked child, and
+its comment says it "will very likely segmentation fault" if that is wrong.
+Losing it on every future interpreter is worse than the bug.
+
+So ask for fork explicitly, through a context, and let the Pool keep using it
+whatever the default becomes.  The guard then only has to answer "is fork
+available and safe here", which is what it was reaching for all along.
+`sys.platform` carries the safety half: macOS lists fork in
+`get_all_start_methods()` but moved off it as a default in 3.8 because running
+arbitrary code after `fork()` stopped being reliable there, and that test
+already skipped on macOS by way of its spawn default.
+
+--- a/ase_db_backends/tests/test_aselmdb_concurrency.py
++++ b/ase_db_backends/tests/test_aselmdb_concurrency.py
+@@ -1,4 +1,5 @@
+ import multiprocessing as mp
++import sys
+ import numpy as np
+ import pytest
+ 
+@@ -55,10 +56,14 @@
+     potential energies.
+     """
+ 
+-    # This test is only meaningful on platforms that support 'fork'.
+-    if mp.get_start_method(allow_none=True) not in (None, "fork"):
++    # This test is only meaningful where 'fork' is available and safe, which
++    # is not the same question as whether it is the default -- Python 3.14
++    # moved the Linux default to 'forkserver' (gh-84559), and macOS moved off
++    # fork in 3.8 because running code after fork() is unreliable there.
++    if sys.platform != "linux" or "fork" not in mp.get_all_start_methods():
+         pytest.skip(
+-            "Requires 'fork' start method to share handle via copy-on-write")
++            "Requires the 'fork' start method to share the handle via "
++            "copy-on-write")
+ 
+     name = get_db_name('aselmdb')  # ensures a clean LMDB database file
+ 
+@@ -87,6 +92,8 @@
+     # This will very likely segmentation fault if we are not
+     # reinitializing lmdb
+     # environment correctly in the subprocesses.
+-    with mp.Pool(processes=n_proc) as pool:
++    # An explicit context, not the default one: the default is 'forkserver'
++    # from 3.14 on, whose workers never inherit the DB handle set above.
++    with mp.get_context("fork").Pool(processes=n_proc) as pool:
+         _ = pool.starmap(
+             _worker, [(s, reads_per_proc, ID_LIST) for s in seeds])

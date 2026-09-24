@@ -66,16 +66,16 @@ let
 
   # Whether custodian instantiates at all.  See materials-custodian-evaluates
   # below for why this is a binding rather than an inline expression.
-  custodianEvaluates = (builtins.tryEval overlaidPkgs.python313Packages.custodian.drvPath).success;
+  custodianEvaluates = (builtins.tryEval overlaidPkgs.python3Packages.custodian.drvPath).success;
 
   # The same shape for the two halves of the pymatgen split, and for the same
   # statix reason: a bare select expression cannot be wrapped in parentheses,
   # and these do not fit on one line inline.
-  pymatgenEvaluates = (builtins.tryEval overlaidPkgs.python313Packages.pymatgen.drvPath).success;
-  basePymatgenThrows = !(builtins.tryEval basePkgs.python313Packages.pymatgen.drvPath).success;
+  pymatgenEvaluates = (builtins.tryEval overlaidPkgs.python3Packages.pymatgen.drvPath).success;
+  basePymatgenThrows = !(builtins.tryEval basePkgs.python3Packages.pymatgen.drvPath).success;
 
   # Everything the two overlays lift to the top level and ../../default.nix
-  # re-exports through python313Packages.  Deliberately not derived from either
+  # re-exports through python3Packages.  Deliberately not derived from either
   # file — the point is that the hand-written lists agree.
   exportedPackages = [
     "wignernj"
@@ -111,7 +111,7 @@ let
   # moltui is deliberately not in the list above.  It is a
   # buildPythonApplication rather than a buildPythonPackage, so it is not a
   # Python module and cannot be a member of any package set — nixpkgs rejects
-  # one that turns up in a python313Packages with "moltui should use
+  # one that turns up in a python3Packages with "moltui should use
   # `buildPythonPackage` or `toPythonModule`".  It is a top-level attribute
   # only, like dotdrop and harmonwig, and gets its own assertions below.
   applicationPackages = [
@@ -119,7 +119,7 @@ let
   ];
 
   # Carried for a dependant rather than for their own sake, so they must stay
-  # reachable through python313Packages and stay *out* of the top level, or
+  # reachable through python3Packages and stay *out* of the top level, or
   # ci.nix builds each of them in its own right.  fireworks needs
   # mongomock-persistence to test its database code without a database, and
   # maggma needs mongomock-ng.
@@ -152,11 +152,11 @@ lib.fix (self: {
   # Overlay contract
   # ==========================================================================
 
-  # The top-level aliases and python313Packages must be the same derivation, or
+  # The top-level aliases and python3Packages must be the same derivation, or
   # every consumer of the overlay builds the closure twice.
   chemtools-toplevel-packages = check "chemtools-toplevel-packages" (
     lib.all (
-      name: overlaidPkgs ? ${name} && overlaidPkgs.${name} == overlaidPkgs.python313Packages.${name}
+      name: overlaidPkgs ? ${name} && overlaidPkgs.${name} == overlaidPkgs.python3Packages.${name}
     ) exportedPackages
   );
 
@@ -181,7 +181,7 @@ lib.fix (self: {
   # place — so this asserts the shape rather than trusting it.
   chemtools-applications-are-toplevel-only = check "chemtools-applications-are-toplevel-only" (
     lib.all (
-      name: overlaidPkgs ? ${name} && !(overlaidPkgs.python313Packages ? ${name})
+      name: overlaidPkgs ? ${name} && !(overlaidPkgs.python3Packages ? ${name})
     ) applicationPackages
   );
 
@@ -198,7 +198,7 @@ lib.fix (self: {
   # cheminformatics-dependencies-are-internal in ../cheminformatics.
   chemtools-dependencies-are-internal = check "chemtools-dependencies-are-internal" (
     lib.all (
-      name: overlaidPkgs.python313Packages ? ${name} && !(overlaidPkgs ? ${name})
+      name: overlaidPkgs.python3Packages ? ${name} && !(overlaidPkgs ? ${name})
     ) internalDependencies
   );
 
@@ -220,8 +220,8 @@ lib.fix (self: {
   );
 
   chemtools-trexio-binding-is-separate = check "chemtools-trexio-binding-is-separate" (
-    overlaidPkgs.python313Packages.trexio ? pythonModule
-    && overlaidPkgs.python313Packages.trexio != overlaidPkgs.trexio
+    overlaidPkgs.python3Packages.trexio ? pythonModule
+    && overlaidPkgs.python3Packages.trexio != overlaidPkgs.trexio
   );
 
   # ==========================================================================
@@ -239,9 +239,9 @@ lib.fix (self: {
     # The top-level one is not a Python package...
     !(overlaidPkgs.chemfiles ? pythonModule)
     # ...and the Python one is.
-    && overlaidPkgs.python313Packages.chemfiles ? pythonModule
+    && overlaidPkgs.python3Packages.chemfiles ? pythonModule
     # And they are genuinely different derivations.
-    && overlaidPkgs.chemfiles != overlaidPkgs.python313Packages.chemfiles
+    && overlaidPkgs.chemfiles != overlaidPkgs.python3Packages.chemfiles
   );
 
   # The binding must build against *our* chemfiles rather than vendoring its
@@ -249,7 +249,7 @@ lib.fix (self: {
   # still passes its tests — it just ships a second private copy of the library
   # — so nothing but an assertion catches it.
   chemtools-chemfiles-binding-uses-our-library = check "chemtools-chemfiles-binding-uses-our-library" (
-    lib.elem overlaidPkgs.chemfiles overlaidPkgs.python313Packages.chemfiles.buildInputs
+    lib.elem overlaidPkgs.chemfiles overlaidPkgs.python3Packages.chemfiles.buildInputs
   );
 
   # ==========================================================================
@@ -276,7 +276,7 @@ lib.fix (self: {
   # monolith.  If pymatgen ever stops depending on pymatgen-core, the halves
   # have been merged again somewhere and every note about the split is stale.
   materials-pymatgen-is-the-split = check "materials-pymatgen-is-the-split" (
-    lib.elem overlaidPkgs.python313Packages.pymatgen-core overlaidPkgs.python313Packages.pymatgen.propagatedBuildInputs
+    lib.elem overlaidPkgs.python3Packages.pymatgen-core overlaidPkgs.python3Packages.pymatgen.propagatedBuildInputs
   );
 
   # pymatgen-core's floor, asserted rather than assumed.  It is the reason
@@ -284,7 +284,7 @@ lib.fix (self: {
   # rather than as an equality so that it keeps passing — and the package
   # becomes deletable — the day a channel ships something new enough.
   materials-monty-satisfies-pymatgen-core = check "materials-monty-satisfies-pymatgen-core" (
-    lib.versionAtLeast overlaidPkgs.python313Packages.monty.version "2026.7.16"
+    lib.versionAtLeast overlaidPkgs.python3Packages.monty.version "2026.7.16"
   );
 
   # custodian takes pymatgen as a check input and is the package that first

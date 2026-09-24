@@ -361,7 +361,7 @@ in
     plugins = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
-      example = lib.literalExpression "[ pkgs.python313Packages.aiida-quantumespresso ]";
+      example = lib.literalExpression "[ pkgs.python3Packages.aiida-quantumespresso ]";
       description = ''
         AiiDA plugin packages to make available to the daemon.
 

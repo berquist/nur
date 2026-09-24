@@ -33,7 +33,7 @@ Some quantum chemistry programs come from [NixOS-QChem](https://github.com/Nix-Q
 
 A dozen dependencies that nixpkgs does not carry — `kiwipy`, `plumpy`, `disk-objectstore`,
 `archive-path`, `pgsu`, `pgtest`, `aiida-pseudo`, `qe-tools` and the rest — come with them,
-reachable as `python313Packages.*` rather than as top-level attributes.
+reachable as `python3Packages.*` rather than as top-level attributes.
 
 The module defaults to the **ZeroMQ** broker (`core.zeromq`), which the daemon runs itself, so a
 working instance needs nothing but PostgreSQL. RabbitMQ is available behind
@@ -66,7 +66,7 @@ Standalone libraries and CLIs, unrelated to the two families above:
 | [`digichem-core`](https://github.com/Chemicus-Ltd/digichem-library) | result parsing and reporting for computational chemistry             |
 
 `mdanalysis`, `griddataformats`, `mda-xdrlib`, `mrcfile`, `basis-set-exchange`, `colour-science`,
-`configurables`, `openprattle` and `lwreg` come with them, reachable as `python313Packages.*`
+`configurables`, `openprattle` and `lwreg` come with them, reachable as `python3Packages.*`
 rather than as top-level attributes.
 
 ### [dotdrop](https://github.com/deadc0de6/dotdrop)
@@ -148,11 +148,12 @@ nix build .#dotdrop
 nix build .#harmonwig          # flake only; see above
 ```
 
-The QCArchive **and** AiiDA packages are pinned to **Python 3.13**: qcportal 0.65 is pydantic-v1
-throughout and cannot be imported on 3.14, and `aiida-psi4` imports the same qcelemental v1
-models. `pkgs.qcfractal` and `python313Packages.qcfractal` are the same derivation, as are
-`pkgs.aiida-core` and `python313Packages.aiida-core`. See `pkgs/qcportal/default.nix` for the
-mechanism and the condition for dropping the pin.
+Everything here is built against the channel's **default** `python3` — there is no pinned
+interpreter, and `pkgs.qcfractal` and `python3Packages.qcfractal` are the same derivation, as
+are `pkgs.aiida-core` and `python3Packages.aiida-core`. The QCArchive and AiiDA families were
+pinned to 3.13 until qcportal 0.70 replaced its pydantic v1 layer; `pkgs/aiida-psi4` is the one
+package that has not followed, because it instantiates a qcelemental QCSchema v1 model and
+those are placeholders on 3.14. It carries `meta.broken` there and says why.
 
 Psi4 is expensive to build from source. `flake.nix` reproduces NixOS-QChem's own instantiation
 so that `nix-qchem.cachix.org` is hit — which only works if your user is in `trusted-users`,
@@ -160,11 +161,10 @@ otherwise Nix ignores the flake's substituter.
 
 One deviation is deliberate: QCEngine imports a Python QC program into the compute worker's own
 process, so `flake.nix` rebuilds the qchem package set against the interpreter
-`qcfractalcompute` runs. While that is 3.13 and NixOS-QChem's nixpkgs defaults to 3.14, the
-resulting Psi4 is not the one `nix-qchem.cachix.org` holds — it comes from
-`nur-berquist.cachix.org` instead, which is the reason to configure that cache before building
-anything here. Dropping the Python 3.13 pin makes the override a no-op and puts Psi4 back on
-NixOS-QChem's own cache.
+`qcfractalcompute` runs. On the locked inputs that rewrite is a no-op — both default to the
+same `python3` — so Psi4 comes from `nix-qchem.cachix.org` as intended. Should the two ever
+part company, the resulting Psi4 is a different derivation and comes from
+`nur-berquist.cachix.org` instead, which is the reason to configure that cache too.
 
 ## Hacking
 
