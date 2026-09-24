@@ -75,7 +75,7 @@ in
 # packages share.
 buildPythonPackage (finalAttrs: {
   pname = "fairchem-data-oc";
-  version = "1.0.2-unstable-2026-09-10";
+  version = "1.0.2-unstable-2026-09-23";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -94,8 +94,8 @@ buildPythonPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "facebookresearch";
     repo = "fairchem";
-    rev = "41d36dc6bf8ced6348dc73e6aaf54d0527ebd8c9";
-    hash = "sha256-z9TrtRTnUYoGfQYMR46fF5cIeQb2Di7bn4bgCt8tAR8=";
+    rev = "57d6e87e7854c2617dda453b67c0283afbefbcb5";
+    hash = "sha256-xjOrT/AFqunqHVnkOPNeYc/mHYo1qVHt8dHTbW9CU0U=";
   };
 
   sourceRoot = "${finalAttrs.src.name}/packages/fairchem-data-oc";

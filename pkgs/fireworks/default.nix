@@ -35,7 +35,7 @@ buildPythonPackage (finalAttrs: {
   # 2.1.4, not the v2.0.2 that `git describe` reports for this commit: the tag
   # is behind, and setup.py here declares `version="2.1.4"`.  atomate2 and
   # jobflow both pin `FireWorks==2.1.4`, so the source is the one to believe.
-  version = "2.1.4-unstable-2026-08-11";
+  version = "2.1.4-unstable-2026-08-28";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -43,8 +43,8 @@ buildPythonPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "materialsproject";
     repo = "fireworks";
-    rev = "71686559d2a407c976cc56b6fa3c648819ee8fe3";
-    hash = "sha256-J2fGV35MWsbgwoSyS2W7YBewFELFqZR6t5WyUS/kVn8=";
+    rev = "eb655c8ce933e8a2722775120cf5f3f6fed74070";
+    hash = "sha256-qpLcdssrsOcVGmr2uMpqQIPk4/yifPR9n27VfeZDE4w=";
   };
 
   build-system = [ setuptools ];

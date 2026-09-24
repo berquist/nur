@@ -21,14 +21,14 @@
 
 buildPythonPackage rec {
   pname = "aiida-wannier90-workflows";
-  version = "3.0.0-unstable-2026-08-20";
+  version = "3.1.0-unstable-2026-09-22";
   pyproject = true;
 
   src = fetchFromGitHub {
     owner = "aiidateam";
     repo = "aiida-wannier90-workflows";
-    rev = "000cabe9c9c3adefa80d3d7d1b2e8f4d9427b870";
-    hash = "sha256-OgGtOuo2xOmY2EpsVKBzfN9YjVEPJ1HLI3Ukh5bvW4g=";
+    rev = "1c0115cb7c77541a0bd549bc05005df435d651b6";
+    hash = "sha256-FfKbzbDfH2AWUqSumMugIWj6BnnK3NKPWNPEwublTpI=";
   };
 
   build-system = [ flit-core ];

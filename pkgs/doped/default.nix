@@ -236,6 +236,22 @@ buildPythonPackage {
     "test_adsorbate_interstitial_generation_in_low_dimensional_structures"
     "test_agcu"
     "test_agcu_no_generate_supercell"
+
+    # --- the Niggli basis moved.  pymatgen-core 2026.9.23 (#144, pymatgen#4457)
+    # makes `Lattice.find_mapping` prefer a proper rotation over the first
+    # match, which may be a reflection.  `get_niggli_reduced_lattice` takes its
+    # basis from that call, and doped reaches it both directly and through
+    # `Structure.get_primitive_structure`.  The sites found are the same; the
+    # representative recorded for each changes to its mirror image — `v_Y` at
+    # z = 0.332 rather than 0.668, and `test_interstitial_coords` gets a
+    # coordinate that is in its own expected list of equivalents.  Charges,
+    # multiplicities and Wyckoff labels are unchanged.  `test_sb2si2te6` is a
+    # prefix of `test_sb2si2te6_eFNV` above, which is deselected anyway.
+    "test_charge_state_gen_kwargs"
+    "test_interstitial_coords"
+    "test_processes"
+    "test_sb2si2te6"
+    "test_ytos_supercell_input"
   ];
 
   pythonImportsCheck = [

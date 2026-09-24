@@ -49,7 +49,7 @@
 # half is optional here.
 buildPythonPackage (finalAttrs: {
   pname = "pymatgen";
-  version = "2026.5.4-unstable-2026-08-31";
+  version = "2026.9.24-unstable-2026-09-23";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -68,8 +68,8 @@ buildPythonPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "materialsproject";
     repo = "pymatgen";
-    rev = "0428f232a569ffe6b16fa030d38ea35a56d70fd6";
-    hash = "sha256-mIt3g6rV+TIiwwkm6YGnNsOxGo+GDjy+w7DdEtjawYw=";
+    rev = "8461938451eedd7591b96998de4b48e4b1901ea0";
+    hash = "sha256-R40UqhSuxo+OodLSGjv54KT1XP+2zuI47+2TzzGLE/s=";
   };
 
   # setuptools_scm against a fetchFromGitHub tarball with no repository, the

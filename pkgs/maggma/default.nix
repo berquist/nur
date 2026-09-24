@@ -51,17 +51,17 @@
 
 buildPythonPackage (finalAttrs: {
   pname = "maggma";
-  version = "0.74.0";
+  version = "0.76.0";
   pyproject = true;
   __structuredAttrs = true;
 
-  # The v0.74.0 tag rather than HEAD, which is twenty-six commits past it.
+  # The v0.76.0 tag rather than HEAD, which is twenty-six commits past it.
   # jobflow asks for `maggma >= 0.72.0`.
   src = fetchFromGitHub {
     owner = "materialsproject";
     repo = "maggma";
     rev = "v${finalAttrs.version}";
-    hash = "sha256-ee3xeaXuUXT6LEQCZ3+jw9caTt445zkKg+xtypYdQ5c=";
+    hash = "sha256-/589BIlkguNV4ixaCCdA7fAaicG8+RbS81YEyAc5mec=";
   };
 
   # setuptools_scm reads the version from git, and fetchFromGitHub hands over a
