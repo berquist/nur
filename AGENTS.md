@@ -75,14 +75,16 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   `trainstation` (hiPhive's one gap), `cmcrameri` and `matplotlib-label-lines` (doped's plotting,
   the latter pydefect's too) — `tensorpotential` (`matcalc[grace]`'s, and **the one unfree package here**;
   see "Deferred packaging"), `pymatgen-io-aims` (`atomate2[aims]`'s, the FHI-aims I/O that
-  upstream pymatgen *shed* in the 2026 split) with `pyfhiaims` under it, and `monty`, a
-  backport that exists only because `pymatgen-core` needs a version no channel here ships yet.
+  upstream pymatgen *shed* in the 2026 split) with `pyfhiaims` under it, and `monty` and
+  `moyopy`, backports that exist only because `pymatgen-core` needs a version nixos-26.05 does not
+  ship.
   Two more are here for a dependant that does not exist yet: `nvalchemi-toolkit-ops`, which
   `orb-models` and `torch-sim` need and which was written off for months as an NVIDIA wall
   before anyone read its two-line dependency list, and `torch-pme` beneath it, the reference its
   electrostatics suite validates against.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
-  upstream split it and the two layouts cannot coexist, `monty` on the legs that are behind,
+  upstream split it and the two layouts cannot coexist, `monty` and `moyopy` on the legs that are
+  behind,
   `torchtnt`, which is simply broken against setuptools 83, and `py-lmdb`, pinned *down* to 1.7.3
   because 2.0 forbids opening one environment path twice and three packages here depend on doing so.
   Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
@@ -391,6 +393,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `metallogen` set `doCheck = false` when `MetalloGen/test.py` exists? | `pkgs/metallogen/default.nix` (the `doCheck` note) |
 | Why does the chemtools python-pin test compose *every* overlay when the cheminformatics one does not? | `tests/chemtools/default.nix` (the `fullyOverlaidPkgs` binding) |
 | Why does this repo carry a `monty` at all, and when should it go? | `pkgs/monty/default.nix` (the header), `overlays/default.nix` (the `monty` binding in the materials overlay) |
+| Why does this repo carry a `moyopy` when nixpkgs has one, and what did 0.9.0 get wrong? | `pkgs/moyopy/default.nix` (the header), `overlays/default.nix` (the `moyopy` binding in the materials overlay) |
 | Why does `monty` need a bson fix its own test suite cannot see? | `pkgs/monty/default.nix` (`postPatch`), `overlays/default.nix` (the aiida overlay's `monty` binding) |
 | Why does `pymatgen-core` *replace* nixpkgs' `pymatgen` rather than sit beside it? | `pkgs/pymatgen-core/default.nix` (the header) |
 | How do two distributions share the `pymatgen/` tree without colliding in a `withPackages`? | `pkgs/pymatgen-core/default.nix` (the header) |
@@ -583,7 +586,7 @@ is reserved in `overlay.nix` alone**. Being skipped by `ci.nix` is what the pred
 for, and skipping that one would defeat its whole purpose; both files carry the reasoning at
 their own copy.
 
-**Every package this repository defines is a top-level attribute**, with seven named exceptions.
+**Every package this repository defines is a top-level attribute**, with eight named exceptions.
 That is the rule, and the reason for it is that being top-level is what makes `ci.nix` build a
 package in its own right: a package nothing builds is a package nobody finds out is broken.
 `pkgs/sevenn` sat green-by-omission for months because it was reachable only through an
@@ -593,10 +596,10 @@ package in its own right: a package nothing builds is a package nobody finds out
 **two**, and only because their names are already taken at the top level by different derivations:
 `chemfiles` (the C++ library) and `trexio` (nixpkgs' C library), both of which
 `tests/chemtools/default.nix` asserts. It still carries `recurseIntoAttrs`, which is exactly what
-`python3Packages` below must not. Five more packages are outside the rule for reasons that are
+`python3Packages` below must not. Six more packages are outside the rule for reasons that are
 not collisions, and stay reachable as `python3Packages.<name>`: `tensorpotential` (unfree, and
 `just ci-eval` forces `drvPath` over everything it can reach) and the guarded backports `monty`,
-`pycifrw`, `qcelemental` and `qcengine` (nixpkgs' own derivations on a new enough channel, which
+`moyopy`, `pycifrw`, `qcelemental` and `qcengine` (nixpkgs' own derivations on a new enough channel, which
 CI has no business building as ours). See the note at the attribute itself.
 
 `scripts/update-universe.nix` is what keeps this honest: it reads `pkgs/` with `builtins.readDir`
@@ -719,6 +722,7 @@ every package here is a top-level attribute now bar the five named at `internalP
 | `mongomock-ng` | `maggma` | **done**; *not* the `mongomock` nixpkgs already has |
 | `pubchempy` | `emmet-core` | **done** |
 | `monty` | `pymatgen-core` | **done**; a backport, guarded — see `pkgs/monty/default.nix` |
+| `moyopy` | `pymatgen-core[symmetry]`, its backend sweep | **done**; a backport, guarded, 26.05 only — nixpkgs has 0.9.0 there, and below 0.17 it returns wrong Wyckoff letters. See `pkgs/moyopy/default.nix` |
 | `pymatgen-core` | everything left | **done**; the split below |
 | `pymatgen` | `emmet-core`, `atomate2` | **done**; the other half of the same split |
 | `pymatgen-io-validation` | `emmet-core` | **done**; `pkgs/pymatgen-io-validation`, re-exported like `pubchempy` for the same reason |

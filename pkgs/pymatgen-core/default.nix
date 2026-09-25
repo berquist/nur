@@ -193,6 +193,8 @@ buildPythonPackage (finalAttrs: {
     abinit = [ netcdf4 ];
     ase = [ ase ];
     numba = [ numba ];
+    # `>=0.17` upstream, and a correctness floor rather than a pin; the
+    # materials overlay backports ../moyopy onto channels below it.
     symmetry = [ moyopy ];
     optional = [
       ase

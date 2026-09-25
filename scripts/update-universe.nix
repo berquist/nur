@@ -77,15 +77,16 @@ let
     lib.filterAttrs (_: lib.isDerivation) nur.internalPackages
   );
 
-  # The seven packages ../default.nix names but does not expose at the top
+  # The eight packages ../default.nix names but does not expose at the top
   # level, each for a reason given at its own note there.  Spelled out rather
   # than discovered, because the whole 3.13 set cannot be enumerated and these
-  # are bounded: two name collisions, one unfree package, and four guarded
+  # are bounded: two name collisions, one unfree package, and five guarded
   # backports.
   extras = {
     "internalPackages.chemfiles" = nur.internalPackages.chemfiles;
     "internalPackages.trexio" = nur.internalPackages.trexio;
     "python3Packages.monty" = nur.python3Packages.monty;
+    "python3Packages.moyopy" = nur.python3Packages.moyopy;
     "python3Packages.pycifrw" = nur.python3Packages.pycifrw;
     "python3Packages.qcelemental" = nur.python3Packages.qcelemental;
     "python3Packages.qcengine" = nur.python3Packages.qcengine;

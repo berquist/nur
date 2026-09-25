@@ -529,6 +529,19 @@ in
           else
             pself.callPackage ../pkgs/monty { };
 
+        # The same shape as `monty` above, for a floor pythonRuntimeDepsCheckHook
+        # cannot see: ../pkgs/pymatgen-core wants `moyopy>=0.17` only in its
+        # extras, so nixos-26.05's 0.9.0 builds cleanly and then gives wrong
+        # Wyckoff letters for three space groups.  See ../pkgs/moyopy.
+        #
+        # `psuper` for the test, and a fresh `callPackage` rather than an
+        # override, for the reasons given at `monty`.
+        moyopy =
+          if final.lib.versionAtLeast psuper.moyopy.version "0.17" then
+            psuper.moyopy
+          else
+            pself.callPackage ../pkgs/moyopy { };
+
         # Upstream split `pymatgen` in two in 2026.  Both halves are ours
         # because nixpkgs is still on the pre-split monolith and the three
         # cannot coexist — read ../pkgs/pymatgen-core's header for what that
@@ -933,9 +946,9 @@ in
 
     # Keep in sync with the `inherit (py)` list in ../default.nix.
     #
-    # `monty` is deliberately absent.  It is a replacement for a package
-    # nixpkgs already ships rather than something this repo publishes, and
-    # nixpkgs has no top-level `monty` to shadow; adding one would only give
+    # `monty` and `moyopy` are deliberately absent.  Each is a replacement for
+    # a package nixpkgs already ships rather than something this repo
+    # publishes, and nixpkgs has no top-level `monty` or `moyopy` to shadow; adding one would only give
     # ci.nix another thing to build.  `pymatgen` and `pymatgen-core` are here
     # for the opposite reason — they are the deliverable.
     inherit (final.python3Packages)

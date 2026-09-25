@@ -134,6 +134,7 @@ let
     "mongomock-persistence"
     "mongomock-ng"
     "monty"
+    "moyopy"
     "maml"
     "mp-pyrho"
     "pyrr"
@@ -285,6 +286,14 @@ lib.fix (self: {
   # becomes deletable — the day a channel ships something new enough.
   materials-monty-satisfies-pymatgen-core = check "materials-monty-satisfies-pymatgen-core" (
     lib.versionAtLeast overlaidPkgs.python3Packages.monty.version "2026.7.16"
+  );
+
+  # The same for ../../pkgs/moyopy.  This floor is the one that matters more,
+  # because nothing else enforces it: pymatgen-core names it only in extras,
+  # which pythonRuntimeDepsCheckHook does not read, so a channel below it
+  # builds green and returns wrong Wyckoff letters.
+  materials-moyopy-satisfies-pymatgen-core = check "materials-moyopy-satisfies-pymatgen-core" (
+    lib.versionAtLeast overlaidPkgs.python3Packages.moyopy.version "0.17"
   );
 
   # custodian takes pymatgen as a check input and is the package that first
