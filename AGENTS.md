@@ -216,6 +216,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does a `versionRegex` also turn on the releases API, rather than that being a second field? | `scripts/update-packages.sh` (the note in `nix_update_argv`), `docs/version-updates.md` (§4) |
 | Why is `firecrest-streamer` `report` when no guard objected to its bump? | `pkgs/firecrest-streamer/default.nix` (`passthru.updatePolicy`) |
 | Why is `parsl` fetched with `fetchPypi` when the URL it had worked perfectly? | `pkgs/parsl/default.nix` (the `src` note) |
+| Where do a failed bump's new version, hash and build log go, and why is the build not `nix-update --build`? | `scripts/update-packages.sh` (the header), `docs/version-updates.md` (§5) |
+| How do I rebuild a failed bump after a fix without running nix-update again? | `Justfile` (`update-rebuild`), `scripts/update-packages.sh` (`rebuild_one`) |
 | How do I apply what a scan found without retyping thirty attribute names? | `Justfile` (`update-from-scan`), `scripts/update-packages.sh` (`attrs_from_report`) |
 | Why does `missing` being non-empty abort the updater rather than warn? | `scripts/update-universe.nix` (the header), `flake.nix` (the `graphrc` note in `legacyPackages`) |
 | Why is no package `manual`, when five of them were called permanently manual? | `docs/version-updates.md` (§2), `pkgs/chemfiles/default.nix` and `pkgs/trexio/default.nix` (`passthru.updatePolicy.secondary`) |
@@ -687,6 +689,7 @@ just eval vise.version                # one expression, likewise; see the skill
 just update-scan                      # which packages have a newer upstream; builds nothing
 just update-policy                    # the resolved update policy as JSON; no daemon either
 just update qcportal                  # bump one package: rewrite, fix hashes, build
+just update-rebuild qcportal          # after a fix; logs and patch in .scratch/update/qcportal/
 just update-pr qcportal               # and open a pull request for it
 just update-flake-inputs              # move flake.lock, gated on the eval checks
 ```

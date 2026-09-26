@@ -273,6 +273,7 @@ just update-from-scan             # bump everything the last scan called would-u
 just update-from-scan 4           # the same, four builds at a time
 just update-from-scan-pr          # the same, one pull request each
 just update qcportal              # rewrite + build + fix hashes; leaves the tree dirty
+just update-rebuild qcportal      # build again after a fix; no second nix-update
 just update-all                   # every actionable package
 just update-pr qcportal           # the above, then branch + signed commit + PR
 just update-batch 5               # what the scheduled workflow runs
@@ -322,9 +323,32 @@ per-file and stays where it is.
 
 Every package announces itself on stderr as `[n/total] attr: <status>`, and the
 paths that build announce a `start` line as well — that is where the long
-silence is, since `nix-update`'s own output is captured rather than streamed
-(the report wants the last three lines of a failure, not a build log on the
-terminal).  It is stderr, so `--json` and the final table are unaffected.
+silence is, since `nix-update`'s output and the build's go to files rather than
+to the terminal.  It is stderr, so `--json` and the final table are unaffected.
+
+### A failed bump keeps what it learned
+
+The build is the driver's own `nix build -L`, not `nix-update --build`.  With
+`nix-update` doing both, a failing check phase restored the file and took the
+new version, the freshly computed src hash and all but three lines of the log
+with it, and iterating meant running the whole bump again.
+
+Every attempt that is not a scan now writes `.scratch/update/<attr>/`:
+`result.json` (the report row, plus the file and the phase that failed),
+`nix-update.log`, `bump.patch` (the rewrite, for `git apply`), `build.log`, and
+one `log-*` per failed derivation.  The run as a whole writes
+`.scratch/update/last-run.json`.  A bump that does not build is
+`build-failed`, and under `--deliver=none` it stays in the tree, so the loop is:
+
+```sh
+just update aiida-core            # build-failed; read .scratch/update/aiida-core/build.log
+$EDITOR pkgs/aiida-core/default.nix
+just update-rebuild aiida-core    # the same files, rewritten; repeat until updated
+```
+
+An agent in the Claude Code sandbox has no nix-daemon, so it edits and reads the
+files, and the builds run through `!` in the prompt.  Under `commit` and `pr`
+delivery a failed bump is restored as before; `bump.patch` brings it back.
 
 `update-scan` always writes `.scratch/update-scan.json`, and `update-from-scan`
 reads its `would-update` rows back.  The scan's entire product is that list, and
@@ -367,7 +391,8 @@ torch-sized closures — and must run somewhere that can afford it.
    defaults the scheduled run to reporting only.
 3. **A failed build is information, not an error.**  If `aiida-core` 3.0 fails
    its suite, the report says so and no pull request is opened.  That is the bot
-   working.
+   working.  The whole log and the bump itself stay in
+   `.scratch/update/aiida-core/`; see §5.
 
 ## 7. Delivery, and why the forge signs
 

@@ -362,6 +362,14 @@ update-from-scan-pr:
 update +pkgs:
     ./scripts/update-packages.sh {{ pkgs }}
 
+# The loop after a bump that failed to build.  `update` left the rewrite in the
+# tree and its logs in .scratch/update/<attr>/; edit the package, then this
+# builds it again without a second nix-update and rewrites those files.
+
+# Build a bump again after a fix, and record the result in .scratch/update/.
+update-rebuild +pkgs:
+    ./scripts/update-packages.sh --rebuild {{ pkgs }}
+
 # The same over every actionable package. Hours of builds; see the scan first.
 update-all jobs="1":
     ./scripts/update-packages.sh --jobs={{ jobs }}
