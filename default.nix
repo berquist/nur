@@ -161,14 +161,15 @@ in
   #     `trexio` binding in ./overlays/default.nix and the split in
   #     ./tests/chemtools/default.nix, which asserts this.
   #
-  # Six packages are outside the rule for reasons that are not collisions and
+  # Nine packages are outside the rule for reasons that are not collisions and
   # are documented where they live: `tensorpotential` is unfree, and `just
   # ci-eval` forces drvPath over everything it can reach, so an unfree
   # derivation in any traversal is an evaluation error rather than a skipped
-  # package (see ci.nix); `monty`, `moyopy`, `pycifrw`, `qcelemental` and
-  # `qcengine` are guarded backports, so on a new enough channel the attribute is nixpkgs' own
+  # package (see ci.nix); `monty`, `moyopy`, `phonopy`, `phonors`, `pycifrw`,
+  # `qcelemental`, `qcengine` and `symfc` are guarded backports — phonopy and phonors of
+  # snapshots rather than releases — so on a new enough channel the attribute is nixpkgs' own
   # derivation and building it here would be CI populating a cache with packages
-  # it does not own.  All six stay reachable as `python3Packages.<name>`.
+  # it does not own.  All nine stay reachable as `python3Packages.<name>`.
   #
   # recurseIntoAttrs is the whole mechanism.  Both `nix-env -f . -qa '*'` (what
   # `just ci-eval` runs) and ci.nix's flattenPkgs descend into an attrset only
@@ -191,9 +192,9 @@ in
   # **Every Python package this repository defines is here**, the dependencies
   # carried for a single dependant included, because being a top-level attribute
   # is what makes ci.nix build a package in its own right.  The exceptions are
-  # named at internalPackages above, and there are eight: two name collisions
-  # that live there, and `tensorpotential`, `monty`, `moyopy`, `pycifrw`,
-  # `qcelemental` and `qcengine`, which are reachable as `python3Packages.<name>` for
+  # named at internalPackages above, and there are eleven: two name collisions
+  # that live there, and `tensorpotential`, `monty`, `moyopy`, `phonopy`,
+  # `phonors`, `pycifrw`, `qcelemental`, `qcengine` and `symfc`, which are reachable as `python3Packages.<name>` for
   # reasons given at that note.
   #
   # Grouped by family, alphabetical within each group.
@@ -236,6 +237,7 @@ in
     cp2k-input-tools
     cp2k-output-tools
     disk-objectstore
+    dough_0_4
     firecrest-streamer
     graphene-file-upload
     kiwipy
@@ -248,11 +250,13 @@ in
     pyfirecrest
     pytray
     qe-tools
+    qe-tools_2
     sisl
     starlette-graphene3
     upf-to-json
 
     # cheminformatics
+    array-api-extra
     basis-set-exchange
     colour-science
     configurables
@@ -262,9 +266,11 @@ in
     mda-xdrlib
     mdanalysis
     morfeus-ml
+    mparray
     mrcfile
     openprattle
     qmzyme
+    scipy-doctest
     xyzgraph
 
     # chemtools
@@ -276,6 +282,7 @@ in
     wignernj
 
     # materials
+    alm
     ase-db-backends
     atomate2
     clusterscope
@@ -291,8 +298,10 @@ in
     fairchem-data-omol
     fireworks
     hiphive
+    icet
     jobflow
     jobflow-remote
+    libtetrabz
     lobsterpy
     maggma
     maml
@@ -308,6 +317,7 @@ in
     optimade
     p-tqdm
     parmed
+    pheasy
     phono3py
     pubchempy
     pydefect
@@ -319,6 +329,7 @@ in
     pymatgen-core
     pymatgen-io-aims
     pymatgen-io-validation
+    pypolymlp
     qtoolkit
     quacc
     redun

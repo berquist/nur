@@ -605,10 +605,10 @@ in
         )
         machine.succeed("sudo -u tester chmod 600 /home/tester/.ssh/authorized_keys")
 
-        # Pre-seed known_hosts.  paramiko is told AutoAddPolicy by the fixture,
-        # but the `core.ssh_async` openssh backend shells out to `ssh`, which
-        # would sit at an interactive host-key prompt instead, and the asyncssh
-        # backend validates against known_hosts by default.
+        # Pre-seed known_hosts.  Both `core.ssh` backends need it: the openssh
+        # backend shells out to `ssh`, which would sit at an interactive
+        # host-key prompt, and the asyncssh backend validates against
+        # known_hosts by default.
         machine.succeed(
             "sudo -u tester sh -c 'ssh-keyscan -H localhost"
             " >> /home/tester/.ssh/known_hosts'"

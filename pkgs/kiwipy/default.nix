@@ -30,7 +30,7 @@ buildPythonPackage rec {
   # suite at all.  That is normally silent — pytestCheckPhase just collects
   # nothing — but here `disabledTestPaths` turned it into a hard error,
   # "Disabled tests path glob "test/rmq" does not match any paths".  Same as
-  # ../qe-tools, ../disk-objectstore and ../archive-path.
+  # ../qe-tools_2, ../disk-objectstore and ../archive-path.
   src = fetchFromGitHub {
     owner = "aiidateam";
     repo = "kiwipy";

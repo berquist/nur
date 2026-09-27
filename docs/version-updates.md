@@ -150,10 +150,12 @@ backport that has fallen through to nixpkgs' own derivation — `monty` and
 `pycifrw` on a new enough channel — is kept from having nixpkgs' file rewritten
 underneath it.
 
-**Three packages are `pinned` today**: `clusterscope` (the exact version
+**Five packages are `pinned` today**: `clusterscope` (the exact version
 `fairchem-core` names with `==`), `node-graph` (v0.6.5, whose pre-`GraphTaskHandle`
-API is the one `aiida-workgraph` and `aiida-pythonjob` are written against), and
-`lobsterpy` (v0.6.1, the transitional release carrying both `cohp` and `coxx`).
+API is the one `aiida-workgraph` and `aiida-pythonjob` are written against),
+`lobsterpy` (v0.6.1, the transitional release carrying both `cohp` and `coxx`),
+`qe-tools_2` (the 2.x series, which `aiida-quantumespresso`'s `~=2.0` asks for),
+and `dough_0_4` (the exact version `qe-tools` 3.x names with `==`).
 `py-lmdb` is pinned in `overlays/default.nix` rather than `pkgs/`, so it is out
 of reach of this mechanism entirely.
 

@@ -22,11 +22,14 @@
   pyyaml,
 
   # optional-dependencies
+  alm,
   ase,
   dscribe,
+  hiphive,
   ijson,
   lobsterpy,
   mp-api,
+  pheasy,
   phonopy,
   pymatgen-analysis-defects,
   pymatgen-analysis-diffusion,
@@ -34,6 +37,7 @@
   python-ulid,
   seekpath,
   tblite,
+  trainstation,
 
   # tests
   pytestCheckHook,
@@ -42,6 +46,7 @@
   pytest-xdist,
   enumlib,
   fireworks,
+  icet,
 
   # packmol, for the one test in `tests/common/jobs/test_mpmorph.py` that gates
   # on `which("packmol")` — `MPMorphMDMaker` shells out to it to pack an
@@ -61,7 +66,7 @@
 # are simply left out.
 buildPythonPackage (finalAttrs: {
   pname = "atomate2";
-  version = "0.1.5-unstable-2026-09-14";
+  version = "0.1.5-unstable-2026-09-25";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -72,8 +77,8 @@ buildPythonPackage (finalAttrs: {
   src = fetchFromGitHub {
     owner = "materialsproject";
     repo = "atomate2";
-    rev = "ab60477fac220e2bfd7abe6b0087753a2ec47739";
-    hash = "sha256-pSUIcr1fmv8t+GQUCNQuFs6jOQi47spNlRAbkLw1w3I=";
+    rev = "03f5ec33004f767505a43e5acf7e5d36b1865fae";
+    hash = "sha256-Hr4V4GRREU4wenLlDUKnds+a9hUhgL0pLSAgW92KvyA=";
   };
 
   # versioningit's `method = "git"` against a fetchFromGitHub tarball with no
@@ -153,8 +158,20 @@ buildPythonPackage (finalAttrs: {
   # first of those is the distribution pymatgen shed when it split in 2026, and
   # packaging it — with ../pyfhiaims beneath it — is what turns `tests/aims`
   # from a collection error into 22 tests.  See ../pymatgen-io-aims' header.
+  #
+  # `alamode`, `hiphive` and `pheasy` are what tests/vasp/flows/test_hiphive.py
+  # and test_pheasy.py need, and until they were declared both modules failed
+  # to collect on `No module named 'hiphive'`.  hiphive and trainstation are
+  # the obvious half.  The other half is ../alm, which both flows call to count
+  # free parameters, and ../pheasy, which the pheasy flow runs as a program.
+  # Upstream's `hiphive` extra is `hiphive, trainstation, atomate2[phonons,
+  # alamode]`, spelled out here because an extra cannot name its own package.
+  # Its `pheasy` extra also pins `numpy<=2.2`, which is not expressed: nothing
+  # enforces an extra's pins, and test_pheasy_wf_vasp is what says whether
+  # pheasy runs on the numpy this has.
   optional-dependencies = {
     aims = [ pymatgen-io-aims ];
+    alamode = [ alm ];
     ase = [ ase ];
     ase-ext = [ tblite ];
     mp = [ mp-api ];
@@ -172,6 +189,17 @@ buildPythonPackage (finalAttrs: {
       python-ulid
     ];
     approxneb = [ pymatgen-analysis-diffusion ];
+    hiphive = [
+      alm
+      hiphive
+      phonopy
+      seekpath
+      trainstation
+    ];
+    pheasy = [
+      hiphive
+      pheasy
+    ];
   };
 
   # `tests/vasp` is the core and mocks VASP execution against 340 MB of
@@ -197,7 +225,8 @@ buildPythonPackage (finalAttrs: {
   # `tests/common` was written off here as needing cclib and icet, and needs
   # neither to be worth running: its one cclib module carries an unconditional
   # `@pytest.mark.skip(reason="cclib is not working in CI")` upstream, and icet
-  # gates two SQS tests out of 37.  What it does have is
+  # gates one test out of 37, `test_sqs` — now supplied; see nativeCheckInputs.
+  # What it does have is
   # `test_mpmorph.py::test_packmol_job`, on `which("packmol")` — see the
   # `packmol` argument above.
   #
@@ -226,6 +255,12 @@ buildPythonPackage (finalAttrs: {
   # installed: pymatgen's `enumlib_caller` resolves `enum.x` and `makestr.x`
   # into module-level constants at import time and refuses to construct an
   # `EnumlibAdaptor` if either is missing.  Not in nixpkgs; see ../enumlib.
+  #
+  # icet for `tests/common/jobs/test_transform.py::test_sqs`, which runs
+  # pymatgen's SQSTransformation with `icet-enumeration` and `icet-monte_carlo`
+  # and skips without it.  None of atomate2's extras names icet, so it is a
+  # check input here rather than an `optional-dependencies` entry.  Not in
+  # nixpkgs; see ../icet.
   nativeCheckInputs = [
     pytestCheckHook
     pytest-cov
@@ -233,6 +268,7 @@ buildPythonPackage (finalAttrs: {
     pytest-xdist
     enumlib
     fireworks
+    icet
   ]
   ++ lib.optional (packmol != null) packmol
   ++ lib.concatLists (builtins.attrValues finalAttrs.passthru.optional-dependencies);
@@ -254,7 +290,7 @@ buildPythonPackage (finalAttrs: {
   '';
 
   # `-rsfE`, so that what this suite declines to run says so in the build log.
-  # Two icet SQS cases, one unconditionally skipped cclib module, and one
+  # One unconditionally skipped cclib module, and one
   # `tests/common/test_jobs.py` case wanting a Materials Project API key are
   # the standing set, plus `test_packmol_job` wherever `packmol` above came
   # back null; anything else in that report is an input that did not arrive.

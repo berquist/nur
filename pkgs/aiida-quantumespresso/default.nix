@@ -29,7 +29,7 @@
 
 buildPythonPackage rec {
   pname = "aiida-quantumespresso";
-  version = "5.0.0";
+  version = "5.1.0";
   pyproject = true;
 
   # fetchFromGitHub rather than fetchPypi even though 5.0.0 is released, for a
@@ -40,7 +40,7 @@ buildPythonPackage rec {
     owner = "aiidateam";
     repo = "aiida-quantumespresso";
     tag = "v${version}";
-    hash = "sha256-j2p8S8+sCIVO/7bRoSx0NxXRE8gSahYVfkrn8CS7Q6Y=";
+    hash = "sha256-tNzYUlS71Mv8L4rn02jjVQzhxz0pX2ImGVFqFvoGhWE=";
   };
 
   build-system = [ hatchling ];
@@ -142,28 +142,6 @@ buildPythonPackage rec {
     "worksteal"
   ];
 
-  # aiida-core has been on `main` since ../aiida-core needed the ZeroMQ broker,
-  # and pytest-regressions references recorded against a release do not always
-  # survive that.  This is the one that does not.
-  #
-  # `BandsData.set_kpointsdata` copies `pbc` off the KpointsData it is given,
-  # and until aiida-core#6990 (the pydantic model rework, May 2026) the
-  # `KpointsData.pbc` getter read the three attributes with no default.  It now
-  # reads them with `False`, so a KpointsData that never had a cell — which is
-  # what the matdyn parser builds — yields (False, False, False) instead, and
-  # the setter writes all three onto the BandsData:
-  #
-  #     @@ -10,4 +10,7 @@
-  #        labels: []
-  #     +  pbc1: false
-  #     +  pbc2: false
-  #     +  pbc3: false
-  #        units: THz
-  #
-  # The parser is unchanged and the three values are aiida-core's own documented
-  # default, so the recorded file is what is stale.  Adding the keys is the fix;
-  # `--force-regen` is not, since it would rewrite every reference in the suite
-  # and hide any of them that had drifted for a real reason.
   # `which` in nativeCheckInputs above got five of the eight code-setup tests
   # green; these are the other three, and no package can fix them because they
   # assert on a branch that GNU which cannot reach.  `get_executable_paths`
@@ -240,16 +218,6 @@ buildPythonPackage rec {
       --replace-fail \
         "'Error: the \`which\` command returned an empty output.'" \
         "'Failed to determine the path of executable'"
-
-    substituteInPlace tests/parsers/test_matdyn/test_matdyn_default.yml \
-      --replace-fail \
-        "  labels: []
-      units: THz" \
-        "  labels: []
-      pbc1: false
-      pbc2: false
-      pbc3: false
-      units: THz"
   '';
 
   # No Quantum ESPRESSO binary is needed: codes come from `aiida_code_installed`

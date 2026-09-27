@@ -310,6 +310,13 @@ in
         colour-science = pself.callPackage ../pkgs/colour-science {
           openimageio = pself.openimageio.out;
         };
+
+        # colour-science's `array-api` extra, and what array-api-extra's own
+        # suite and doctests need: mparray is one more backend for it to run
+        # against, scipy-doctest the doctest plugin.
+        array-api-extra = pself.callPackage ../pkgs/array-api-extra { };
+        mparray = pself.callPackage ../pkgs/mparray { };
+        scipy-doctest = pself.callPackage ../pkgs/scipy-doctest { };
         configurables = pself.callPackage ../pkgs/configurables { };
         griddataformats = pself.callPackage ../pkgs/griddataformats { };
         lwreg = pself.callPackage ../pkgs/lwreg { };
@@ -542,6 +549,40 @@ in
           else
             pself.callPackage ../pkgs/moyopy { };
 
+        # The same shape again, for ../pkgs/phono3py at `main`: it needs
+        # phonopy's `main`, which calls phonors 0.5.  nixpkgs has phonopy 4.4.0
+        # and phonors 0.3.0.  See ../pkgs/phonopy and ../pkgs/phonors for
+        # which names forced which floor.  The phonopy test is "past 4.6.0"
+        # because every later release contains the commit phono3py needs; the
+        # phonors test is the version phonopy `main` actually calls into.
+        #
+        # **Unlike monty and moyopy, this replaces a package with a snapshot
+        # rather than a release**, and phonopy has consumers across the tree:
+        # atomate2, matcalc, quacc, aiida-phonopy and nixpkgs' own.  All of
+        # them get it wherever this overlay is composed.
+        phonopy =
+          if final.lib.versionAtLeast psuper.phonopy.version "4.6.1" then
+            psuper.phonopy
+          else
+            pself.callPackage ../pkgs/phonopy { };
+        phonors =
+          if final.lib.versionAtLeast psuper.phonors.version "0.5.0" then
+            psuper.phonors
+          else
+            pself.callPackage ../pkgs/phonors { };
+
+        # The same shape as `moyopy`, for a floor that no hook can see either:
+        # ../pkgs/pypolymlp passes `use_gradient_solver` to `Symfc.run()`, an
+        # argument symfc gained in 1.7.2, and names symfc only in its extras,
+        # with no version.  Every channel here carries 1.7.1.  See
+        # ../pkgs/symfc.  phonopy and phono3py get this one too wherever the
+        # overlay is composed; phonopy `main` asks for `symfc>=1.7`.
+        symfc =
+          if final.lib.versionAtLeast psuper.symfc.version "1.7.2" then
+            psuper.symfc
+          else
+            pself.callPackage ../pkgs/symfc { };
+
         # Upstream split `pymatgen` in two in 2026.  Both halves are ours
         # because nixpkgs is still on the pre-split monolith and the three
         # cannot coexist — read ../pkgs/pymatgen-core's header for what that
@@ -630,6 +671,9 @@ in
         matminer = pself.callPackage ../pkgs/matminer { };
         redun = pself.callPackage ../pkgs/redun { };
         phono3py = pself.callPackage ../pkgs/phono3py { };
+        # phonopy's `pypolymlp` extra; polynomial ML potentials, with their
+        # own CLI.  Eigen and GSL are top-level attributes.
+        pypolymlp = pself.callPackage ../pkgs/pypolymlp { inherit (final) eigen gsl; };
         mp-api = pself.callPackage ../pkgs/mp-api { };
 
         # Dependencies of one package each, so they stop here rather than
@@ -654,6 +698,24 @@ in
         matplotlib-label-lines = pself.callPackage ../pkgs/matplotlib-label-lines { };
         pydefect = pself.callPackage ../pkgs/pydefect { };
         trainstation = pself.callPackage ../pkgs/trainstation { };
+
+        # atomate2's `alamode`, `hiphive` and `pheasy` extras.  alm is the
+        # ALAMODE force-constant fitter both of those flows call, and it links
+        # C and C++ libraries that are top-level attributes: `spglib` in here
+        # would be the Python module, so the C library is passed by name.
+        # pheasy is a program atomate2 shells out to, so a tool and re-exported
+        # below; libtetrabz is one of pheasy's extras.
+        alm = pself.callPackage ../pkgs/alm {
+          inherit (final) boost eigen lapack;
+          libsymspg = final.spglib;
+        };
+        libtetrabz = pself.callPackage ../pkgs/libtetrabz { };
+        pheasy = pself.callPackage ../pkgs/pheasy { };
+
+        # Cluster expansions, for atomate2's `test_sqs` through pymatgen's
+        # SQSTransformation.  `doctest` is the C++ test runner's header library,
+        # a top-level attribute.
+        icet = pself.callPackage ../pkgs/icet { inherit (final) doctest; };
 
         # The cluster's target, and the one member of it besides ../vise that is
         # a tool in its own right — ten console scripts under two prefixes — so
@@ -776,7 +838,19 @@ in
         # one place.  ../pkgs/quacc and ../pkgs/matcalc take `fairchem-core`
         # defaulted and drop the extra when it is null, the way ../pkgs/matcalc
         # already handles `mace-torch`.
-        fairchem-core = if pself ? e3nn then pself.callPackage ../pkgs/fairchem-core { } else null;
+        #
+        # 2.23.0 added the second condition.  It declares `nvalchemi-toolkit-ops`
+        # as a dependency, and that binding below is null wherever warp-lang is
+        # older than 1.13.0.  An argument that resolves to null does not abort —
+        # it evaluates, and pythonRuntimeDepsCheckHook then fails the build,
+        # which is the "a name that is merely too old costs a whole build" case
+        # the nvalchemi note describes.  Today both conditions fail on the same
+        # channel, nixos-26.05, so no leg loses anything.
+        fairchem-core =
+          if pself ? e3nn && pself.nvalchemi-toolkit-ops != null then
+            pself.callPackage ../pkgs/fairchem-core { }
+          else
+            null;
 
         # The three sibling distributions `quacc[fairchem]` names beside
         # fairchem-core, out of the same thirteen-package monorepo and each
@@ -816,8 +890,9 @@ in
         # It is Apache-2.0, pure Python, and wants `numpy` and `warp-lang`,
         # which nixpkgs has.  See the header of ../pkgs/nvalchemi-toolkit-ops.
         #
-        # Internal, and with no dependant here yet: `orb-models` is the first
-        # that would want it, and matcalc's `orb` extra is what that would open.
+        # Internal.  Its first dependant here is ../pkgs/fairchem-core, which
+        # declares it from 2.23.0 on.  `orb-models` is the next that would want
+        # it, and matcalc's `orb` extra is what that would open.
         #
         # Guarded on `warp-lang` the way `fairchem-core` above is guarded on
         # `e3nn`, and for exactly the same reason: an undefaulted argument that
@@ -965,6 +1040,7 @@ in
       matminer
       mp-api
       optimade
+      pheasy
       phono3py
       pubchempy
       pymatgen
@@ -973,6 +1049,7 @@ in
       pymatgen-analysis-diffusion
       pymatgen-core
       pymatgen-io-validation
+      pypolymlp
       qtoolkit
       quacc
       redun
@@ -1224,7 +1301,17 @@ in
           # aiida-psi4's mock_code fixture — but it lives here rather than in a
           # checkInputs-only position because pself is the only thing that can
           # resolve its own aiida-core to the same derivation.
-          qe-tools = pself.callPackage ../pkgs/qe-tools { };
+          #
+          # qe-tools is two attributes, because aiida-quantumespresso still pins
+          # `qe-tools~=2.0` while upstream's 3.x line pins an older dough than
+          # the cheminformatics overlay carries.  Each older series is here for
+          # one dependant; see the headers of ../pkgs/qe-tools_2 and
+          # ../pkgs/dough_0_4.  dough_0_4 lives in this overlay rather than
+          # beside dough so that a consumer taking only `overlays.aiida` still
+          # gets a qe-tools that resolves.
+          qe-tools = pself.callPackage ../pkgs/qe-tools { inherit pymatgen; };
+          qe-tools_2 = pself.callPackage ../pkgs/qe-tools_2 { };
+          dough_0_4 = pself.callPackage ../pkgs/dough_0_4 { };
           sisl = pself.callPackage ../pkgs/sisl { };
 
           # The node-graph stack, which aiida-workgraph, aiida-pythonjob and
@@ -1364,7 +1451,9 @@ in
           aiida-octopus = pself.callPackage ../pkgs/aiida-octopus { };
           aiida-orca = pself.callPackage ../pkgs/aiida-orca { };
           aiida-psi4 = pself.callPackage ../pkgs/aiida-psi4 { };
-          aiida-quantumespresso = pself.callPackage ../pkgs/aiida-quantumespresso { };
+          aiida-quantumespresso = pself.callPackage ../pkgs/aiida-quantumespresso {
+            qe-tools = pself.qe-tools_2;
+          };
           aiida-phonopy = pself.callPackage ../pkgs/aiida-phonopy { };
           aiida-pythonjob = pself.callPackage ../pkgs/aiida-pythonjob { };
           aiida-restapi = pself.callPackage ../pkgs/aiida-restapi { };

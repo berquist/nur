@@ -136,10 +136,13 @@ let
     "monty"
     "moyopy"
     "maml"
+    "phonopy"
+    "phonors"
     "mp-pyrho"
     "pyrr"
     "rootstock"
     "sevenn"
+    "symfc"
   ];
 
   # `trexio` is deliberately not in that list, because it cannot satisfy it:
@@ -294,6 +297,13 @@ lib.fix (self: {
   # builds green and returns wrong Wyckoff letters.
   materials-moyopy-satisfies-pymatgen-core = check "materials-moyopy-satisfies-pymatgen-core" (
     lib.versionAtLeast overlaidPkgs.python3Packages.moyopy.version "0.17"
+  );
+
+  # The same for ../../pkgs/symfc, and for the same reason: pypolymlp names
+  # symfc in extras only, with no version, so nothing else enforces the
+  # `use_gradient_solver` floor before pypolymlp's force-constant path is run.
+  materials-symfc-satisfies-pypolymlp = check "materials-symfc-satisfies-pypolymlp" (
+    lib.versionAtLeast overlaidPkgs.python3Packages.symfc.version "1.7.2"
   );
 
   # custodian takes pymatgen as a check input and is the package that first
