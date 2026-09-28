@@ -75,14 +75,18 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   `trainstation` (hiPhive's one gap), `cmcrameri` and `matplotlib-label-lines` (doped's plotting,
   the latter pydefect's too) — `tensorpotential` (`matcalc[grace]`'s, and **the one unfree package here**;
   see "Deferred packaging"), `pymatgen-io-aims` (`atomate2[aims]`'s, the FHI-aims I/O that
-  upstream pymatgen *shed* in the 2026 split) with `pyfhiaims` under it, and `monty`, a
-  backport that exists only because `pymatgen-core` needs a version no channel here ships yet.
-  Two more are here for a dependant that does not exist yet: `nvalchemi-toolkit-ops`, which
+  upstream pymatgen *shed* in the 2026 split) with `pyfhiaims` under it, `monty` and
+  `moyopy`, backports that exist only because `pymatgen-core` needs a version nixos-26.05 does not
+  ship, and `symfc`, a backport for `pypolymlp`'s `use_gradient_solver`, which no channel ships.
+  Two more came here for a dependant that did not exist yet: `nvalchemi-toolkit-ops`, which
   `orb-models` and `torch-sim` need and which was written off for months as an NVIDIA wall
   before anyone read its two-line dependency list, and `torch-pme` beneath it, the reference its
-  electrostatics suite validates against.
+  electrostatics suite validates against.  `fairchem-core` has declared nvalchemi since 2.23.0,
+  so that is its first dependant.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
-  upstream split it and the two layouts cannot coexist, `monty` on the legs that are behind,
+  upstream split it and the two layouts cannot coexist, `monty` and `moyopy` on the legs that are
+  behind, `symfc` on every leg today,
+  `phonopy` and `phonors`, replaced by snapshots of `main` because `phono3py` at `main` needs them,
   `torchtnt`, which is simply broken against setuptools 83, and `py-lmdb`, pinned *down* to 1.7.3
   because 2.0 forbids opening one environment path twice and three packages here depend on doing so.
   Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
@@ -214,6 +218,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does a `versionRegex` also turn on the releases API, rather than that being a second field? | `scripts/update-packages.sh` (the note in `nix_update_argv`), `docs/version-updates.md` (§4) |
 | Why is `firecrest-streamer` `report` when no guard objected to its bump? | `pkgs/firecrest-streamer/default.nix` (`passthru.updatePolicy`) |
 | Why is `parsl` fetched with `fetchPypi` when the URL it had worked perfectly? | `pkgs/parsl/default.nix` (the `src` note) |
+| Where do a failed bump's new version, hash and build log go, and why is the build not `nix-update --build`? | `scripts/update-packages.sh` (the header), `docs/version-updates.md` (§5) |
+| How do I rebuild a failed bump after a fix without running nix-update again? | `Justfile` (`update-rebuild`), `scripts/update-packages.sh` (`rebuild_one`) |
 | How do I apply what a scan found without retyping thirty attribute names? | `Justfile` (`update-from-scan`), `scripts/update-packages.sh` (`attrs_from_report`) |
 | Why does `missing` being non-empty abort the updater rather than warn? | `scripts/update-universe.nix` (the header), `flake.nix` (the `graphrc` note in `legacyPackages`) |
 | Why is no package `manual`, when five of them were called permanently manual? | `docs/version-updates.md` (§2), `pkgs/chemfiles/default.nix` and `pkgs/trexio/default.nix` (`passthru.updatePolicy.secondary`) |
@@ -281,7 +287,6 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `aiida-siesta` hand sisl back an `R` it just read, and what did the missing one cost? | `pkgs/aiida-siesta/default.nix` (the third and fourth notes above `postPatch`) |
 | Why does `aiida-gromacs` patch a build-system requirement, when `pythonRelaxDeps` exists? | `pkgs/aiida-gromacs/default.nix` (`postPatch`) |
 | Why does `aiida-gromacs` put `$out/bin` on the check PATH? | `pkgs/aiida-gromacs/default.nix` (`preCheck`) |
-| Why do `aiida-gromacs`' three metadynamics tests force `-ntmpi 1`, and what would a parallel one need? | `pkgs/aiida-gromacs/default.nix` (`postPatch`), `.scratch/nixpkgs-plumed-mpi.patch` |
 | Why is `aiida-lammps`' `jsonschema~=3.2` merely relaxed, four major versions on? | `pkgs/aiida-lammps/default.nix` (`pythonRelaxDeps`) |
 | Why does `aiida-lammps` pass `--lammps-exec lmp`? | `pkgs/aiida-lammps/default.nix` (`pytestFlags`) |
 | Why does `sisl` not fetch its one submodule? | `pkgs/sisl/default.nix` (`src`) |
@@ -319,7 +324,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `aiida-gaussian` the one of the thirteen whose conftest could not be checked first? | `pkgs/aiida-gaussian/default.nix` (the note above `postPatch`) |
 | Why does aiida-core relax `flit_core >=4.0.2` when nixpkgs has 3.12.0, and why can `pythonRelaxDeps` not do it? | `pkgs/aiida-core/default.nix` (the note above the second `pyproject.toml` hunk) |
 | Why does `test_backup` need `aiida_profile_clean` when the test before it cleans already? | `pkgs/aiida-core/default.nix` (the `test_backup` note above `postPatch`) |
-| Why does one parser test call `spec()` before rebinding `define`, when nothing reads it? | `pkgs/aiida-core/default.nix` (the `test_parser.py` note above `postPatch`) |
+| Why does the legacy `core.ssh` migration write `GSSAPIServerIdentity` only with `gss_kex`, unlike upstream? | `pkgs/aiida-core/default.nix` (the `legacy_ssh.py` note above `postPatch`) |
+| Why do two monitor tests run their async body on `runner.loop` rather than as `@pytest.mark.asyncio` tests? | `pkgs/aiida-core/default.nix` (the monitor-tests note above `postPatch`) |
 | Why does one repository test read its isolated stream inside the `with` block? | `pkgs/aiida-core/default.nix` (the `test_repository.py` note above `postPatch`) |
 | Why is RabbitMQ deleted from the *deprecated* pytest fixture plugin, and which packages does that fix? | `pkgs/aiida-core/default.nix` (the last note above `postPatch`) |
 | Why does `TestLaunchersDryRun` need its own working directory? | `pkgs/aiida-core/default.nix` (the `test_launch.py` note above `postPatch`) |
@@ -341,7 +347,6 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why do three `which` tests still fail with `which` installed? | `pkgs/aiida-quantumespresso/default.nix` (`postPatch`) |
 | Why does `aiida-quantumespresso` use `--dist worksteal` rather than xdist's default? | `pkgs/aiida-quantumespresso/default.nix` (`pytestFlags`) |
 | Why does `aiida-quantumespresso` need `which`, and why do the *negative* tests need it too? | `pkgs/aiida-quantumespresso/default.nix` (`nativeCheckInputs`) |
-| Why does the `matdyn` regression reference gain three `pbc` keys? | `pkgs/aiida-quantumespresso/default.nix` (`postPatch`) |
 | Why is aiida-core's `jq` threaded in from `final` instead of resolved through the Python set? | `overlays/default.nix` (the `aiida-core` callPackage) |
 | Which aiida-core failures are retried rather than deselected, and what makes that sound? | `pkgs/aiida-core/default.nix` (the `--only-rerun` block in `pytestFlags`) |
 | Why does aiida-core raise five of upstream's timeouts, and why is none of them an `--only-rerun` entry? | `pkgs/aiida-core/default.nix` (the wall-clock note at the end of `postPatch`) |
@@ -391,6 +396,10 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `metallogen` set `doCheck = false` when `MetalloGen/test.py` exists? | `pkgs/metallogen/default.nix` (the `doCheck` note) |
 | Why does the chemtools python-pin test compose *every* overlay when the cheminformatics one does not? | `tests/chemtools/default.nix` (the `fullyOverlaidPkgs` binding) |
 | Why does this repo carry a `monty` at all, and when should it go? | `pkgs/monty/default.nix` (the header), `overlays/default.nix` (the `monty` binding in the materials overlay) |
+| Why does this repo carry a `moyopy` when nixpkgs has one, and what did 0.9.0 get wrong? | `pkgs/moyopy/default.nix` (the header), `overlays/default.nix` (the `moyopy` binding in the materials overlay) |
+| Why does this repo carry a `symfc` when nixpkgs has one, and why can no hook catch 1.7.1? | `pkgs/symfc/default.nix` (the header), `overlays/default.nix` (the `symfc` binding in the materials overlay) |
+| Why are `phonopy` and `phonors` replaced by snapshots, and which names forced which floor? | `pkgs/phonopy/default.nix` and `pkgs/phonors/default.nix` (the headers), `overlays/default.nix` (the `phonopy` binding in the materials overlay) |
+| How is the phonopy ↔ pypolymlp check cycle cut? | `pkgs/phonopy/default.nix` (`pypolymlpForTests`) |
 | Why does `monty` need a bson fix its own test suite cannot see? | `pkgs/monty/default.nix` (`postPatch`), `overlays/default.nix` (the aiida overlay's `monty` binding) |
 | Why does `pymatgen-core` *replace* nixpkgs' `pymatgen` rather than sit beside it? | `pkgs/pymatgen-core/default.nix` (the header) |
 | How do two distributions share the `pymatgen/` tree without colliding in a `withPackages`? | `pkgs/pymatgen-core/default.nix` (the header) |
@@ -583,7 +592,7 @@ is reserved in `overlay.nix` alone**. Being skipped by `ci.nix` is what the pred
 for, and skipping that one would defeat its whole purpose; both files carry the reasoning at
 their own copy.
 
-**Every package this repository defines is a top-level attribute**, with seven named exceptions.
+**Every package this repository defines is a top-level attribute**, with eight named exceptions.
 That is the rule, and the reason for it is that being top-level is what makes `ci.nix` build a
 package in its own right: a package nothing builds is a package nobody finds out is broken.
 `pkgs/sevenn` sat green-by-omission for months because it was reachable only through an
@@ -593,11 +602,12 @@ package in its own right: a package nothing builds is a package nobody finds out
 **two**, and only because their names are already taken at the top level by different derivations:
 `chemfiles` (the C++ library) and `trexio` (nixpkgs' C library), both of which
 `tests/chemtools/default.nix` asserts. It still carries `recurseIntoAttrs`, which is exactly what
-`python3Packages` below must not. Five more packages are outside the rule for reasons that are
+`python3Packages` below must not. Nine more packages are outside the rule for reasons that are
 not collisions, and stay reachable as `python3Packages.<name>`: `tensorpotential` (unfree, and
 `just ci-eval` forces `drvPath` over everything it can reach) and the guarded backports `monty`,
-`pycifrw`, `qcelemental` and `qcengine` (nixpkgs' own derivations on a new enough channel, which
-CI has no business building as ours). See the note at the attribute itself.
+`moyopy`, `phonopy`, `phonors`, `pycifrw`, `qcelemental`, `qcengine` and `symfc` (nixpkgs' own derivations on a new enough channel, which
+CI has no business building as ours). `phonopy` and `phonors` are backports of snapshots, for
+`phono3py` at `main`. See the note at the attribute itself.
 
 `scripts/update-universe.nix` is what keeps this honest: it reads `pkgs/` with `builtins.readDir`
 and fails if any directory has no attribute path. That check is what found `graphrc`, which was
@@ -684,6 +694,7 @@ just eval vise.version                # one expression, likewise; see the skill
 just update-scan                      # which packages have a newer upstream; builds nothing
 just update-policy                    # the resolved update policy as JSON; no daemon either
 just update qcportal                  # bump one package: rewrite, fix hashes, build
+just update-rebuild qcportal          # after a fix; logs and patch in .scratch/update/qcportal/
 just update-pr qcportal               # and open a pull request for it
 just update-flake-inputs              # move flake.lock, gated on the eval checks
 ```
@@ -719,6 +730,8 @@ every package here is a top-level attribute now bar the five named at `internalP
 | `mongomock-ng` | `maggma` | **done**; *not* the `mongomock` nixpkgs already has |
 | `pubchempy` | `emmet-core` | **done** |
 | `monty` | `pymatgen-core` | **done**; a backport, guarded — see `pkgs/monty/default.nix` |
+| `moyopy` | `pymatgen-core[symmetry]`, its backend sweep | **done**; a backport, guarded, 26.05 only — nixpkgs has 0.9.0 there, and below 0.17 it returns wrong Wyckoff letters. See `pkgs/moyopy/default.nix` |
+| `symfc` | `pypolymlp`'s force-constant path, `use_gradient_solver` | **done**; a backport, guarded, every leg — nixpkgs has 1.7.1 everywhere, and the argument arrived in 1.7.2. See `pkgs/symfc/default.nix` |
 | `pymatgen-core` | everything left | **done**; the split below |
 | `pymatgen` | `emmet-core`, `atomate2` | **done**; the other half of the same split |
 | `pymatgen-io-validation` | `emmet-core` | **done**; `pkgs/pymatgen-io-validation`, re-exported like `pubchempy` for the same reason |
@@ -733,7 +746,7 @@ every package here is a top-level attribute now bar the five named at `internalP
 | `mendeleev` | `lobsterpy[featurizer]` | **done**; `pkgs/mendeleev`, internal — element data from a bundled SQLite db |
 | `matgl` | `emmet-core` tests, atomate2 forcefields | **done**; `pkgs/matgl` — `doCheck = false`, its suite needs Hugging Face model weights |
 | `emmet-core` | `atomate2`, `quacc` | **done**; `pkgs/emmet-core`, one package out of the `materialsproject/emmet` monorepo — see below |
-| `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `amset`. `tests/{vasp,ase,lobster,common,aims,cp2k,jdftx,lammps,qchem}` run in full — the last six mock the run, so none of them needs the program its name mentions — and `test_magnetic_orderings` is included since `enumlib` landed |
+| `atomate2` | the chain's target | **done**; `pkgs/atomate2`. Core `dependencies` all satisfied. Extras done: `ase`, `ase-ext`, `mp`, `lobster`, `phonons`, `defects`, `approxneb`, `alamode`, `hiphive`, `pheasy`; still out: `forcefields`, `openff`, `torchsim`, `abinit`, `amset`. `tests/{vasp,ase,lobster,common,aims,cp2k,jdftx,lammps,qchem}` run in full — the last six mock the run, so none of them needs the program its name mentions — and `test_magnetic_orderings` is included since `enumlib` landed |
 | `matcalc` | atomate2 follow-on | **done**; `pkgs/matcalc` — `doCheck = false`, its conftest imports `matgl` and every test downloads a model. Extras done: `phonon`, `phonon3` (phonopy-4 channels only), `benchmark`, `grace` (unfree — see `tensorpotential` below), `maml`, `matgl`, `mace` (unstable only), `sevennet`, `deepmd`, `fairchem`. Missing: none but `orb`/`mattersim`/`petmad`, which are NVIDIA-blocked (see below) |
 | `tensorpotential` | `matcalc[grace]` | **done**; `pkgs/tensorpotential` (repo `ICAMS/grace-tensorpotential`) — **the one unfree package here.** Academic Software Licence: GPLv2 with a non-commercial clause, "not an open-source licence" by its own preamble. Reachable as `python3Packages.tensorpotential` only, deliberately not a top-level attribute — see `ci.nix` and the overlay binding |
 | `mp-api` | `maml`, atomate2 `mp` | **done**; `pkgs/mp-api` — `doCheck = false` (every test drives a live MPRester). Dist `mp-api`, import `mp_api` |

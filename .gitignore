@@ -24,5 +24,9 @@ result-*
 # `just update-scan`'s report, read back by `just update-from-scan`.  A working
 # note about what upstream happens to hold today, rewritten whole by every scan.
 /.scratch/update-scan.json
+
+# Every non-scan updater run's logs, patches and results, one directory per
+# attribute.  See the header of scripts/update-packages.sh.
+/.scratch/update/
 log-*
 log_*

@@ -134,11 +134,15 @@ let
     "mongomock-persistence"
     "mongomock-ng"
     "monty"
+    "moyopy"
     "maml"
+    "phonopy"
+    "phonors"
     "mp-pyrho"
     "pyrr"
     "rootstock"
     "sevenn"
+    "symfc"
   ];
 
   # `trexio` is deliberately not in that list, because it cannot satisfy it:
@@ -285,6 +289,21 @@ lib.fix (self: {
   # becomes deletable — the day a channel ships something new enough.
   materials-monty-satisfies-pymatgen-core = check "materials-monty-satisfies-pymatgen-core" (
     lib.versionAtLeast overlaidPkgs.python3Packages.monty.version "2026.7.16"
+  );
+
+  # The same for ../../pkgs/moyopy.  This floor is the one that matters more,
+  # because nothing else enforces it: pymatgen-core names it only in extras,
+  # which pythonRuntimeDepsCheckHook does not read, so a channel below it
+  # builds green and returns wrong Wyckoff letters.
+  materials-moyopy-satisfies-pymatgen-core = check "materials-moyopy-satisfies-pymatgen-core" (
+    lib.versionAtLeast overlaidPkgs.python3Packages.moyopy.version "0.17"
+  );
+
+  # The same for ../../pkgs/symfc, and for the same reason: pypolymlp names
+  # symfc in extras only, with no version, so nothing else enforces the
+  # `use_gradient_solver` floor before pypolymlp's force-constant path is run.
+  materials-symfc-satisfies-pypolymlp = check "materials-symfc-satisfies-pypolymlp" (
+    lib.versionAtLeast overlaidPkgs.python3Packages.symfc.version "1.7.2"
   );
 
   # custodian takes pymatgen as a check input and is the package that first

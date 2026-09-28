@@ -26,7 +26,6 @@
   jinja2,
   numpy,
   pamqp,
-  paramiko,
   pgsu,
   psutil,
   psycopg,
@@ -90,7 +89,7 @@
 
 buildPythonPackage rec {
   pname = "aiida-core";
-  version = "2.9.2-unstable-2026-09-12";
+  version = "2.9.2-unstable-2026-09-26";
   pyproject = true;
 
   # Not fetchPypi.  The newest release is 2.9.0, and the ZeroMQ broker —
@@ -102,8 +101,8 @@ buildPythonPackage rec {
   src = fetchFromGitHub {
     owner = "aiidateam";
     repo = "aiida-core";
-    rev = "e4d99200ab68fc86f84bc1f275856bc7dd640f56";
-    hash = "sha256-19sGoqt45qhTCyKt6KEeqbggnXxLTw7xWG+VeL8b1lY=";
+    rev = "5c075940c3112283c639da69d47205fc37c12268";
+    hash = "sha256-GyM4L5/W6Nuxp1yNNJ1EWCQgf9MGnqnAomVPxBXycws=";
   };
 
   # `core.sqlite_dos` opens its database on SQLite's two defaults: a rollback
@@ -447,63 +446,49 @@ buildPythonPackage rec {
   # because `tempfile = Path(file_stem + '.txt')` in test_clear_stale_pid_files
   # shares the same directory and the same exposure.
   #
-  # tests/tools/workflows/test_base.py is the odd one out: not a race and not a
-  # leaked row, but an ordering dependency, and the only one of these that would
-  # fail identically on a single worker if the order came out wrong.
-  # test_fallback_workflow_tools_on_loading_error replaces
-  # aiida.plugins.entry_point.load_entry_point with one that always raises, and
-  # only then builds a WorkChainNode.  Constructing a node needs the *storage*
-  # backend, which resolves through the function just replaced:
+  # aiida/storage/migrations/legacy_ssh.py is a library fix, not a test one.
+  # The migration that retires the paramiko `core.ssh` writes an `ssh_config`
+  # stanza for each computer, and it writes `GSSAPIServerIdentity` whenever
+  # the computer had a `gss_host`.  That keyword comes from the GSSAPI patch
+  # that Debian and Red Hat apply.  Stock OpenSSH, which is what nixpkgs'
+  # `openssh` is, stops on it:
   #
-  #     StorageFactory('core.psql_dos') -> BaseFactory -> load_entry_point
-  #     LoadingEntryPointError: broken tools entry point
+  #     Bad configuration option: gssapiserveridentity
+  #     terminating, 1 bad configuration options
   #
-  # get_profile_storage caches after first use, so the test passes whenever
-  # anything on that worker has already touched the database — which is nearly
-  # everything, and is why upstream does not see it.  Across 128 workers one
-  # eventually draws this test before any such neighbour.
+  # So on NixOS, macOS or a BSD, such a computer breaks the openssh backend.
+  # Upstream's own comment names this hazard for `GSSAPIKeyExchange`, from the
+  # same patch, but guards only that keyword; its CI runs a patched client and
+  # cannot see the difference.  test_the_ssh_client_accepts_every_directive
+  # catches it here, because its client is stock.
   #
-  # The node construction moves above the monkeypatch rather than a fixture
-  # being added to warm the cache.  What the test asserts is about `node.tools`,
-  # which is still resolved after the patch, so it goes on testing exactly what
-  # it did and stops depending on what ran before it.
+  # The hunk puts `GSSAPIServerIdentity` under the `gss_kex` guard: a computer
+  # that asked for GSSAPI key exchange needs a patched client anyway.  For the
+  # others, the openssh backend loses the server identity, but the asyncssh
+  # backend, the default, still gets it through `connect_flags`, which does
+  # not depend on the stanza.  Both test_main_0003 modules set `gss_kex`, so
+  # their assertions on the stanza still hold.
   #
-  # tests/parsers/test_parser.py is the same shape once more, and reading the
-  # two together is the point: a cache decides whether a leak is ever observed.
-  # test_parser_get_outputs_for_parsing opens with
+  # test_calc_job_monitors_process_poll_interval_integrated and
+  # test_monitor_result_action_disable_self depend on the pytest-asyncio
+  # version.  Upstream made them `@pytest.mark.asyncio async def` in #7640 and
+  # #7667: each one schedules a process on `runner.loop`, then waits for its
+  # monitor with `asyncio.sleep` on whatever loop the test runs on.  That is the
+  # same loop only under the pytest-asyncio upstream pins, `<0.17`, where
+  # tests/conftest.py overrides `event_loop` to hand out `runner.loop`.
+  # pytest-asyncio 1.0 removed that override point, and nixpkgs has 1.4.0, so
+  # each test gets a loop of its own.  `runner.loop` then never runs, the
+  # process never steps, the wait times out after 30 seconds, and the cleanup
+  # fails as well:
   #
-  #     ArithmeticAddCalculation.define = CustomCalcJob.define
+  #     RuntimeError: The local process controller must be called from its
+  #     event loop.
   #
-  # and never puts it back.  Nothing in that test consults it — its node carries
-  # `CustomCalcJob.build_process_type()`, so `get_outputs_for_parsing` reads
-  # CustomCalcJob's spec — but the rebinding outlives the test in that worker's
-  # interpreter.  `Process.spec()` caches into `cls.__dict__['_spec']`, so what
-  # happens next depends entirely on whether that cache was already warm:
-  #
-  #   warm — nearly always, since test_parser_exit_codes and hundreds of others
-  #   build it — the rebound `define` is never called and nothing is visible.
-  #
-  #   cold, and ArithmeticAddCalculation's spec gets built from CustomCalcJob's
-  #   define.  Its outputs become {out, output, remote_folder, remote_stash,
-  #   retrieved}: no `sum`, and an `output` port that is required and
-  #   pass_to_parser.  test_parse_from_node then asks for a link that was never
-  #   made:
-  #
-  #       NotExistent: no neighbor with the label output found
-  #
-  # Reproduced directly against the built library rather than inferred — cold,
-  # the outputs come back without `sum`; warm, they are correct.
-  #
-  # So the same derivation passed on the nixpkgs-unstable leg and failed on
-  # nixos-unstable, 3363 tests versus 3362 out of an identical suite.  With 128
-  # workers and dynamic distribution it is a coin flip which test reaches
-  # ArithmeticAddCalculation first.
-  #
-  # The fix warms the cache deliberately and then scopes the rebinding, rather
-  # than deleting a line that upstream may yet find a use for.  `spec()` on the
-  # line above pins the correct spec before `define` changes, and monkeypatch
-  # puts `define` back at teardown; what the test actually exercises, through
-  # CustomCalcJob, is untouched.
+  # Their siblings in tests/engine/processes/test_communications.py do not
+  # have this problem, because they are synchronous and drive `runner.loop`
+  # with `run_until_complete`.  The two hunks give these tests that shape: the
+  # async body becomes a helper, unchanged, and a synchronous test of the same
+  # name runs it on `runner.loop`.
   #
   # tests/cmdline/utils/test_repository.py is not a race at all — it is the one
   # failure here that depends on the channel rather than on the dice.  It reads
@@ -880,11 +865,6 @@ buildPythonPackage rec {
         "def test_walk_with_invalid_path():" \
         "def test_walk_with_invalid_path(aiida_profile_clean):"
 
-    substituteInPlace tests/orm/nodes/data/test_upf.py \
-      --replace-fail \
-        "    def init_profile(self, tmp_path):" \
-        "    def init_profile(self, aiida_profile_clean, tmp_path):"
-
     substituteInPlace tests/tools/archive/orm/test_users.py \
       --replace-fail \
         "def test_nodes_belonging_to_different_users(aiida_profile, tmp_path, aiida_localhost):" \
@@ -910,15 +890,6 @@ buildPythonPackage rec {
       --replace-fail \
         "    def test_dump_cli_to_api_mapping(self, mock_dump, run_cli_command, tmp_path):" \
         "    def test_dump_cli_to_api_mapping(self, mock_dump, aiida_profile_clean, run_cli_command, tmp_path):"
-
-    substituteInPlace tests/tools/workflows/test_base.py \
-      --replace-fail \
-        "    monkeypatch.setattr(entry_point_module, 'load_entry_point', raise_loading_entry_point_error)
-
-        node = WorkChainNode(process_type=f'aiida.workflows:{WORKFLOW_ENTRY_POINT_NAME}')" \
-        "    node = WorkChainNode(process_type=f'aiida.workflows:{WORKFLOW_ENTRY_POINT_NAME}')
-
-        monkeypatch.setattr(entry_point_module, 'load_entry_point', raise_loading_entry_point_error)"
 
     substituteInPlace tests/cmdline/utils/test_multiline.py \
       --replace-fail \
@@ -985,15 +956,6 @@ buildPythonPackage rec {
         "    monkeypatch.chdir(tmp_path)
         aiida_profile = get_manager().get_profile()"
 
-    substituteInPlace tests/parsers/test_parser.py \
-      --replace-fail \
-        "    def test_parser_get_outputs_for_parsing(self):" \
-        "    def test_parser_get_outputs_for_parsing(self, monkeypatch):" \
-      --replace-fail \
-        "        ArithmeticAddCalculation.define = CustomCalcJob.define" \
-        "        ArithmeticAddCalculation.spec()
-            monkeypatch.setattr(ArithmeticAddCalculation, 'define', CustomCalcJob.define)"
-
     substituteInPlace tests/cmdline/utils/test_repository.py \
       --replace-fail \
         "        list_repository_contents(folder_data, path=''', color=True)
@@ -1001,6 +963,37 @@ buildPythonPackage rec {
         values = outstreams[0].getvalue()" \
         "        list_repository_contents(folder_data, path=''', color=True)
             values = outstreams[0].getvalue()"
+
+    substituteInPlace src/aiida/storage/migrations/legacy_ssh.py \
+      --replace-fail \
+        "        directives.append('GSSAPIKeyExchange yes')
+        if gss_host := params.get('gss_host'):
+            directives.append(f'GSSAPIServerIdentity {_quote(str(gss_host))}')" \
+        "        directives.append('GSSAPIKeyExchange yes')
+            if gss_host := params.get('gss_host'):
+                directives.append(f'GSSAPIServerIdentity {_quote(str(gss_host))}')"
+
+    substituteInPlace tests/engine/processes/calcjobs/test_monitors.py \
+      --replace-fail \
+        "@pytest.mark.asyncio
+    async def test_calc_job_monitors_process_poll_interval_integrated(entry_points, aiida_code_installed, runner):" \
+        "def test_calc_job_monitors_process_poll_interval_integrated(entry_points, aiida_code_installed, runner):
+        runner.loop.run_until_complete(_process_poll_interval_integrated(entry_points, aiida_code_installed, runner))
+
+
+    async def _process_poll_interval_integrated(entry_points, aiida_code_installed, runner):"
+
+    substituteInPlace tests/engine/processes/calcjobs/test_calc_job.py \
+      --replace-fail \
+        "@pytest.mark.asyncio
+    @pytest.mark.usefixtures('override_logging')
+    async def test_monitor_result_action_disable_self(get_calcjob_builder, entry_points, caplog, runner):" \
+        "@pytest.mark.usefixtures('override_logging')
+    def test_monitor_result_action_disable_self(get_calcjob_builder, entry_points, caplog, runner):
+        runner.loop.run_until_complete(_monitor_result_action_disable_self(get_calcjob_builder, entry_points, caplog, runner))
+
+
+    async def _monitor_result_action_disable_self(get_calcjob_builder, entry_points, caplog, runner):"
 
     substituteInPlace src/aiida/tools/pytest_fixtures/storage.py \
       --replace-fail \
@@ -1170,7 +1163,6 @@ buildPythonPackage rec {
     "importlib-metadata"
     "jedi"
     "pamqp"
-    "paramiko"
     "pytz"
     "tabulate"
     "upf_to_json"
@@ -1205,7 +1197,6 @@ buildPythonPackage rec {
     jinja2
     numpy
     pamqp
-    paramiko
     pgsu
     psutil
     psycopg
@@ -1532,10 +1523,10 @@ buildPythonPackage rec {
   # the `transports-ssh` VM test, which runs all four files unfiltered.
   #
   # tests/engine/daemon/test_execmanager.py drives every test through the
-  # `node_and_calc_info` fixture, whose four params are (core.local, core.ssh,
-  # core.ssh_async/asyncssh, core.ssh_async/openssh).  Only param 0 works
-  # without a server, and the other three accounted for 108 of the 131 SSH
-  # failures — 36 tests times three transports.  The params are tuples, so
+  # `node_and_calc_info` fixture, whose three params are (core.local,
+  # core.ssh/asyncssh, core.ssh/openssh).  Only param 0 works without a server.
+  # When there were four params, the other three accounted for 108 of the 131
+  # SSH failures — 36 tests times three transports.  The params are tuples, so
   # pytest names them by index rather than by content; if upstream reorders or
   # adds one, the indices here shift silently.  The canary is the failure
   # count, since a wrongly-kept param fails loudly on connection refused.
@@ -1544,7 +1535,7 @@ buildPythonPackage rec {
   # pytestFlags, and pytest keeps only the last `-k` it is given, so a second
   # one here would silently discard every name in `disabledTests`.
   #
-  # The remaining fifteen are enumerable, so they are deselected by exact node
+  # The remaining fourteen are enumerable, so they are deselected by exact node
   # id rather than by a `not ssh` name filter — that filter would also drop the
   # SSH tests that pass here precisely because they never open a connection.
   ++
@@ -1555,7 +1546,6 @@ buildPythonPackage rec {
       ])
       [
         "tests/engine/test_memory_leaks.py::test_leak_ssh_calcjob"
-        "tests/tools/pytest_fixtures/test_orm.py::test_aiida_computer_fixtures[aiida_computer_ssh-BlockingTransport-core.ssh]"
         "tests/tools/pytest_fixtures/test_orm.py::test_aiida_computer_fixtures_async[asyncssh-_AsyncSSH]"
         "tests/orm/nodes/data/test_remote.py::test_clean[ssh]"
         "tests/orm/nodes/data/test_remote.py::test_get_size_on_disk_du[ssh]"
@@ -1716,11 +1706,10 @@ buildPythonPackage rec {
     # above is what fixed the bulk of the SSH failures, because most of them
     # never reached a connection.  Only what needs something listening is here.
     #
-    # All three of these files are about the SSH transports end to end, so
-    # moving them wholesale costs no coverage that stays behind — everything in
-    # them runs in the VM, including the handful that would pass here.
+    # Both of these files are about the SSH transport end to end, so moving
+    # them wholesale costs no coverage that stays behind — everything in them
+    # runs in the VM, including the handful that would pass here.
     "tests/transports/test_all_plugins.py"
-    "tests/transports/test_ssh.py"
     "tests/transports/test_asyncssh_plugin.py"
   ];
 
@@ -1733,13 +1722,12 @@ buildPythonPackage rec {
     "test_icsd"
     "test_materialsproject"
 
-    # The three SSH params of tests/engine/daemon/test_execmanager.py's
+    # The two SSH params of tests/engine/daemon/test_execmanager.py's
     # `node_and_calc_info` fixture — see the note in pytestFlags for why they
     # are named by index, and why they have to be expressed here rather than as
     # a `-k` of their own.
     "node_and_calc_info1"
     "node_and_calc_info2"
-    "node_and_calc_info3"
   ];
 
   pythonImportsCheck = [

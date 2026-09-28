@@ -28,15 +28,15 @@
 # sibling of phonopy.  Carried for `matcalc[phonon3]`.
 buildPythonPackage (finalAttrs: {
   pname = "phono3py";
-  version = "4.4.0-unstable-2026-09-04";
+  version = "4.5.0-unstable-2026-09-26";
   pyproject = true;
   __structuredAttrs = true;
 
   src = fetchFromGitHub {
     owner = "phonopy";
     repo = "phono3py";
-    rev = "2bacd16988fd37dfb419c717841d1a29a2f7bbad";
-    hash = "sha256-sVzlXLSWwebR/h5tnYCj9vVXQ9q4CXuH6mmbw1uZtkI=";
+    rev = "3a69b1bbae572063f2a2c7a8ef5ee1a202a74a9c";
+    hash = "sha256-5C5vew03sl5lOD/jDy3vCeGSvmGQeHiKoABpsEQRgzg=";
   };
 
   # scikit-build-core takes the version from setuptools_scm
@@ -48,9 +48,26 @@ buildPythonPackage (finalAttrs: {
   # phono3py's bindings use the ordinary `nb::module_` / `nb::ndarray` surface.
   # A build-system pin, so it has to be rewritten in pyproject.toml —
   # `pythonRelaxDeps` only touches the wheel's runtime metadata.
+  #
+  # test_reciprocal_to_normal_vs_c compares the Python ReciprocalToNormal with
+  # the compiled interaction strength at `rtol=1e-10, atol=0`.  Here 16 of its
+  # 216 elements disagreed, all of them between 1e-41 and 1e-39, while the other
+  # 200 agreed to 1e-10.  For scale, the sibling regression test's per-band sums
+  # of |fc3|^2 are 8e-6 to 2.5e-4 before the unit factor.  Those 16 are
+  # presumably residues of terms that cancel to zero, and the two paths sum in a
+  # different order; with no absolute floor, the test compares that noise at a
+  # relative 1e-10, and it passes or fails with the toolchain.  The floor is
+  # 1e-10 of the largest element, so every element that matters still gets the
+  # same 1e-10 relative check.  Patched rather than deselected so that the check
+  # of the real values stays.
   postPatch = ''
     substituteInPlace pyproject.toml \
       --replace-fail '"nanobind<2.10.0"' '"nanobind"'
+
+    substituteInPlace test/phonon3/test_reciprocal_to_normal.py \
+      --replace-fail \
+        'np.testing.assert_allclose(py_interaction, c_interaction[0], rtol=1e-10, atol=0)' \
+        'np.testing.assert_allclose(py_interaction, c_interaction[0], rtol=1e-10, atol=1e-10 * np.abs(c_interaction[0]).max())'
   '';
 
   # `USE_CONDA_PATH` defaults ON and points CMake at a conda prefix; off here.
@@ -98,8 +115,10 @@ buildPythonPackage (finalAttrs: {
     license = lib.licenses.bsd3;
     mainProgram = "phono3py";
     maintainers = with lib.maintainers; [ berquist ];
-    # phono3py 4.4 links against phonopy 4.x's C library and pins
-    # `phonopy >= 4.4, < 4.5`; nixos-26.05 is still on phonopy 3.5.1.
-    broken = lib.versionOlder phonopy.version "4.4";
+    # This `main` pins `phonopy>=4.6.0,<4.7.0` and needs more than that: it
+    # imports a function phonopy added after tagging 4.6.0.  The materials
+    # overlay supplies phonopy `main` as ../phonopy; this guards the case of a
+    # phonopy from anywhere else, such as nixos-26.05's 3.5.1.
+    broken = lib.versionOlder phonopy.version "4.6";
   };
 })

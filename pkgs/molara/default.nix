@@ -46,14 +46,14 @@ buildPythonPackage rec {
   # src/molara/__init__.py declares and what pyproject.toml reads back through
   # `version = {attr = "molara.__version__"}` — here the tag and the source
   # agree, unlike ../fireworks, they are just 98 commits apart.
-  version = "0.1.2-unstable-2026-09-08";
+  version = "0.1.2-unstable-2026-09-15";
   pyproject = true;
 
   src = fetchFromGitHub {
     owner = "Molara-Lab";
     repo = "Molara";
-    rev = "d2924261f729fb11020b8fbdf6b8c90839467443";
-    hash = "sha256-4OTEe6r5a3e+ymml6RtLfTh7OiR8S+Urmm/ztDnFPbk=";
+    rev = "4b7a6230950ae5b295f4de41d742efef50e8a19d";
+    hash = "sha256-AXvCD51QOxvEP1RHCyD4gzcfhggahRUFrMYrEKyMmhY=";
   };
 
   build-system = [

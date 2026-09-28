@@ -6,6 +6,7 @@
 #   scripts/update-packages.sh --scan                 what would move, nothing written
 #   scripts/update-packages.sh --scan qcportal        one package
 #   scripts/update-packages.sh qcportal               rewrite, fix hashes, build
+#   scripts/update-packages.sh --rebuild qcportal     build the tree as it is, and record it
 #   scripts/update-packages.sh --deliver=pr --limit=5
 #
 # Everything the scheduled workflow does goes through this script, and the
@@ -31,6 +32,33 @@
 # stronger signal than a hash comparison, and also why a full run is hours of
 # work and belongs on a machine that can afford it.  A failed build is
 # information: the report records it and no pull request is opened.
+#
+# ## A failed bump keeps what it learned
+#
+# The build is this script's own `nix build`, not `nix-update --build`.  With
+# nix-update doing both, a failing check phase made nix-update exit non-zero,
+# the file was restored, and the new version and the src hash it had just
+# downloaded to compute went with it — along with every line of the build log
+# but the last three.  Iterating on a fix meant running the whole bump again.
+#
+# So every attempt that reaches nix-update writes .scratch/update/<attr>/:
+#
+#   result.json      the report row, plus the file rewritten and the phase
+#                    that failed (nix-update, secondary or build)
+#   nix-update.log   nix-update's whole output
+#   bump.patch       the rewrite as a diff, which `git apply` puts back
+#   build.log        the whole `nix build -L` output, refresh-hashes.sh's too
+#   log-*            one log per failed derivation, from ./fetch-build-logs.sh
+#
+# and the run as a whole writes .scratch/update/last-run.json.  A bump whose
+# build fails is `build-failed`, and under --deliver=none it stays in the tree,
+# so the loop is: read build.log, edit the package, `--rebuild` it.  --rebuild
+# runs no nix-update and touches no file; it builds what is there and rewrites
+# result.json and build.log.  Under commit and pr the tree is restored as
+# before, and bump.patch is how to get the work back.
+#
+# Scan mode writes none of this: it builds nothing, and its product is the
+# report ../Justfile already keeps in .scratch/update-scan.json.
 #
 # ## Why nix-update is pointed at ../default.nix rather than at the flake
 #
@@ -98,20 +126,24 @@
 # ## Progress
 #
 # A run that spends twenty minutes inside one build must not be
-# indistinguishable from one that has hung, and nix-update's own output is
-# captured rather than streamed — the report wants the last three lines of a
-# failure, not the whole build log on the terminal.  So each package announces
+# indistinguishable from one that has hung, and nix-update's and the build's
+# output go to files rather than to the terminal — a dozen interleaved build
+# logs are unreadable there, and each one is kept whole under
+# .scratch/update/<attr>/ instead.  So each package announces
 # itself on stderr as `[n/total] attr: <status>`, and the paths that build
 # announce a `start` as well, because that is where the long silence is.  stderr
-# rather than stdout, so --json and the final table are unaffected.
+# rather than stdout, so --json and the final table are unaffected.  A
+# `build-failed` line names the directory to read.
 
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly repo_root
 readonly universe_expr="${repo_root}/scripts/update-universe.nix"
+readonly state_root="${repo_root}/.scratch/update"
 
 scan=false
+rebuild=false
 deliver=none
 dry_run=false
 build=true
@@ -127,6 +159,8 @@ total_width=1
 snapshot=''
 snapshot_target=''
 keep_changes=false
+current_file=''
+current_phase=''
 declare -a selected=()
 
 usage() {
@@ -134,6 +168,8 @@ usage() {
 usage: update-packages.sh [OPTIONS] [ATTR...]
 
   --scan              report what would move, then restore the tree
+  --rebuild           build the named attributes as the tree has them, no
+                      nix-update; for iterating on a bump that failed to build
   --deliver=MODE      none (default) | commit | pr
   --limit=N           stop after N packages have actually changed (0 = no limit)
   --jobs=N            packages at once; needs --scan or --deliver=none, and no --limit
@@ -146,7 +182,8 @@ usage: update-packages.sh [OPTIONS] [ATTR...]
   -h, --help          this
 
 With no ATTR and no --from, every package whose policy makes it actionable is
-attempted.
+attempted.  Every attempt that is not a scan leaves its logs, its rewrite as a
+patch and its result in .scratch/update/<attr>/.
 EOF
 }
 
@@ -196,15 +233,35 @@ finished_status() {
         return 0
     }
 
-    jq --raw-output \
-        '.status + (if .old == .new then "" else "  " + .old + " -> " + .new end)' \
-        "$row"
+    jq --raw-output --arg dir "${state_root#"${repo_root}/"}/${1}/" '
+        .status
+        + (if .old == .new then "" else "  " + .old + " -> " + .new end)
+        + (if .status == "build-failed" then "  (" + $dir + ")" else "" end)
+    ' "$row"
+}
+
+# Where one attribute's logs, patch and result live.  Attribute paths have no
+# slash in them, so the name is the directory, as it is for emit()'s rows.
+attr_dir() {
+    printf '%s/%s' "$state_root" "$1"
+}
+
+# The line of a nix log worth putting in a table: its first `error:`, which for
+# a failed build names the derivation.  The last lines are the fallback, for
+# output with no such line — nix-update failing in its own Python, say.
+first_error() {
+    local text
+    text="$(cat)"
+
+    grep --max-count=1 -- 'error:' <<<"$text" \
+        || tail -n 3 <<<"$text" | tr '\n' ' '
 }
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --scan) scan=true ;;
+            --rebuild) rebuild=true ;;
             --deliver=*) deliver="${1#*=}" ;;
             --limit=*) limit="${1#*=}" ;;
             --jobs=*) jobs="${1#*=}" ;;
@@ -232,6 +289,17 @@ parse_args() {
         build=false
         [[ "$deliver" == none ]] \
             || die "--scan writes nothing, so --deliver=${deliver} cannot mean anything"
+    fi
+
+    # --rebuild builds what is already in the tree, so everything that chooses
+    # or delivers a bump has nothing to act on.  --jobs still means something.
+    if [[ "$rebuild" == true ]]; then
+        [[ "$scan" != true ]] || die '--rebuild builds and --scan never does; pick one'
+        [[ "$deliver" == none ]] || die '--rebuild records a build; it does not deliver one'
+        [[ "$build" == true ]] || die '--rebuild with --no-build would do nothing'
+        [[ -z "$from_file" && "$limit" == 0 ]] \
+            || die '--rebuild takes named attributes, not --from or --limit'
+        [[ ${#selected[@]} -gt 0 ]] || die '--rebuild needs at least one attribute'
     fi
 
     [[ "$limit" =~ ^[0-9]+$ ]] || die '--limit takes a number'
@@ -279,7 +347,7 @@ require_tools() {
 
     local help flag
     help="$(nix-update --help 2>&1 || true)"
-    for flag in --file --build --version --no-src --version-regex --use-github-releases; do
+    for flag in --file --version --no-src --version-regex --use-github-releases; do
         grep --quiet --fixed-strings -- "$flag" <<<"$help" \
             || die "nix-update does not advertise ${flag}; re-read its --help before trusting this script"
     done
@@ -419,9 +487,8 @@ nix_update_argv() {
         *) die "nix_update_argv called for mode ${mode}" ;;
     esac
 
-    if [[ "$build" == true ]]; then
-        argv+=(--build)
-    fi
+    # No `--build`: build_bump() does that, so that a failing build cannot take
+    # the rewrite down with it.  See the header.
 
     # A scan reads the rewritten `version` line back and then restores the file,
     # so the hash is work with no reader.  Skipping it is the difference between
@@ -589,14 +656,54 @@ open_pull_request() {
     "${argv[@]}"
 }
 
+# The rewrite as a patch `git apply` takes back, from the snapshot rather than
+# from git for the reason process_one() gives at its `cmp`.  diff exits 1 when
+# the files differ, which is the only case this is called in.
+save_patch() {
+    local file="$1" dir="$2"
+
+    diff --unified --label "a/${file}" --label "b/${file}" \
+        "$snapshot" "${repo_root}/${file}" >"${dir}/bump.patch" || true
+}
+
+# The build gate.  `--file` and the NIX_PATH pin_nixpkgs() exported, to match
+# nix-update and ./refresh-hashes.sh; `-L` so the log holds every builder's
+# output, and `--keep-going` so one failed dependency does not hide another.
+# Appends, because refresh-hashes.sh may have written to the same log first.
+build_bump() {
+    local attr="$1" dir="$2"
+
+    (cd "$repo_root" && nix build --no-link --print-build-logs --keep-going \
+        --file "$repo_root" "$attr") >>"${dir}/build.log" 2>&1
+}
+
+# One file per failed derivation next to build.log, which with --keep-going is
+# several builders shuffled together.  Best effort: the log is already whole.
+fetch_logs() {
+    "${repo_root}/scripts/fetch-build-logs.sh" -o "$1" "${1}/build.log" >/dev/null 2>&1 || true
+}
+
 # One file per attribute rather than one shared append, so that workers running
 # at once cannot interleave a line.  Attribute paths are the only thing here
 # with a dot in them and nothing has a slash, so the name is the filename.
+#
+# The same row goes to .scratch/update/<attr>/result.json when that directory
+# exists, which is only once process_one() has got as far as running
+# nix-update — so a skipped package leaves no directory behind.
 emit() {
+    local dir
+    dir="$(attr_dir "$1")"
+
     jq --null-input --compact-output \
         --arg attr "$1" --arg mode "$2" --arg old "$3" --arg new "$4" \
         --arg status "$5" --arg detail "$6" \
-        '{ $attr, $mode, $old, $new, $status, $detail }' >"${report_dir}/${1}.json"
+        --arg file "$current_file" --arg phase "$current_phase" \
+        '{ $attr, $mode, $old, $new, $status, $detail, $file, $phase }' \
+        >"${report_dir}/${1}.json"
+
+    if [[ "$scan" != true && -d "$dir" ]]; then
+        jq '.' "${report_dir}/${1}.json" >"${dir}/result.json"
+    fi
 }
 
 # Every line emitted so far, in no particular order.  Each reader sorts or
@@ -638,17 +745,32 @@ process_one() {
         return 0
     fi
     file="${file#"${repo_root}/"}"
+    current_file="$file"
 
     snapshot="$(mktemp)"
     snapshot_target="$file"
     cp "${repo_root}/${file}" "$snapshot"
 
+    # A fresh directory per attempt, so nothing in it can be mistaken for this
+    # attempt's that was left by the last one.
+    local dir
+    dir="$(attr_dir "$attr")"
+    if [[ "$scan" != true ]]; then
+        rm --recursive --force "$dir"
+        mkdir --parents "$dir"
+    fi
+
     local -a argv=()
     mapfile -t argv < <(nix_update_argv "$attr" "$mode" "$branch" "$version_regex")
 
-    if ! output="$(cd "$repo_root" && "${argv[@]}" 2>&1)"; then
-        emit "$attr" "$mode" "$version" "$version" failed \
-            "$(tail -n 3 <<<"$output" | tr '\n' ' ')"
+    current_phase=nix-update
+    local status=0
+    output="$(cd "$repo_root" && "${argv[@]}" 2>&1)" || status=$?
+    if [[ "$scan" != true ]]; then
+        printf '%s\n' "$output" >"${dir}/nix-update.log"
+    fi
+    if [[ "$status" -ne 0 ]]; then
+        emit "$attr" "$mode" "$version" "$version" failed "$(first_error <<<"$output")"
         return 0
     fi
 
@@ -694,13 +816,34 @@ process_one() {
         return 0
     fi
 
-    if ! handle_secondaries "$attr" "$file"; then
-        emit "$attr" "$mode" "$version" "$new_version" failed \
-            'a secondary source could not be brought along'
-        return 0
-    fi
+    # Into build.log, because ./refresh-hashes.sh builds the whole attribute to
+    # find its hashes, and a check phase that fails there is a failed build.
+    current_phase=secondary
+    local built=true
+    handle_secondaries "$attr" "$file" 2>>"${dir}/build.log" || built=false
 
     tidy "$file"
+    save_patch "$file" "$dir"
+
+    if [[ "$built" == true && "$build" == true ]]; then
+        current_phase=build
+        build_bump "$attr" "$dir" || built=false
+    fi
+
+    # The bump stays in the tree under --deliver=none, so that the next step
+    # is an edit rather than a second nix-update.  Under commit and pr it is
+    # restored, since a broken bump has no business near git; bump.patch
+    # brings it back.
+    if [[ "$built" != true ]]; then
+        fetch_logs "$dir"
+        if [[ "$deliver" == none ]]; then
+            keep_changes=true
+        fi
+        emit "$attr" "$mode" "$version" "$new_version" build-failed \
+            "$(first_error <"${dir}/build.log")"
+        return 0
+    fi
+    current_phase=''
 
     # One file per commit is what ./forge-pr.sh can sign through the contents
     # API.  Anything wider is reported rather than delivered; nothing here
@@ -724,12 +867,46 @@ process_one() {
     emit "$attr" "$mode" "$version" "$new_version" updated ''
 }
 
+# --rebuild: the build gate alone, over whatever the tree holds now.  `old`
+# comes from the attempt that wrote result.json, so the row still reads as the
+# bump it is; `new` is evaluated afresh, because the fix being tested may be to
+# the version itself.
+rebuild_one() {
+    local attr="$1"
+    local dir mode=rebuild old new
+
+    dir="$(attr_dir "$attr")"
+
+    new="$(cd "$repo_root" && nix eval --raw --file "$repo_root" "${attr}.version" 2>/dev/null)" \
+        || new=''
+    old="$new"
+    if [[ -r "${dir}/result.json" ]]; then
+        old="$(jq --raw-output '.old' "${dir}/result.json")"
+        current_file="$(jq --raw-output '.file // ""' "${dir}/result.json")"
+    fi
+
+    mkdir --parents "$dir"
+    rm --force "${dir}/build.log" "${dir}"/log-*
+
+    current_phase=build
+    if ! build_bump "$attr" "$dir"; then
+        fetch_logs "$dir"
+        emit "$attr" "$mode" "$old" "$new" build-failed "$(first_error <"${dir}/build.log")"
+        return 0
+    fi
+
+    current_phase=''
+    emit "$attr" "$mode" "$old" "$new" updated ''
+}
+
 process() {
     local attr="$1" index="$2"
 
     snapshot=''
     snapshot_target=''
     keep_changes=false
+    current_file=''
+    current_phase=''
 
     # Only the paths that build announce a start.  A scan answers in about a
     # second, so a start line there is one more line to read for nothing; a bump
@@ -739,7 +916,11 @@ process() {
         progress "$index" "${attr}: start"
     fi
 
-    process_one "$attr" || log "${attr}: the driver itself failed; the tree has been restored"
+    if [[ "$rebuild" == true ]]; then
+        rebuild_one "$attr" || log "${attr}: the driver itself failed"
+    else
+        process_one "$attr" || log "${attr}: the driver itself failed; the tree has been restored"
+    fi
 
     progress "$index" "${attr}: $(finished_status "$attr")"
 
@@ -854,6 +1035,13 @@ main() {
 
     pin_nixpkgs
 
+    # --rebuild needs no policy: it runs no nix-update, and an attribute that
+    # does not exist is an error `nix build` reports in build.log by itself.
+    if [[ "$rebuild" == true ]]; then
+        run_and_report
+        return 0
+    fi
+
     policy="$(resolve_policy)" \
         || die 'could not evaluate scripts/update-universe.nix; if a package was named, check the spelling of its attribute path'
 
@@ -890,13 +1078,20 @@ main() {
         fi
     fi
 
+    run_and_report
+}
+
+# Everything after the attributes are chosen.  A run that is not a scan also
+# leaves its whole report in .scratch/update/last-run.json, with or without
+# --json, next to the per-attribute directories it summarises.
+run_and_report() {
     report_dir="$(mktemp --directory)"
     total=${#selected[@]}
     total_width=${#total}
 
     if [[ "$jobs" -gt 1 ]]; then
         run_parallel "${selected[@]}"
-        if [[ "$scan" != true ]]; then
+        if [[ "$scan" != true && "$rebuild" != true ]]; then
             tidy_all
         fi
     else
@@ -908,6 +1103,12 @@ main() {
     if [[ -n "$json_out" ]]; then
         report_json | jq --slurp '.' >"$json_out"
         log "report written to ${json_out}"
+    fi
+
+    if [[ "$scan" != true ]]; then
+        mkdir --parents "$state_root"
+        report_json | jq --slurp '.' >"${state_root}/last-run.json"
+        log "logs and results under ${state_root#"${repo_root}/"}/"
     fi
 
     rm --recursive --force "$report_dir"

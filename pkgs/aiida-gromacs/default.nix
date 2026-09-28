@@ -21,7 +21,7 @@
 
 buildPythonPackage rec {
   pname = "aiida-gromacs";
-  version = "2.2.2-unstable-2026-08-27";
+  version = "2.2.2-unstable-2026-09-23";
   pyproject = true;
 
   # Two commits past the 2.2.2 tag, which upstream writes without a leading `v`.
@@ -30,8 +30,8 @@ buildPythonPackage rec {
   src = fetchFromGitHub {
     owner = "CCPBioSim";
     repo = "aiida-gromacs";
-    rev = "e848bbc2a18af220306a6a53f1f88681b432c1fd";
-    hash = "sha256-PfzFcnkc9F0hwlwoya0qvzB+UIL4bK32PqIrUeuQn4U=";
+    rev = "2e44e69855f1648cfe36dc2a0985743ec512cc12";
+    hash = "sha256-GwiwGTh4ISWFNs5167D5MVU9a/nOMMdh1lc4H8pGxR8=";
   };
 
   build-system = [ flit-core ];
@@ -47,87 +47,15 @@ buildPythonPackage rec {
   # pythonRelaxDeps cannot do this.  It rewrites the *distribution's* declared
   # dependencies in the built metadata, and this is a build-system requirement,
   # read from pyproject.toml before any of that exists.
-  # The two `-ntmpi` rewrites uncomment what upstream already wrote down,
-  # and the reason is a property of the packaged PLUMED rather than of these
-  # tests.  **nixpkgs' plumed is built without MPI support** — its derivation
-  # takes blas and nothing else — so a PLUMED-patched mdrun works on exactly
-  # one rank.  Running the tests' own tpr and plumed.dat through `gmx mdrun
-  # -plumed` directly says so, at four rank counts:
-  #
-  #   (default, 128 tMPI)  exit 139  double free or corruption (fasttop)
-  #   -ntmpi 1             exit 0    HILLS, COLVAR and the .gro all written
-  #   -ntmpi 2             exit 1    PLMD::Communicator::Set_comm: "you are
-  #   -ntmpi 4             exit 1      trying to use an MPI function, but
-  #                                     PLUMED has been compiled without MPI
-  #                                     support"
-  #
-  # So two ranks and four fail cleanly and 128 fails as a crash — the same
-  # missing MPI support, once with a diagnostic and once without.  A stock
-  # thread-MPI gmx picks a rank per core, which is why the tests hit the crash
-  # rather than the message, and why the file list the MdrunParser complains
-  # about has a .log and empty .edr/.trr and no HILLS.
-  #
-  # `-ntmpi 1` is therefore not papering over a defect in this plugin: it is
-  # the only mode the packaged PLUMED can run in, and it is what both call
-  # sites already carry commented out with "turn off omp and mpi for gmx
-  # patched with plumed" beside them.  What it does mean is that these three
-  # tests cover serial metadynamics only.
-  #
-  # Covering a parallel one is a nixpkgs change first — plumed needs an
-  # `enableMpi`, drafted in ../../.scratch/nixpkgs-plumed-mpi.patch — and then
-  # both halves here:
-  #
-  #   gromacs.override {
-  #     enablePlumed = true;
-  #     enableMpi = true;
-  #     plumed = plumed.override { enableMpi = true; };
-  #   }
-  #
-  # which also stops being substitutable, since nothing has built that
-  # combination before.
-  #
-  # Uncommented as one line each rather than two, because the `# "1",` that
-  # follows both is not unique to the plumed test and substituteInPlace
-  # replaces every occurrence — uncommenting it in the neighbouring test would
-  # leave a stray argument after a `-ntmpi` that is still commented out.
   postPatch = ''
-    # See ../aiida-cp2k for why this is a rewrite rather than a version bump,
-    # and why pgtest, postgresql and the locale export left with it.
-    # The dropped fixtures as well as the module path; see ../aiida-diff for
-    # what `aiida_code_installed` replaced and why a bare executable name still
-    # resolves.
-    substituteInPlace conftest.py \
-      --replace-fail 'aiida.manage.tests.pytest_fixtures' 'aiida.tools.pytest_fixtures' \
-      --replace-fail \
-        'def gromacs_code(aiida_local_code_factory):' \
-        'def gromacs_code(aiida_code_installed):' \
-      --replace-fail \
-        'aiida_local_code_factory(executable="gmx", entry_point="gromacs")' \
-        'aiida_code_installed(filepath_executable="gmx", default_calc_job_plugin="gromacs")' \
-      --replace-fail \
-        'def bash_code(aiida_local_code_factory):' \
-        'def bash_code(aiida_code_installed):' \
-      --replace-fail \
-        'aiida_local_code_factory(executable="bash", entry_point="gromacs")' \
-        'aiida_code_installed(filepath_executable="bash", default_calc_job_plugin="gromacs")'
-
     substituteInPlace pyproject.toml \
       --replace-fail 'requires = ["flit_core >=4,<5"]' 'requires = ["flit_core >=3.2,<5"]'
-
-    substituteInPlace tests/test_calcs_mdrun.py \
-      --replace-fail \
-        '# "ntmpi": "1", # turn off omp and mpi for gmx patched with plumed' \
-        '"ntmpi": "1",'
-
-    substituteInPlace tests/test_cli_mdrun.py \
-      --replace-fail \
-        '# "-ntmpi", # turn off mpi for gmx patched with plumed' \
-        '"-ntmpi", "1",'
   '';
 
   # See ../aiida-orca/default.nix.  Mandatory rather than cosmetic here: the
-  # pin is `aiida-core>=2.8.0,<=2.8.1`, an upper bound that our 2.10.0.dev0
-  # fails on its own terms, not merely as a pre-release.
+  # pin is `aiida-core>=2.9.0,<2.10`, and PEP 440 has `<2.10` exclude the
+  # pre-releases of 2.10 itself, so our 2.10.0.dev0 fails the upper bound on
+  # its own terms, not merely as a pre-release.
   pythonRelaxDeps = [ "aiida-core" ];
 
   dependencies = [
@@ -154,8 +82,8 @@ buildPythonPackage rec {
   nativeCheckInputs = [
     pytestCheckHook
     # The suite runs GROMACS for real: `aiida.engine.run` on nine calculation
-    # plugins, each through `aiida_local_code_factory(executable="gmx")`, which
-    # resolves the name on PATH.  `bash` is the executable behind the second
+    # plugins, each through a code whose `filepath_executable` is the bare name
+    # `gmx`, which resolves on PATH.  `bash` is the executable behind the second
     # code fixture, and `which` is how aiida-core's local transport resolves
     # both.
     #

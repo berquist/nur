@@ -73,7 +73,7 @@
 # there, no `__init__.py` on either side.
 buildPythonPackage (finalAttrs: {
   pname = "pymatgen-core";
-  version = "2026.8.30";
+  version = "2026.9.23";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -81,7 +81,7 @@ buildPythonPackage (finalAttrs: {
     owner = "materialsproject";
     repo = "pymatgen-core";
     tag = "v${finalAttrs.version}";
-    hash = "sha256-7af04oBxPS27WeqaCvBeQukU23NYn3akHNxWr5Ay108=";
+    hash = "sha256-eKe4lPLnlKequVfmqRy0g9d4CuEdtSAvcEPtfr4GEl4=";
   };
 
   # `pmg` is not in this distribution and has not been since the split: the
@@ -193,6 +193,8 @@ buildPythonPackage (finalAttrs: {
     abinit = [ netcdf4 ];
     ase = [ ase ];
     numba = [ numba ];
+    # `>=0.17` upstream, and a correctness floor rather than a pin; the
+    # materials overlay backports ../moyopy onto channels below it.
     symmetry = [ moyopy ];
     optional = [
       ase

@@ -11,13 +11,13 @@
 
 buildGoModule (finalAttrs: {
   pname = "anilist-mal-sync";
-  version = "0.27.1";
+  version = "0.28.0";
 
   src = fetchFromGitHub {
     owner = "bigspawn";
     repo = "anilist-mal-sync";
     tag = "v${finalAttrs.version}";
-    hash = "sha256-RufN0hMuhhkCQOt8OCfn97Rr8PhGtWU14QhfBIpAHsw=";
+    hash = "sha256-fUJbGEc2jI2jHwNkdfzAOhAzJ+Xcj5yfr1l8mg6bd84=";
   };
 
   # The source carries a committed vendor/ (go.sum-consistent), so there is

@@ -22,7 +22,7 @@
 
 buildPythonPackage rec {
   pname = "aiida-pseudo";
-  version = "1.7.2";
+  version = "1.9.0";
   pyproject = true;
 
   # The lower bound aiida-quantumespresso pins (`>=1.7.2,<2`); aiida-cp2k asks
@@ -35,7 +35,7 @@ buildPythonPackage rec {
     owner = "aiidateam";
     repo = "aiida-pseudo";
     tag = "v${version}";
-    hash = "sha256-DkEQ3sVMaKjES2U6oha6FdjgPGFLM80tyPIgEH7hR1U=";
+    hash = "sha256-/yqVCFaJBlZxBW0eQkbnrnYm1nIXVYyhwlWCtDD+6To=";
   };
 
   # `ProfileParamType(load_profile=True)` stopped being a thing aiida-core
@@ -49,11 +49,22 @@ buildPythonPackage rec {
   #
   # Five collection errors, all of them this one line.  Dropping the argument
   # gives up nothing: what it asked for is what upstream now does unconditionally.
+  #
+  # 1.9.0 moves the build-system pin from `flit_core >=3.4,<4` to `>=4.0.2,<5`,
+  # and nixpkgs has flit-core 3.12.0.  `pythonRelaxDeps` cannot reach a
+  # `[build-system]` requirement; see the note on the same pin in
+  # ../aiida-core/default.nix.  Nothing else in pyproject.toml moved with it:
+  # the license is still the `{file = ...}` table flit 3 writes, and the
+  # `[tool.flit.*]` tables are unchanged since 1.7.2.  So the lower bound goes
+  # back to 1.7.2's, and upstream's new upper bound stays.
   postPatch = ''
     substituteInPlace src/aiida_pseudo/cli/params/options.py \
       --replace-fail \
         'core_options.PROFILE, type=core_types.ProfileParamType(load_profile=True), expose_value=False' \
         'core_options.PROFILE, type=core_types.ProfileParamType(), expose_value=False'
+
+    substituteInPlace pyproject.toml \
+      --replace-fail "'flit_core >=4.0.2,<5'" "'flit_core >=3.4,<5'"
   '';
 
   build-system = [ flit-core ];

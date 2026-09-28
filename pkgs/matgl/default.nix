@@ -28,7 +28,7 @@
 # import.  atomate2's `forcefields` workflows want it too.
 buildPythonPackage {
   pname = "matgl";
-  version = "4.0.3-unstable-2026-09-14";
+  version = "4.0.3-unstable-2026-09-23";
   pyproject = true;
   __structuredAttrs = true;
 
@@ -38,8 +38,8 @@ buildPythonPackage {
   src = fetchFromGitHub {
     owner = "materialyzeai";
     repo = "matgl";
-    rev = "153313684d24dfe708bdd27b61c823bb82a3c46e";
-    hash = "sha256-fmqLOxP+lyeuM7xvKukW2BMebbr5/JW2dY4eQGkXEUU=";
+    rev = "8816c92345b405d45b7139e18f2b5914d5ef5422";
+    hash = "sha256-u/BevVegjQ1r4eR/dQsZG88YeKjC8O0n6ekAxmR1U1c=";
   };
 
   # `oldest-supported-numpy` is a build-time NumPy pin for projects with C

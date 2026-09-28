@@ -9,6 +9,10 @@
   # dependencies
   numpy,
 
+  # optional-dependencies
+  array-api-compat,
+  array-api-extra,
+
   # tests
   pytestCheckHook,
   pytest-xdist,
@@ -23,20 +27,20 @@
   xxhash,
 }:
 
-buildPythonPackage {
+buildPythonPackage rec {
   # The distribution is `colour-science`; the import name is `colour`.  Not to
   # be confused with nixpkgs' `colour` (vaab/colour 0.1.5), which is a small
   # colour-name utility that happens to claim the same import name — the two
   # cannot be installed into one environment.
   pname = "colour-science";
-  version = "0.4.7-unstable-2026-08-16";
+  version = "0.4.7-unstable-2026-09-09";
   pyproject = true;
 
   src = fetchFromGitHub {
     owner = "colour-science";
     repo = "colour";
-    rev = "b6b2a95ac80123ace9cc929b041bfad823ce6823";
-    hash = "sha256-LsQ7zhW6Ij0oVXnq9rL1Ocx4kLEI5tkRA6q/9cOjx5o=";
+    rev = "5259f87c012e42b570778007f3d2560c15549518";
+    hash = "sha256-vlyMbV22IncA7ASApac7GoSbc9gJSL3NmXzKrsUQPEE=";
   };
 
   # The single-channel EXR assertion in `test_read_image_Imageio` cannot hold
@@ -54,6 +58,17 @@ buildPythonPackage {
   # everything in the `optional` extra is imported lazily, behind
   # colour.utilities.required.
   dependencies = [ numpy ];
+
+  # Upstream's `array-api` extra: array-api-compat and array-api-extra, through
+  # which colour's functions accept any array-API namespace rather than numpy
+  # alone.  Declared, unlike upstream's other extras, because nativeCheckInputs
+  # takes it whole; see the note there.
+  optional-dependencies = {
+    array-api = [
+      array-api-compat
+      array-api-extra
+    ];
+  };
 
   # ...but the test suite is not so restrained, and exercises those lazy paths.
   # These are the members of upstream's `optional` extra that nixpkgs carries.
@@ -83,6 +98,11 @@ buildPythonPackage {
   # tristimulus cache key change between runs.  So this is a check input,
   # matching upstream's `optional` extra, but a consumer who wants digests that
   # survive a restart wants xxhash installed as well.
+  #
+  # The `array-api` extra is the same story: its seven tests reach
+  # array-api-compat through `colour.utilities.required` and fail with
+  # `ImportError` without it, and two of them assert outright that each package
+  # is installed.
   #
   # opencv4 is imageio's EXR backend, and it is the *third* candidate rather
   # than the first two for reasons worth writing down, because the obvious two
@@ -121,7 +141,17 @@ buildPythonPackage {
     scipy
     tqdm
     xxhash
-  ];
+  ]
+  ++ optional-dependencies.array-api;
+
+  # matplotlib creates ~/.config/matplotlib on import, and /homeless-shelter is
+  # not writable.  preBuild rather than preCheck so that pythonImportsCheck is
+  # covered too; see ../aiida-core/default.nix.
+  preBuild = ''
+    export HOME="$(mktemp -d)"
+    export MPLCONFIGDIR="$HOME/.config/matplotlib"
+    mkdir -p "$MPLCONFIGDIR"
+  '';
 
   # OpenCV compiles the OpenEXR codec in but refuses to use it unless this is
   # set; without it `imread` returns None and imageio reports a read failure
