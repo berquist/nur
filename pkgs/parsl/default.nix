@@ -76,10 +76,16 @@ buildPythonPackage rec {
 
   build-system = [ setuptools ];
 
-  # Core requirements.txt bounds are all satisfiable against nixpkgs as-is.
-  # Only the visualization extra pins an upper bound we sit above
-  # (networkx>=3.2,<3.3).
-  pythonRelaxDeps = [ "networkx" ];
+  # The visualization extra pins networkx>=3.2,<3.3, which we sit above.
+  #
+  # The core requirements.txt pins filelock>=3.13,<4, and the channel has 4.x.
+  # parsl's only use is `with filelock.FileLock(path):` in
+  # parsl/data_provider/zip.py, which filelock 4 still provides, so the bound
+  # is cosmetic.
+  pythonRelaxDeps = [
+    "filelock"
+    "networkx"
+  ];
 
   dependencies = [
     dill
