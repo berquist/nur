@@ -67,9 +67,12 @@ ci-eval:
 # `nix build` rather than `nix-build` because only the new CLI accepts -L, and
 # it handles ci.nix's list-valued attribute fine.
 
+# `hosted` is `true` only on the GitHub-hosted runners; it drops the packages
+# too large for them.  See `tooHeavyForHostedRunners` in ci.nix.
+
 # Build everything ci.nix reports as buildable and cacheable.
-ci-build:
-    nix build -L --no-link --keep-going -f ci.nix cacheOutputs
+ci-build hosted="false":
+    nix build -L --no-link --keep-going -f ci.nix --arg hostedRunner {{ hosted }} cacheOutputs
 
 # Full CI sequence against one channel, e.g. `just ci nixos-26.05`.
 ci channel=default_channel:

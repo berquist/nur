@@ -197,6 +197,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is there a home-manager module that only installs xpra, and why is it Linux-only? | `home-modules/hydrus-client.nix` (the header comment, and `assertions`) |
 | Why no `nix-build-uncached`, and what breaks between CppNix and Lix? | `Justfile` (the note above `ci-build`) |
 | Why does `ci.nix` filter on `meta.license.free` when nothing here is unfree any more? | `ci.nix` (the note above `isBuildable`) |
+| Why do `fairchem-core`, `fairchem-data-oc` and `quacc` not build on GitHub Actions, and how do they reach the cache? | `ci.nix` (`hostedRunner`, `tooHeavyForHostedRunners`) |
 | Why is `repeated_keys` disabled? Why does the whitespace hook skip `*.patch`? | `statix.toml`, `flake.nix` |
 | Why does `qcfractalcompute` carry a patch? Why is `parsl` built from the sdist? | the respective `pkgs/*/default.nix` |
 | How does a worker get an account and a password? Why `qcfractal-manage`? | `docs/bootstrapping-worker-credentials.md` |
