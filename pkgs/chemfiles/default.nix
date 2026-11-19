@@ -52,16 +52,25 @@ in
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "chemfiles";
-  version = "0.11.0-rc1";
+  version = "0.12.0-dev-unstable-2026-11-19";
 
-  # The tag rather than HEAD, which declares 0.12.0-dev.  0.11.0-rc1 is what the
-  # chemfiles.py 0.10.4 submodule pins, so it is the pairing upstream tests, and
-  # it satisfies that binding's `find_package(chemfiles CONFIG QUIET 0.10)`.
+  # A fork, until upstream takes the fix.  `set-cpp-std-17` is the 0.11.0-rc1
+  # tag, twelve upstream bug-fix commits, and one more that sets
+  # `CMAKE_CXX_STANDARD 17` in cmake/CompilerFlags.cmake.  Upstream asks only
+  # for `cxx_std_17` through `target_compile_features`, which is a minimum, so
+  # CMake adds no `-std=` when the compiler's default is newer.  GCC 16 defaults
+  # to C++20, where the bundled fmt checks format strings with consteval, and the
+  # runtime format strings in error_fmt.hpp and warnings.hpp stop compiling.
+  #
+  # Pinned to the commit rather than the branch name, so the hash cannot go
+  # stale under it.  The branch is past the tag, so it says 0.12.0-dev;
+  # ../chemfiles-python asks for that minor version to match.  Go back to
+  # upstream's `chemfiles` owner once the fix is merged there.
   src = fetchFromGitHub {
-    owner = "chemfiles";
+    owner = "berquist";
     repo = "chemfiles";
-    tag = finalAttrs.version;
-    hash = "sha256-hu9sB2onaf8BA0TnCWI20xkgJ2cF8hlAwxfOHR1MS2E=";
+    rev = "e8b3c04fa908de2905952a013eae696f6145b285";
+    hash = "sha256-GyOt4aD5AwZSQpnBFWmqwiLBXdWz1dGng+wwXY3Hx+0=";
   };
 
   nativeBuildInputs = [
@@ -139,6 +148,8 @@ stdenv.mkDerivation (finalAttrs: {
   # out of the new source, rewrites the binding, and lets
   # ../../scripts/refresh-hashes.sh recover the hash from the build's mismatch.
   # That is the whole of what the note above `testsDataRev` asks a human to do.
+  passthru.updatePolicy.mode = "pinned";
+  passthru.updatePolicy.reason = "a fork commit carrying the C++17 fix; see the note above src";
   passthru.updatePolicy.secondary = [
     {
       name = "testsData";

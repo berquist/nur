@@ -1164,9 +1164,17 @@ buildPythonPackage rec {
   # 9.6.2 and `pamqp~=3.2` against 4.0.1.  They were never checked here before,
   # because as transitive dependencies of kiwipy no metadata check of this
   # package's own ever looked at them.
+  #
+  # click-spinner~=0.1.8 against 0.2.0.  aiida-core imports `spinner` alone,
+  # in three places, and only ever as a bare `with spinner():`; 0.2.0 still has
+  # that function, with the same keywords, returning a context manager.  Safe to
+  # list by name despite the `click` trap described above `postPatch`: that one
+  # is `click` matching the *prefix* of `click-spinner`, and nothing here starts
+  # with `click-spinner`.
   pythonRelaxDeps = [
     "aio-pika"
     "asyncssh"
+    "click-spinner"
     "importlib-metadata"
     "jedi"
     "pamqp"

@@ -616,6 +616,61 @@ in
 
         matminer = pself.callPackage ../pkgs/matminer { };
         redun = pself.callPackage ../pkgs/redun { };
+
+        # phono3py and the phonopy it is pinned to.  phono3py pins phonopy's
+        # *minor* version with a real API dependency behind it, and the three
+        # channels here carry three different phonopys — 4.4.0 locked, 4.7.2 on
+        # the newest unstable, 3.5.1 on nixos-26.05 — so no one phono3py could
+        # build on all of them.  These make it one phonopy everywhere.
+        # ../pkgs/phonopy has the long version.
+        #
+        # The three backports are guarded the way `monty` above is: the
+        # channel's own copy whenever it meets the floor, ours otherwise, so a
+        # channel that has moved on is never downgraded.  `psuper ? <name>`
+        # first because nixos-26.05's phonopy 3.5.1 predates phonors entirely,
+        # and selecting a missing attribute is an error rather than a null.
+        #
+        # Each floor is the dependant's own: phonopy 4.10 declares
+        # `phonors>=0.6.0` and `symfc>=1.8`, and phono3py 4.10 pins
+        # `phonopy>=4.10.0,<4.11.0`.  A channel *past* 4.10 gets its own
+        # phonopy and a `meta.broken` phono3py, which is the signal to bump both
+        # — see the note at phono3py's `meta.broken`.
+        #
+        # **This replaces nixpkgs' phonopy for everything in the set**, not
+        # only for phono3py: aiida-phonopy, atomate2, matcalc, quacc and both
+        # pymatgen halves all take `pself.phonopy`.  An import path admits one
+        # implementation, and phono3py and phonopy share an environment in
+        # `matcalc[phonon3]`, so a phonopy local to phono3py would collide
+        # there.  The same bargain as `monty` and `pymatgen`.
+        phonors =
+          if psuper ? phonors && final.lib.versionAtLeast psuper.phonors.version "0.6.0" then
+            psuper.phonors
+          else
+            pself.callPackage ../pkgs/phonors { };
+        symfc =
+          if psuper ? symfc && final.lib.versionAtLeast psuper.symfc.version "1.8" then
+            psuper.symfc
+          else
+            pself.callPackage ../pkgs/symfc { };
+        # `cp2k-input-tools` is the aiida overlay's, so it is only there when
+        # that overlay is composed too; phonopy's `cp2k` extra and its one CP2K
+        # test module drop out when it is not.
+        phonopy =
+          if final.lib.versionAtLeast psuper.phonopy.version "4.10.0" then
+            psuper.phonopy
+          else
+            pself.callPackage ../pkgs/phonopy {
+              cp2k-input-tools = pself.cp2k-input-tools or null;
+            };
+        # Not a backport: nixpkgs has no pypolymlp.  phonopy's `pypolymlp`
+        # extra, and the top of a check-input cycle that ../pkgs/pypolymlp's
+        # header describes.
+        pypolymlp = pself.callPackage ../pkgs/pypolymlp { };
+        # Not a backport either.  A check input of phonopy and phono3py, which
+        # offer it as a force-constant calculator without declaring it.  Two
+        # spglibs: `spglib` resolves to the Python binding inside this set, and
+        # ALM's C++ core links the C library, which is nixpkgs' top-level one.
+        alm = pself.callPackage ../pkgs/alm { libspglib = final.spglib; };
         phono3py = pself.callPackage ../pkgs/phono3py { };
         mp-api = pself.callPackage ../pkgs/mp-api { };
 

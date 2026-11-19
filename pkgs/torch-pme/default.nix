@@ -91,16 +91,56 @@ buildPythonPackage (finalAttrs: {
   # either the plugin or this, pytest rejects the whole invocation with
   # "unrecognized arguments" before collecting anything — the same fix, for the
   # same reason, as ../disk-objectstore and ../aiida-core.
-  pytestFlags = [ "--override-ini=addopts=" ];
+  #
+  # The `-W` is for torch 2.15 on Python 3.14.  Upstream's `filterwarnings`
+  # starts with `"error"` and already ignores torch's old
+  # "`torch.jit.…` is deprecated" DeprecationWarning, but torch 2.15 warns about
+  # TorchScript on 3.14 with different text and a different category:
+  #
+  #   FutureWarning: `torch.jit.script` is not supported in Python 3.14+ and
+  #   may break. Please switch to `torch.compile` or `torch.export`.
+  #
+  # Fifty-eight tests call `torch.jit.script`, and every one failed on that
+  # warning alone, before reaching an assertion.  `test_save_load` then failed
+  # the same way on `torch.jit.save`, and would have on `torch.jit.load` after
+  # it, so the filter is the "`torch.jit." prefix rather than one entry per
+  # function.  pytest escapes a command-line `-W` message and matches it from
+  # the start, so a prefix is all it takes.  A command-line `-W` is applied
+  # after the ini `filterwarnings`, so it wins over `"error"`.
+  pytestFlags = [
+    "--override-ini=addopts="
+    "-Wignore:`torch.jit.:FutureWarning"
+  ];
 
   enabledTestPaths = [ "tests" ];
 
-  # Eighteen of the twenty modules run.  The two here want `metatensor-torch`
-  # and `metatomic-torch`, which nixpkgs does not carry and nothing else in this
-  # repository needs; they are upstream's `metatensor` extra, and they test an
-  # interface layer rather than any of the arithmetic that the other eighteen
-  # cover.
-  disabledTestPaths = [ "tests/metatensor" ];
+  # With the warning out of the way, TorchScript itself fails on 3.14 in one
+  # place.  `torchpme.lib.math._CustomExp1` is a `torch.autograd.Function`, and
+  # torch 2.15 gave that base class a property TorchScript cannot read:
+  #
+  #   def input_grad_buffers(self) -> tuple[torch.Tensor | None, ...]:
+  #   RuntimeError: Expression of type dots cannot be used in a type expression
+  #
+  # That is torch's own annotation, so nothing here can fix it.  Only the
+  # InversePowerLawPotential cases reach `_CustomExp1`, through `exp1`.  The
+  # second one fails as "Can't redefine method", because the first left the
+  # class half-registered.  The other fifty-six scripted tests pass.
+  #
+  # Gated on 2.15 because that is where it was seen; the locked 2.13 was not
+  # checked.  A 2.14 that has the property too will fail loudly, not silently.
+  #
+  # Eighteen of the twenty modules run.  The two in `tests/metatensor` want
+  # `metatensor-torch` and `metatomic-torch`, which nixpkgs does not carry and
+  # nothing else in this repository needs; they are upstream's `metatensor`
+  # extra, and they test an interface layer rather than any of the arithmetic
+  # that the other eighteen cover.
+  disabledTestPaths = [
+    "tests/metatensor"
+  ]
+  ++ lib.optionals (lib.versionAtLeast torch.version "2.15") [
+    "tests/test_potentials.py::test_potentials_jit[potpars1]"
+    "tests/test_potentials.py::test_potentials_jit[potpars2]"
+  ];
 
   # `torchpme.metatensor` is left out: it imports metatensor-torch at module
   # scope, which is neither a dependency here nor in nixpkgs.

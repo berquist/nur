@@ -241,6 +241,46 @@ buildPythonPackage (finalAttrs: {
             )' \
         '            [0, 1, 2],
             )'
+
+    # `test_freq_job_v1` and `_v3` each assert the *first raw* vibrational
+    # mode at pytest's default relative tolerance of 1e-6.  That mode is one of
+    # the six translations and rotations, which are zero in exact arithmetic
+    # and which the recipe itself drops from `vib_freqs` — what is left is
+    # finite-difference noise, and its value moves with tblite and BLAS:
+    #
+    #   v1, H2O:  -0.10922 cm^-1 against an expected -0.10864
+    #   v3, CH3:  -7.52e-6 eV    against an expected -9.55e-6
+    #
+    # Everything physical in the same tests was right: the thermochemistry
+    # printed by the failing v1 run is H = 0.638 eV, S = 0.0019585 eV/K and
+    # G = 0.054 eV, which are the expected values.  So both assertions keep
+    # their reference value but take an absolute tolerance of about a tenth of
+    # a wavenumber — still enough to fail if that mode stopped being near zero —
+    # and the assertions after them, which never ran, now do.
+    substituteInPlace tests/core/recipes/tblite_recipes/test_tblite_recipes.py \
+      --replace-fail \
+        'pytest.approx(-0.10864429415434408)' \
+        'pytest.approx(-0.10864429415434408, abs=0.1)' \
+      --replace-fail \
+        '-9.551076713062095e-06' \
+        '-9.551076713062095e-06, abs=1e-5'
+
+    # `test_unset` opens the config file that `test_set` writes, and nothing
+    # else creates it.  Under xdist's default `load` scheduling the two can go
+    # to different workers, and at 128 workers they did:
+    #
+    #   FileNotFoundError: ... '/build/source/tests/core/cli/test_quacc.yaml'
+    #
+    # The module's own `setup_module` / `teardown_module` are per worker too,
+    # so one worker can also remove the file while another reads it.  Putting
+    # the whole module in one `xdist_group`, with `--dist=loadgroup` in
+    # `pytestFlags`, keeps it on one worker in file order and leaves every
+    # other test scheduled exactly as `load` would.
+    substituteInPlace tests/core/cli/test_cli.py \
+      --replace-fail \
+        'TEST_YAML = FILE_PATH / "test_quacc.yaml"' \
+        'TEST_YAML = FILE_PATH / "test_quacc.yaml"
+    pytestmark = pytest.mark.xdist_group("cli")'
   '';
 
   # The whole of upstream's own `testpaths`, less what is named below.  It was
@@ -489,7 +529,12 @@ buildPythonPackage (finalAttrs: {
   # which is how the first run of this change ended `4 failed, 445 passed` with
   # a short summary that named the 28 skips and not one of the four failures.
   # ../parmed passes `-rsfE`; ../fireworks' `-rs` predates the discovery.
-  pytestFlags = [ "-rsfE" ];
+  #
+  # `--dist=loadgroup` is for tests/core/cli; see the last note in `postPatch`.
+  pytestFlags = [
+    "-rsfE"
+    "--dist=loadgroup"
+  ];
 
   # Two bulk-Cu GFN1-xTB recipes whose asserted numbers were computed against a
   # different tblite / ASE than the channels here carry.  `test_relax_job_cell`

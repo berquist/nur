@@ -76,13 +76,17 @@ berquist's personal [NUR](https://github.com/nix-community/NUR) repository, buil
   the latter pydefect's too) — `tensorpotential` (`matcalc[grace]`'s, and **the one unfree package here**;
   see "Deferred packaging"), `pymatgen-io-aims` (`atomate2[aims]`'s, the FHI-aims I/O that
   upstream pymatgen *shed* in the 2026 split) with `pyfhiaims` under it, and `monty`, a
-  backport that exists only because `pymatgen-core` needs a version no channel here ships yet.
+  backport that exists only because `pymatgen-core` needs a version no channel here ships yet,
+  and three more for phono3py's sake — `phonopy`, `phonors` and `symfc` — with two that
+  nixpkgs lacks outright: `pypolymlp`, phonopy's `pypolymlp` extra, and `alm`, which phonopy and
+  phono3py test against without declaring.
   Two more are here for a dependant that does not exist yet: `nvalchemi-toolkit-ops`, which
   `orb-models` and `torch-sim` need and which was written off for months as an NVIDIA wall
   before anyone read its two-line dependency list, and `torch-pme` beneath it, the reference its
   electrostatics suite validates against.
   **This is the one overlay that replaces packages nixpkgs already has** — `pymatgen`, because
   upstream split it and the two layouts cannot coexist, `monty` on the legs that are behind,
+  `phonopy` (with `phonors` and `symfc` beneath it) on the legs that are behind phono3py's pin,
   `torchtnt`, which is simply broken against setuptools 83, and `py-lmdb`, pinned *down* to 1.7.3
   because 2.0 forbids opening one environment path twice and three packages here depend on doing so.
   Taking `overlays.materials` means taking both; see the cclib-style discussion at the overlay
@@ -362,7 +366,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `chemfiles-python` refuse to fetch its own submodule, and what does `postInstall` assert? | `pkgs/chemfiles-python/default.nix` (`src`, `postInstall`) |
 | Why does `chemfiles-python` run `unittest discover` instead of `pytestCheckHook`? | `pkgs/chemfiles-python/default.nix` (`checkPhase`) |
 | How does the chemfiles C++ suite get its test data with no network, and why `ctest` rather than a check target? | `pkgs/chemfiles/default.nix` (the note above `preConfigure`, and `checkPhase`) |
-| Why does `chemfiles-python` ask for chemfiles 0.11 when upstream's CMakeLists says 0.10? | `pkgs/chemfiles-python/default.nix` (`postPatch`) |
+| Why does `chemfiles-python` ask for chemfiles 0.12 when upstream's CMakeLists says 0.10? | `pkgs/chemfiles-python/default.nix` (`postPatch`) |
 | Why is `pyrr` carried here at all, and when should it be deleted? | `pkgs/pyrr/default.nix` (the header) |
 | What was pyrr's NumPy 2 incompatibility, actually? It is three defects, not one | `pkgs/pyrr/default.nix` (the note above `patches`), `pkgs/pyrr/numpy2.patch` |
 | Why does `molara` relax PySide6 with `pythonRelaxDeps` when `sella` had to patch its pin instead? | `pkgs/molara/default.nix` (`pythonRelaxDeps`), `pkgs/sella/default.nix` (`postPatch`) |
@@ -511,6 +515,12 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Which `colour-science` failures were never going to skip themselves, and what did the old note get wrong? | `pkgs/colour-science/default.nix` (the note above `nativeCheckInputs`) |
 | Why does `torch-pme` patch a tolerance rather than deselect the test, and why not just seed the RNG? | `pkgs/torch-pme/default.nix` (the note above `patches`), `pkgs/torch-pme/combined-potential-tolerance.patch` |
 | Why did `rootstock` start 404ing on a `rev` that still resolves in its clone? | `pkgs/rootstock/default.nix` (the note above `src`) |
+| Why does this repo carry `phonopy`, `phonors` and `symfc` when nixpkgs has all three? | `pkgs/phonopy/default.nix` (the header), `overlays/default.nix` (the binding above `phonors`) |
+| Why are phonopy and phono3py `report` in the update policy rather than `stable`? | `pkgs/phono3py/default.nix` (`passthru.updatePolicy`) |
+| How is the phonopy ↔ pypolymlp ↔ phono3py check-input cycle cut? | `pkgs/pypolymlp/default.nix` (the header), `pkgs/phonopy/default.nix` (`nativeCheckInputs`) |
+| Why does `symfc` deselect one test by node id when nixpkgs uses `disabledTests`? | `pkgs/symfc/default.nix` (`disabledTestPaths`) |
+| Why does `alm` take spglib twice, once as `libspglib`? | `pkgs/alm/default.nix` (the `libspglib` argument), `overlays/default.nix` (the `alm` binding) |
+| Why does `alm` delete its own console script? | `pkgs/alm/default.nix` (`postPatch`) |
 
 ### The sdist-has-no-tests trap
 
@@ -584,7 +594,7 @@ is reserved in `overlay.nix` alone**. Being skipped by `ci.nix` is what the pred
 for, and skipping that one would defeat its whole purpose; both files carry the reasoning at
 their own copy.
 
-**Every package this repository defines is a top-level attribute**, with seven named exceptions.
+**Every package this repository defines is a top-level attribute**, with ten named exceptions.
 That is the rule, and the reason for it is that being top-level is what makes `ci.nix` build a
 package in its own right: a package nothing builds is a package nobody finds out is broken.
 `pkgs/sevenn` sat green-by-omission for months because it was reachable only through an
@@ -594,11 +604,12 @@ package in its own right: a package nothing builds is a package nobody finds out
 **two**, and only because their names are already taken at the top level by different derivations:
 `chemfiles` (the C++ library) and `trexio` (nixpkgs' C library), both of which
 `tests/chemtools/default.nix` asserts. It still carries `recurseIntoAttrs`, which is exactly what
-`python3Packages` below must not. Five more packages are outside the rule for reasons that are
+`python3Packages` below must not. Eight more packages are outside the rule for reasons that are
 not collisions, and stay reachable as `python3Packages.<name>`: `tensorpotential` (unfree, and
 `just ci-eval` forces `drvPath` over everything it can reach) and the guarded backports `monty`,
-`pycifrw`, `qcelemental` and `qcengine` (nixpkgs' own derivations on a new enough channel, which
-CI has no business building as ours). See the note at the attribute itself.
+`pycifrw`, `qcelemental`, `qcengine`, `phonopy`, `phonors` and `symfc` (nixpkgs' own derivations
+on a new enough channel, which CI has no business building as ours). See the note at the
+attribute itself.
 
 `scripts/update-universe.nix` is what keeps this honest: it reads `pkgs/` with `builtins.readDir`
 and fails if any directory has no attribute path. That check is what found `graphrc`, which was
@@ -754,7 +765,9 @@ every package here is a top-level attribute now bar the five named at `internalP
 | `shakenbreak` | `quacc[defects]` — the chain's last target | **done**; `pkgs/shakenbreak`, and with it the whole `defects` cluster: `doped`, `pydefect`, `vise`, `hiphive`, `trainstation`, `cmcrameri`, `matplotlib-label-lines`. It is the half of the `doped` cycle that declares the other; see `pkgs/doped` for why the cut goes that way |
 | `matminer` | `matcalc[benchmark]` | **done**; `pkgs/matminer` — `tests/{featurizers,utils}` only, the data-retrieval suites hit external APIs |
 | `redun` | `quacc[redun]` | **done**; `pkgs/redun` — `doCheck = false` (AWS-executor tests), `fancycompleter` removed |
-| `phono3py` | `matcalc[phonon3]` | **done**; `pkgs/phono3py` — the phonopy sibling, scikit-build-core + nanobind + CMake |
+| `phono3py` | `matcalc[phonon3]` | **done**; `pkgs/phono3py` at v4.10.0 — the phonopy sibling, scikit-build-core + nanobind + CMake. Pins phonopy's minor version, so `pkgs/phonopy` 4.10.0 is carried too, with `phonors` and `symfc` beneath it as guarded backports |
+| `pypolymlp` | phonopy's `pypolymlp` / `tools` extras | **done**; `pkgs/pypolymlp` — pybind11 + Eigen. Its suite imports phono3py, so phonopy and phono3py take it unchecked; see its header |
+| `alm` | phonopy's and phono3py's suites (nine `importorskip`s) | **done**; `pkgs/alm` — ALAMODE's force-constant library, declared by neither. HEAD, since the newest tag is from 2016. Needs both spglibs, the C one under the name `libspglib` |
 | `rootstock` | `quacc[mlip]` | **done**; `pkgs/rootstock`, internal — `doCheck = false` (builds environments via `uv`) |
 | `enumlib` | atomate2 `test_magnetic_orderings`, any `MagneticStructureEnumerator` | **done**; `pkgs/enumlib` — Fortran, not a Python package, top-level like `chemfiles`. Its `symlib` submodule is a second `fetchFromGitHub` because a submodule hash cannot be computed offline |
 | `vise` | `pydefect`, `doped` — the `quacc[defects]` cluster | **done**; `pkgs/vise` at HEAD, 827 commits past its 2020 tag, because that is where the pymatgen-core refactoring landed. Ten undeclared imports added to `dependencies`, two dead `distutils` imports deleted. 25 tests dropped, 23 of them needing VASP's licensed POTCAR files |
