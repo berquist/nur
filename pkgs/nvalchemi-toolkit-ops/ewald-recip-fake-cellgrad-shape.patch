@@ -1,0 +1,48 @@
+Give the Ewald reciprocal fake kernel the cell-grad cache shape it returns
+
+`ewald_recip_energy_{single,batch}` return four tensors, the last a
+cell-gradient cache.  The real forward allocates it as (K, 8) for a single
+system and (S*K, 8) batched whenever `need_cell` is set, and as (0, 8)
+otherwise.  The fake (meta) kernel always says (0, 8): it parses
+`need_cell` and then discards it as `_need_cell`.
+
+torch 2.15's inductor checks a custom op's real outputs against its fake
+shapes, so every compiled path that asks for a cell gradient now fails:
+
+    AssertionError: expected size 665==0, stride 8==8 at dim=0
+    Error in op: torch.ops.nvalchemiops.ewald_recip_energy_batch.default
+    This error most often comes from a incorrect fake (aka meta) kernel
+    for a custom op.
+
+Three tests at v0.4.1, in TestEwaldTorchCompile and TestSlabTorchCompile.
+Older torch did not check, so the wrong shape went unnoticed.  The fake
+now follows the same rule the real allocation does.  The real forward also
+returns (0, 8) when there are no atoms or no k-vectors.  The fake cannot
+know that when it traces symbolic sizes, and K == 0 gives 0 rows anyway.
+--- a/nvalchemiops/torch/interactions/electrostatics/_ewald_recip_chain.py
++++ b/nvalchemiops/torch/interactions/electrostatics/_ewald_recip_chain.py
+@@ -1206,14 +1206,21 @@
+ def _recip_forward_fake(positions, *args):
+     """Forward fake: ``(energy, dE/dR cache, dE/dq cache, cellgrad cache)``.
+ 
+-    Cache shapes gated by the ``need_pos`` / ``need_charge`` booleans.
++    Cache shapes gated by the ``need_pos`` / ``need_charge`` / ``need_cell`` booleans.
+     """
+-    need_pos, need_charge, _need_cell = _fake_need_flags(args)
++    need_pos, need_charge, need_cell = _fake_need_flags(args)
+     n = positions.shape[0]
+     energy = positions.new_empty(n, dtype=torch.float64)
+     dEdR = positions.new_empty(n if need_pos else 0, 3, dtype=positions.dtype)
+     dEdq = positions.new_empty(n if need_charge else 0, dtype=torch.float64)
+-    cellgrad_cache = positions.new_empty(0, 8, dtype=torch.float64)
++    # The real forward fills an un-weighted cell-grad cache whenever need_cell is
++    # set: (K, 8) for a single system, (S*K, 8) batched.  args[2] is k_vectors and
++    # args[3] the per-system volume; len(args) == 12 is the batched signature.
++    num_k = args[2].shape[-2]
++    cache_rows = num_k * (args[3].shape[0] if len(args) == 12 else 1)
++    cellgrad_cache = positions.new_empty(
++        cache_rows if need_cell else 0, 8, dtype=torch.float64
++    )
+     return energy, dEdR, dEdq, cellgrad_cache
+ 
+ 

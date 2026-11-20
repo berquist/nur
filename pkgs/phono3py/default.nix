@@ -57,9 +57,32 @@ buildPythonPackage (finalAttrs: {
   # phono3py's bindings use the ordinary `nb::module_` / `nb::ndarray` surface.
   # A build-system pin, so it has to be rewritten in pyproject.toml —
   # `pythonRelaxDeps` only touches the wheel's runtime metadata.
+  #
+  # `test_reciprocal_to_normal_vs_c` compares the Python reciprocal-to-normal
+  # transform with the compiled one at `rtol=1e-10, atol=0`.  Sixteen of the 216
+  # entries are zero by symmetry, and both sides compute them as rounding noise
+  # near 1e-40.  With no `atol`, the test compares noise with noise:
+  #
+  #     Mismatched elements: 16 / 216 (7.41%)
+  #      [0, 4, 1]: 6.330858610203191e-41 (ACTUAL), 2.104729304428205e-41 (DESIRED)
+  #
+  # The result depends on the CPU.  One derivation, with identical inputs,
+  # passed on one builder and failed on another.  On the failing kind of
+  # machine, the largest difference across all 216 entries is 2.4e-16 of the
+  # largest entry (6.9e-9), which is the exact double-precision rounding level.
+  # The two populations are far apart: the noise entries are at most 5e-38, and
+  # the smallest real entry is 1.4e-13.  An `atol` of 1e-16 times the largest
+  # entry (7e-25) is five orders above the noise.  For the smallest real entry
+  # it is 5e-12 relative, which is still stricter than `rtol`, so no real
+  # entry is judged more loosely than before.
   postPatch = ''
     substituteInPlace pyproject.toml \
       --replace-fail '"nanobind<2.10.0"' '"nanobind"'
+
+    substituteInPlace test/phonon3/test_reciprocal_to_normal.py \
+      --replace-fail \
+        'np.testing.assert_allclose(py_interaction, c_interaction[0], rtol=1e-10, atol=0)' \
+        'np.testing.assert_allclose(py_interaction, c_interaction[0], rtol=1e-10, atol=1e-16 * np.abs(c_interaction[0]).max())'
   '';
 
   # `USE_CONDA_PATH` defaults ON and points CMake at a conda prefix; off here.

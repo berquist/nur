@@ -324,6 +324,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `aiida-gaussian` the one of the thirteen whose conftest could not be checked first? | `pkgs/aiida-gaussian/default.nix` (the note above `postPatch`) |
 | Why does aiida-core relax `flit_core >=4.0.2` when nixpkgs has 3.12.0, and why can `pythonRelaxDeps` not do it? | `pkgs/aiida-core/default.nix` (the note above the second `pyproject.toml` hunk) |
 | Why does `test_backup` need `aiida_profile_clean` when the test before it cleans already? | `pkgs/aiida-core/default.nix` (the `test_backup` note above `postPatch`) |
+| Why does aiida-core's CLI test runner unstyle its output, and what did click 8.4 change? | `pkgs/aiida-core/default.nix` (the click 8.4 note in `postPatch`) |
+| Why do two archive-import tests ask for `aiida_localhost` when neither uses it? | `pkgs/aiida-core/default.nix` (the leaked-computer note in `postPatch`) |
 | Why does one parser test call `spec()` before rebinding `define`, when nothing reads it? | `pkgs/aiida-core/default.nix` (the `test_parser.py` note above `postPatch`) |
 | Why does one repository test read its isolated stream inside the `with` block? | `pkgs/aiida-core/default.nix` (the `test_repository.py` note above `postPatch`) |
 | Why is RabbitMQ deleted from the *deprecated* pytest fixture plugin, and which packages does that fix? | `pkgs/aiida-core/default.nix` (the last note above `postPatch`) |
@@ -426,6 +428,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why is `dftb_recipes` deselected rather than left to skip, when nothing provides `dftb+`? | `pkgs/quacc/default.nix` (`disabledTestPaths`), `docs/TODO.md` |
 | Why does quacc run two of its own test modules in a second pytest process? | `pkgs/quacc/default.nix` (`postCheck`), `docs/TODO.md` |
 | Why do three quacc phonon tests fail on Si and C but not on Li or Pt? | `pkgs/quacc/default.nix` (the last note above `disabledTestPaths`), `docs/TODO.md` |
+| Why do quacc's tblite frequency tests take absolute tolerances, and why only on some machines? | `pkgs/quacc/default.nix` (the `test_freq_job_v1` note in `postPatch`) |
 | Why does `vise` delete two `distutils` imports rather than add setuptools at runtime? | `pkgs/vise/default.nix` (`postPatch`) |
 | Why does `vise` declare nine dependencies its own requirements.txt does not? | `pkgs/vise/default.nix` (`dependencies`) |
 | Why is `vise` pinned 827 commits past its tag, and are its POTCARs a licensing problem? | `pkgs/vise/default.nix` (the `src` note, `enabledTestPaths`) |
@@ -511,12 +514,16 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why did 73 `nvalchemi-toolkit-ops` tests start failing the moment `torch-pme` began to build? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the third note above `patches`), `pkgs/nvalchemi-toolkit-ops/torchpme-prefactor-moved.patch` |
 | Why is dropping torch-pme's `prefactor` argument exact rather than approximate? | `pkgs/nvalchemi-toolkit-ops/torchpme-prefactor-moved.patch` (the header) |
 | Which three shapes of `cuda:0` does the nvalchemi conftest gate not reach, and why is one of them a *torch* device? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the last four notes in `postPatch`) |
-| Why does `nvalchemi-toolkit-ops` give `np.eye(3)` a dtype, and which two tests were failing without it? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the last note in `postPatch`) |
+| Why does `nvalchemi-toolkit-ops` give `np.eye(3)` a dtype, and which two tests were failing without it? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the `np.eye(3)` note in `postPatch`) |
+| Why does `nvalchemi-toolkit-ops` wrap every `warp.jax_experimental` import in a try/except? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the warp 1.19 note in `postPatch`) |
+| Why did three `*TorchCompile` tests fail with `expected size 665==0` under torch 2.15? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the fifth note above `patches`), `pkgs/nvalchemi-toolkit-ops/ewald-recip-fake-cellgrad-shape.patch` |
+| Why does one `nvalchemi-toolkit-ops` mock get a `__name__`? | `pkgs/nvalchemi-toolkit-ops/default.nix` (the last note in `postPatch`) |
 | Which `colour-science` failures were never going to skip themselves, and what did the old note get wrong? | `pkgs/colour-science/default.nix` (the note above `nativeCheckInputs`) |
 | Why does `torch-pme` patch a tolerance rather than deselect the test, and why not just seed the RNG? | `pkgs/torch-pme/default.nix` (the note above `patches`), `pkgs/torch-pme/combined-potential-tolerance.patch` |
 | Why did `rootstock` start 404ing on a `rev` that still resolves in its clone? | `pkgs/rootstock/default.nix` (the note above `src`) |
 | Why does this repo carry `phonopy`, `phonors` and `symfc` when nixpkgs has all three? | `pkgs/phonopy/default.nix` (the header), `overlays/default.nix` (the binding above `phonors`) |
 | Why are phonopy and phono3py `report` in the update policy rather than `stable`? | `pkgs/phono3py/default.nix` (`passthru.updatePolicy`) |
+| Why does phono3py's `test_reciprocal_to_normal_vs_c` gain an `atol`, and why does it pass on some builders anyway? | `pkgs/phono3py/default.nix` (the note above `postPatch`) |
 | How is the phonopy ↔ pypolymlp ↔ phono3py check-input cycle cut? | `pkgs/pypolymlp/default.nix` (the header), `pkgs/phonopy/default.nix` (`nativeCheckInputs`) |
 | Why does `symfc` deselect one test by node id when nixpkgs uses `disabledTests`? | `pkgs/symfc/default.nix` (`disabledTestPaths`) |
 | Why does `alm` take spglib twice, once as `libspglib`? | `pkgs/alm/default.nix` (the `libspglib` argument), `overlays/default.nix` (the `alm` binding) |

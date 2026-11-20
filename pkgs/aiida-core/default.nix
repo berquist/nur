@@ -1002,6 +1002,69 @@ buildPythonPackage rec {
         "        list_repository_contents(folder_data, path=''', color=True)
             values = outstreams[0].getvalue()"
 
+    # click 8.4 costs sixteen tests in two clusters, and neither is an aiida
+    # bug.  The first is fifteen of tests/cmdline/params/options/
+    # test_interactive.py plus one RabbitMQ prompt test in test_profile.py:
+    #
+    #     AssertionError: assert 'Opt: TEST\nTEST\n' in
+    #       '...\x1b[93mOpt\x1b[0m: TEST\nTEST\n'
+    #
+    # InteractiveOption colours its prompt with click.style, and CliRunner's
+    # default `color=False` promises to strip that.  Up to 8.3 the promise
+    # held, because click.prompt wrote the prompt through `echo`, which
+    # CliRunner patches to strip.  8.4's `_readline_prompt` hands the whole
+    # styled string to `visible_prompt_func` instead, so that readline can
+    # place the cursor, and CliRunner's replacement for that function writes it
+    # out verbatim.  Unstyling the captured bytes in the runner restores what
+    # `color=False` says it does.  Nothing that goes through this runner asks
+    # for colour — the two tests that assert on ANSI codes call
+    # `runner.isolation(color=True)` or the formatter directly.
+    #
+    # The second is click rewording its own error, from
+    # `No such option: --broker-port` to `No such option '--broker-port'.`.
+    # The test asserts that the option is rejected, so it checks both halves
+    # rather than either spelling.
+    substituteInPlace tests/conftest.py \
+      --replace-fail \
+        "stderr_bytes=result.stderr_bytes or b'''," \
+        "stderr_bytes=click.unstyle((result.stderr_bytes or b''').decode()).encode()," \
+      --replace-fail \
+        'stdout_bytes=result.stdout_bytes,' \
+        'stdout_bytes=click.unstyle(result.stdout_bytes.decode()).encode(),'
+    substituteInPlace tests/cmdline/commands/test_profile.py \
+      --replace-fail \
+        "assert 'No such option: --broker-port' in cli_result.output" \
+        "assert 'No such option' in cli_result.output and '--broker-port' in cli_result.output"
+
+    # Another leaked row, and this one is a computer.  tests/static/calcjob/
+    # arithmetic.add.aiida carries a computer labelled `localhost` whose
+    # transport is `local`, the entry-point name from before the `core.`
+    # prefix.  test_import_archive and test_import_to_group import that archive
+    # into the shared profile and leave the row behind.  Any later test on the
+    # same worker that asks for `aiida_localhost` then fails in setup: the
+    # fixture looks for label, hostname, scheduler *and* transport, misses the
+    # stale row, and its store hits the label constraint alone:
+    #
+    #     ERROR tests/orm/data/code/test_portable.py::test_can_run_on_computer
+    #       UniqueViolation: duplicate key value violates unique constraint
+    #       "uq_db_dbcomputer_label"
+    #
+    # Hundreds of tests ask for `aiida_localhost`, so guarding victims is not
+    # an option, and `aiida_profile_clean` cleans at setup, which cannot help
+    # the test that comes *after*.  Asking for `aiida_localhost` in the two
+    # importers fixes it at the source.  With a correct `localhost` already
+    # stored, the import relabels the archive's computer to `localhost
+    # (Imported #0)`, which is exactly what already happens in test_calcjob.py,
+    # whose fixture requests `aiida_localhost` before it imports the same
+    # archive.  Neither test asserts on computers.
+    substituteInPlace tests/cmdline/commands/test_archive_import.py \
+      --replace-fail \
+        'def test_import_archive(run_cli_command, newest_archive):' \
+        'def test_import_archive(run_cli_command, newest_archive, aiida_localhost):' \
+      --replace-fail \
+        'def test_import_to_group(run_cli_command, newest_archive):' \
+        'def test_import_to_group(run_cli_command, newest_archive, aiida_localhost):'
+
     substituteInPlace src/aiida/tools/pytest_fixtures/storage.py \
       --replace-fail \
         "import pathlib
