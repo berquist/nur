@@ -76,8 +76,9 @@ let
   # gap would be exactly backwards: `meta.broken` is this repository saying it
   # already knows.  ../ci.nix filters on both properties for the same reason,
   # and its note is the long version.  The seven cclib dependants are broken on
-  # every channel by design, ../pkgs/phono3py is broken wherever phonopy is
-  # older than 4.4, and ../pkgs/tensorpotential is the unfree one.
+  # every channel by design, ../pkgs/phono3py is broken wherever phonopy's minor
+  # version is not its own (never, under overlays.materials, until a channel
+  # passes it), and ../pkgs/tensorpotential is the unfree one.
   #
   # `meta.broken` is still *forced*, so a `broken` expression that throws — one
   # reading a version off a package the channel lacks, say — is still caught.

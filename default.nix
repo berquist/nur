@@ -161,14 +161,15 @@ in
   #     `trexio` binding in ./overlays/default.nix and the split in
   #     ./tests/chemtools/default.nix, which asserts this.
   #
-  # Five packages are outside the rule for reasons that are not collisions and
+  # Eight packages are outside the rule for reasons that are not collisions and
   # are documented where they live: `tensorpotential` is unfree, and `just
   # ci-eval` forces drvPath over everything it can reach, so an unfree
   # derivation in any traversal is an evaluation error rather than a skipped
-  # package (see ci.nix); `monty`, `pycifrw`, `qcelemental` and `qcengine` are
-  # guarded backports, so on a new enough channel the attribute is nixpkgs' own
-  # derivation and building it here would be CI populating a cache with packages
-  # it does not own.  All five stay reachable as `python3Packages.<name>`.
+  # package (see ci.nix); `monty`, `pycifrw`, `qcelemental`, `qcengine`,
+  # `phonopy`, `phonors` and `symfc` are guarded backports, so on a new enough
+  # channel the attribute is nixpkgs' own derivation and building it here would
+  # be CI populating a cache with packages it does not own.  All eight stay
+  # reachable as `python3Packages.<name>`.
   #
   # recurseIntoAttrs is the whole mechanism.  Both `nix-env -f . -qa '*'` (what
   # `just ci-eval` runs) and ci.nix's flattenPkgs descend into an attrset only
@@ -191,10 +192,10 @@ in
   # **Every Python package this repository defines is here**, the dependencies
   # carried for a single dependant included, because being a top-level attribute
   # is what makes ci.nix build a package in its own right.  The exceptions are
-  # named at internalPackages above, and there are seven: two name collisions
-  # that live there, and `tensorpotential`, `monty`, `pycifrw`, `qcelemental`
-  # and `qcengine`, which are reachable as `python3Packages.<name>` for
-  # reasons given at that note.
+  # named at internalPackages above, and there are ten: two name collisions
+  # that live there, and `tensorpotential`, `monty`, `pycifrw`, `qcelemental`,
+  # `qcengine`, `phonopy`, `phonors` and `symfc`, which are reachable as
+  # `python3Packages.<name>` for reasons given at that note.
   #
   # Grouped by family, alphabetical within each group.
   inherit (py)
@@ -276,6 +277,7 @@ in
     wignernj
 
     # materials
+    alm
     ase-db-backends
     atomate2
     clusterscope
@@ -319,6 +321,7 @@ in
     pymatgen-core
     pymatgen-io-aims
     pymatgen-io-validation
+    pypolymlp
     qtoolkit
     quacc
     redun

@@ -11,6 +11,10 @@
 
 {
   pkgs ? import <nixpkgs> { },
+  # Leave out the attributes in `tooHeavyForHostedRunners` below.  Only
+  # .github/workflows/build.yml sets this, through `just ci-build true`, so a
+  # local `just ci` or `just push` still builds them and fills the cache.
+  hostedRunner ? false,
 }:
 
 with builtins;
@@ -108,12 +112,25 @@ let
 
   outputsOf = p: map (o: p.${o}) p.outputs;
 
+  # The free GitHub-hosted runners do not have the memory or disk to build
+  # fairchem-core.  The list must hold every top-level attribute that has
+  # fairchem-core in its build closure, not only fairchem-core itself:
+  # fairchem-data-oc depends on it, and ../pkgs/quacc takes the `fairchem`
+  # extra as check inputs.  A name missing here builds fairchem-core anyway.
+  #
+  # This filters by top-level name only.  Evaluation is not affected:
+  # `just ci-eval` does not come through this file.
+  tooHeavyForHostedRunners = [
+    "fairchem-core"
+    "fairchem-data-oc"
+    "quacc"
+  ];
+  isSkipped = n: isReserved n || (hostedRunner && elem n tooHeavyForHostedRunners);
+
   nurAttrs = import ./default.nix { inherit pkgs; };
 
   nurPkgs = flattenPkgs (
-    listToAttrs (
-      map (n: nameValuePair n nurAttrs.${n}) (filter (n: !isReserved n) (attrNames nurAttrs))
-    )
+    listToAttrs (map (n: nameValuePair n nurAttrs.${n}) (filter (n: !isSkipped n) (attrNames nurAttrs)))
   );
 
 in

@@ -129,16 +129,25 @@ let
   # pymatgen-core's floor is newer than any channel here — see ../../pkgs/monty.
   # nixpkgs has no top-level `monty` either, so lifting one would invent an
   # attribute rather than shadow one.
+  #
+  # `phonopy`, `phonors` and `symfc` are odd in the same way, for phono3py
+  # rather than pymatgen-core — see the binding above `phonors` in
+  # ../../overlays/default.nix.
   internalDependencies = [
+    "alm"
     "mendeleev"
     "mongomock-persistence"
     "mongomock-ng"
     "monty"
     "maml"
     "mp-pyrho"
+    "phonopy"
+    "phonors"
+    "pypolymlp"
     "pyrr"
     "rootstock"
     "sevenn"
+    "symfc"
   ];
 
   # `trexio` is deliberately not in that list, because it cannot satisfy it:

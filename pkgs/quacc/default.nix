@@ -241,6 +241,72 @@ buildPythonPackage (finalAttrs: {
             )' \
         '            [0, 1, 2],
             )'
+
+    # `test_freq_job_v1` and `_v3` each assert the *first raw* vibrational
+    # mode at pytest's default relative tolerance of 1e-6.  That mode is one of
+    # the six translations and rotations, which are zero in exact arithmetic
+    # and which the recipe itself drops from `vib_freqs` — what is left is
+    # finite-difference noise, and its value moves with tblite and BLAS:
+    #
+    #   v1, H2O:  -0.10922 cm^-1 against an expected -0.10864
+    #   v3, CH3:  -7.52e-6 eV    against an expected -9.55e-6
+    #
+    # Everything physical in the same tests was right: the thermochemistry
+    # printed by the failing v1 run is H = 0.638 eV, S = 0.0019585 eV/K and
+    # G = 0.054 eV, which are the expected values.  So both assertions keep
+    # their reference value but take an absolute tolerance of about a tenth of
+    # a wavenumber — still enough to fail if that mode stopped being near zero —
+    # and the assertions after them, which never ran, now do.
+    #
+    # The real modes and the thermochemistry built on them failed next, on
+    # some machines only.  One derivation, with identical inputs, passed on
+    # one builder and failed on an AMD EPYC 7513:
+    #
+    #   v1, H2O:  highest mode 3526.9711 cm^-1 against 3526.9940   (6.5e-6 relative)
+    #   v3, CH3:  lowest real mode 0.0713540 eV against 0.0713507  (4.6e-5 relative)
+    #
+    # and, behind them, H2O's 1586.6198 cm^-1 mode (2.1e-6), its enthalpy
+    # (4.4e-6) and its Gibbs energy (5.3e-5; an absolute 2.8e-6 eV).  pytest's
+    # default is 1e-6 relative.  On that machine the values are stable to 1e-12
+    # across five OpenBLAS kernels and 1 to 16 OpenMP threads, so the difference
+    # is not BLAS and not a race.  It is a finite-difference Hessian, and its
+    # last digits depend on the CPU.  Every difference is at most 0.023 cm^-1 or
+    # 3.3e-6 eV.  So the same absolute tolerances as above apply: 0.1 cm^-1 for
+    # frequencies, and 1e-5 eV (0.08 cm^-1) for energies.  That is three times
+    # the largest difference seen.  The entropies and CH3's other values already
+    # pass at the default tolerance and keep it.  The bare literals are
+    # replaced because one of the three 3526.99 assertions spans lines.
+    substituteInPlace tests/core/recipes/tblite_recipes/test_tblite_recipes.py \
+      --replace-fail \
+        'pytest.approx(-0.10864429415434408)' \
+        'pytest.approx(-0.10864429415434408, abs=0.1)' \
+      --replace-fail \
+        '-9.551076713062095e-06' \
+        '-9.551076713062095e-06, abs=1e-5' \
+      --replace-fail '3526.9940431752034' '3526.9940431752034, abs=0.1' \
+      --replace-fail '1586.623114694335' '1586.623114694335, abs=0.1' \
+      --replace-fail '0.6375973622705722' '0.6375973622705722, abs=1e-5' \
+      --replace-fail '0.05367081893346437' '0.05367081893346437, abs=1e-5' \
+      --replace-fail \
+        'pytest.approx(0.0713506770137291)' \
+        'pytest.approx(0.0713506770137291, abs=1e-5)'
+
+    # `test_unset` opens the config file that `test_set` writes, and nothing
+    # else creates it.  Under xdist's default `load` scheduling the two can go
+    # to different workers, and at 128 workers they did:
+    #
+    #   FileNotFoundError: ... '/build/source/tests/core/cli/test_quacc.yaml'
+    #
+    # The module's own `setup_module` / `teardown_module` are per worker too,
+    # so one worker can also remove the file while another reads it.  Putting
+    # the whole module in one `xdist_group`, with `--dist=loadgroup` in
+    # `pytestFlags`, keeps it on one worker in file order and leaves every
+    # other test scheduled exactly as `load` would.
+    substituteInPlace tests/core/cli/test_cli.py \
+      --replace-fail \
+        'TEST_YAML = FILE_PATH / "test_quacc.yaml"' \
+        'TEST_YAML = FILE_PATH / "test_quacc.yaml"
+    pytestmark = pytest.mark.xdist_group("cli")'
   '';
 
   # The whole of upstream's own `testpaths`, less what is named below.  It was
@@ -489,7 +555,12 @@ buildPythonPackage (finalAttrs: {
   # which is how the first run of this change ended `4 failed, 445 passed` with
   # a short summary that named the 28 skips and not one of the four failures.
   # ../parmed passes `-rsfE`; ../fireworks' `-rs` predates the discovery.
-  pytestFlags = [ "-rsfE" ];
+  #
+  # `--dist=loadgroup` is for tests/core/cli; see the last note in `postPatch`.
+  pytestFlags = [
+    "-rsfE"
+    "--dist=loadgroup"
+  ];
 
   # Two bulk-Cu GFN1-xTB recipes whose asserted numbers were computed against a
   # different tblite / ASE than the channels here carry.  `test_relax_job_cell`

@@ -70,13 +70,30 @@ buildPythonPackage rec {
   # Upstream does not notice because their wheels vendor the submodule; the
   # external path is for distributors, and we are the ones exercising it.
   #
-  # Bumping the request rather than downgrading the library: the submodule pin
+  # Bumping the request rather than downgrading the library.  The submodule pin
   # is upstream's own statement of which chemfiles this binding is written
   # against, and src/chemfiles/__init__.py agrees, calling itself 0.11.0-rc1.
+  #
+  # The request is 0.12, not 0.11, because ../chemfiles is a fork commit twelve
+  # bug fixes past that tag, and that commit's VERSION says 0.12.0-dev — see
+  # the note above its `src`.  Those twelve commits add API and change none,
+  # so a binding written against 0.11.0-rc1 still builds against it.  Put this
+  # back to 0.11 if ../chemfiles returns to the tag.
+  #
+  # The same mismatch fails `tests/misc.py::TestVersion`, which asserts that the
+  # binding's `__version__` equals what the loaded library's `chfl_version()`
+  # returns: 0.11.0-rc1 against 0.12.0-dev.  That test is the one place the
+  # suite proves it loaded *our* library, so it is kept and pointed at
+  # chemfilesLib's own version instead — the part before `-unstable-`, which is
+  # what the library's VERSION file says.  On the tag that is 0.11.0-rc1 again,
+  # and the test is upstream's.
   postPatch = ''
     substituteInPlace CMakeLists.txt \
       --replace-fail 'find_package(chemfiles CONFIG QUIET 0.10)' \
-                     'find_package(chemfiles CONFIG QUIET 0.11)'
+                     'find_package(chemfiles CONFIG QUIET 0.12)'
+    substituteInPlace tests/misc.py \
+      --replace-fail 'self.assertEqual(chemfiles.__version__, version.decode("utf8"))' \
+                     'self.assertEqual("${lib.head (lib.splitString "-unstable-" chemfilesLib.version)}", version.decode("utf8"))'
   '';
 
   build-system = [
