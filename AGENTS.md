@@ -326,6 +326,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why does `test_backup` need `aiida_profile_clean` when the test before it cleans already? | `pkgs/aiida-core/default.nix` (the `test_backup` note above `postPatch`) |
 | Why does aiida-core's CLI test runner unstyle its output, and what did click 8.4 change? | `pkgs/aiida-core/default.nix` (the click 8.4 note in `postPatch`) |
 | Why do two archive-import tests ask for `aiida_localhost` when neither uses it? | `pkgs/aiida-core/default.nix` (the leaked-computer note in `postPatch`) |
+| Why does `test_change_workers_without_wait` resend `decr`, and why does a monitor test sleep for 4 seconds? | `pkgs/aiida-core/default.nix` (the timing note in `postPatch`) |
 | Why does one parser test call `spec()` before rebinding `define`, when nothing reads it? | `pkgs/aiida-core/default.nix` (the `test_parser.py` note above `postPatch`) |
 | Why does one repository test read its isolated stream inside the `with` block? | `pkgs/aiida-core/default.nix` (the `test_repository.py` note above `postPatch`) |
 | Why is RabbitMQ deleted from the *deprecated* pytest fixture plugin, and which packages does that fix? | `pkgs/aiida-core/default.nix` (the last note above `postPatch`) |
@@ -525,6 +526,8 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | Why are phonopy and phono3py `report` in the update policy rather than `stable`? | `pkgs/phono3py/default.nix` (`passthru.updatePolicy`) |
 | Why does phono3py's `test_reciprocal_to_normal_vs_c` gain an `atol`, and why does it pass on some builders anyway? | `pkgs/phono3py/default.nix` (the note above `postPatch`) |
 | How is the phonopy ↔ pypolymlp ↔ phono3py check-input cycle cut? | `pkgs/pypolymlp/default.nix` (the header), `pkgs/phonopy/default.nix` (`nativeCheckInputs`) |
+| Why does `pypolymlp` compute a mesh before every DOS, and what did phonopy 4.10 change? | `pkgs/pypolymlp/default.nix` (the notes above `postPatch`) |
+| Which `pypolymlp` assertions depend on the OpenBLAS kernel, and why are two removed rather than loosened? | `pkgs/pypolymlp/default.nix` (the same notes) |
 | Why does `symfc` deselect one test by node id when nixpkgs uses `disabledTests`? | `pkgs/symfc/default.nix` (`disabledTestPaths`) |
 | Why does `alm` take spglib twice, once as `libspglib`? | `pkgs/alm/default.nix` (the `libspglib` argument), `overlays/default.nix` (the `alm` binding) |
 | Why does `alm` delete its own console script? | `pkgs/alm/default.nix` (`postPatch`) |
