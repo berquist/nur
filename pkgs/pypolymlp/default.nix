@@ -71,7 +71,8 @@ buildPythonPackage (finalAttrs: {
   # gives: it runs `pypolymlp.polyinv`, which upstream does not ship, so the
   # installed script could only fail with ModuleNotFoundError.
   # test_command_lines_developer runs it with `--help`, so its two lines go
-  # too, and the test keeps its other three scripts.
+  # too, and the test keeps its other three scripts.  The tests have CRLF
+  # line endings, so that two-line pattern is a `$'…'` string with `\r\n`.
   #
   # phonopy 4.10 clears every derived result, the mesh included, when force
   # constants are set (`_invalidate_derived("dm_inputs")`).  pypolymlp 0.22.2
@@ -112,9 +113,8 @@ buildPythonPackage (finalAttrs: {
       --replace-fail \
         'pypolymlp-invariant = "pypolymlp.api.developer.run_polymlp_polyinv:run"' ""
     substituteInPlace tests/test_command/test_command.py \
-      --replace-fail '    cmd = "pypolymlp-invariant --help"
-        subprocess.run(cmd.split(), check=True)
-    ' ""
+      --replace-fail \
+        $'    cmd = "pypolymlp-invariant --help"\r\n    subprocess.run(cmd.split(), check=True)\r\n' ""
 
     substituteInPlace src/pypolymlp/calculator/sscha/harmonic_reciprocal_base.py \
       --replace-fail \
