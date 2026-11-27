@@ -169,7 +169,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 
 | Question | Read |
 |---|---|
-| How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh` |
+| How do I check anything from inside the Claude Code sandbox? | the `no-daemon-check` skill, `scripts/no-daemon-check.sh`; the global `nix-sandbox` skill for the sandbox in general |
 | How do I evaluate one expression from inside the sandbox, without running the whole suite? | `scripts/sandbox-eval.sh` (the header comment), `just eval` |
 | How do I find *every* attribute that will not evaluate on a channel, rather than one per CI round? | `scripts/channel-gaps.sh` (the header comment), `just channel-gaps` |
 | How do I collect the build logs a failed `--keep-going` run pointed at, without retyping a dozen store hashes? | `scripts/fetch-build-logs.sh` (the header comment), `just build-logs` |
@@ -190,7 +190,7 @@ it will be read. Do not copy those explanations into this file; add a pointer in
 | How do I tell an *excepted* process from one no daemon worker ever adopted? | `pkgs/aiida-workgraph/default.nix` (the same note) |
 | Why are `aiida-phonopy`'s two workflow tests deselected when the rest of its suite runs? | `pkgs/aiida-phonopy/default.nix` (`disabledTestPaths`) |
 | Why is `aiida-phonopy`'s `phonopy~=4.0` relaxed, and what does 26.05's phonopy 3.5.1 still get wrong? | `pkgs/aiida-phonopy/default.nix` (`pythonRelaxDeps`) |
-| Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment) |
+| Why is `ls` — or `git`, or `nix` — not on PATH inside the sandbox, and how do I get it back? | `scripts/sandbox-path.sh` (the header comment); the global `session-env.sh` hook now does it at session start |
 | Why is there no pinned interpreter, when there used to be a `python313` one? | `pkgs/qcportal/default.nix` (`meta`), `default.nix` (the `py` binding), `docs/TODO.md` |
 | Which package is still stuck on QCSchema v1, and why does no evaluation notice? | `pkgs/aiida-psi4/default.nix` (`meta.broken`), `docs/TODO.md` |
 | Why is Psi4 taken from a hand-pinned `nixpkgs-qchem`, and why not `nixos-qchem.packages.*`? | `flake.nix` (the `nixpkgs-qchem` input, and `qchemPkgs` in `perSystem`) |
