@@ -77,18 +77,21 @@ let
     lib.filterAttrs (_: lib.isDerivation) nur.internalPackages
   );
 
-  # The seven packages ../default.nix names but does not expose at the top
+  # The ten packages ../default.nix names but does not expose at the top
   # level, each for a reason given at its own note there.  Spelled out rather
   # than discovered, because the whole 3.13 set cannot be enumerated and these
-  # are bounded: two name collisions, one unfree package, and four guarded
+  # are bounded: two name collisions, one unfree package, and seven guarded
   # backports.
   extras = {
     "internalPackages.chemfiles" = nur.internalPackages.chemfiles;
     "internalPackages.trexio" = nur.internalPackages.trexio;
     "python3Packages.monty" = nur.python3Packages.monty;
+    "python3Packages.phonopy" = nur.python3Packages.phonopy;
+    "python3Packages.phonors" = nur.python3Packages.phonors;
     "python3Packages.pycifrw" = nur.python3Packages.pycifrw;
     "python3Packages.qcelemental" = nur.python3Packages.qcelemental;
     "python3Packages.qcengine" = nur.python3Packages.qcengine;
+    "python3Packages.symfc" = nur.python3Packages.symfc;
     "python3Packages.tensorpotential" = nur.python3Packages.tensorpotential;
     # Reachable as `nix build .#graphrc` only — see ../flake.nix.
     inherit (pkgs') graphrc;
@@ -176,10 +179,10 @@ let
       # `external` overrides a declared mode as well as the inferred one, and
       # has to: the attribute resolves to a derivation defined outside ../pkgs,
       # so the file `nix-update` would rewrite is nixpkgs' own — in the store,
-      # and not ours to touch.  `pycifrw`, `monty`, `qcelemental` and `qcengine`
-      # are the guarded backports this is for; on a channel new enough to carry
-      # them, ../overlays leaves nixpkgs' derivation in place and there is
-      # nothing here to update.
+      # and not ours to touch.  `pycifrw`, `monty`, `qcelemental`, `qcengine`,
+      # `phonopy`, `phonors` and `symfc` are the guarded backports this is for;
+      # on a channel new enough to carry them, ../overlays leaves nixpkgs'
+      # derivation in place and there is nothing here to update.
       mode = if directory == null then "external" else declared.mode or inferred;
       inferredMode = inferred;
       declaredMode = declared.mode or null;

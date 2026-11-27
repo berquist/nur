@@ -104,11 +104,20 @@ buildPythonPackage (finalAttrs: {
   # reshuffled.  `test_batch_momentum_conservation` beside them already supplies
   # a cell per batch; this makes the other three match.  Worth sending upstream,
   # along with the observation that nothing validates the two shapes agree.
+  #
+  # The fifth is a wrong fake kernel that torch 2.15 started to check.  The
+  # Ewald reciprocal op returns a cell-gradient cache of (S*K, 8) whenever a
+  # cell gradient is wanted, and its fake kernel always declares (0, 8).
+  # Inductor now compares the two, and three `*TorchCompile` tests fail with
+  # `expected size 665==0`.  See the patch's own header.  When you check this by
+  # hand, use an empty `TORCHINDUCTOR_CACHE_DIR`.  Inductor caches the compiled
+  # graph across runs, and a graph cached before the fix keeps the old shape.
   patches = [
     ./torchpme-import-guard.patch
     ./cuda-gating.patch
     ./torchpme-prefactor-moved.patch
     ./batched-cell-out-of-bounds.patch
+    ./ewald-recip-fake-cellgrad-shape.patch
   ];
 
   # Five modules pick a CUDA device in the test body rather than through a
@@ -192,6 +201,37 @@ buildPythonPackage (finalAttrs: {
       --replace-fail \
         'cell = np.eye(3)' \
         'cell = np.eye(3, dtype=positions.dtype)'
+
+    # warp-lang 1.19 deleted `warp.jax_experimental`.  The same functions are
+    # now top-level `warp` attributes, and `GraphMode` is `JaxCallableGraphMode`
+    # there.  Twenty-four test modules failed to collect, and
+    # `nvalchemiops.jax` failed to import at all.  Each import becomes a
+    # try/except that keeps the old spelling first.  The legs with warp 1.15
+    # still get exactly what upstream wrote, and only a warp without the old
+    # module falls through.  Every such import is one line at column zero, and
+    # `GraphMode` is always the first name, so the first expression handles the
+    # rename.  The second expression cannot see a line the first one rewrote,
+    # because `^` anchors to the start of the pattern space, which is `try:`
+    # by then.  The keyword arguments upstream passes to `jax_kernel` and
+    # `jax_callable` all still exist in 1.19.
+    grep --recursive --files-with-matches --null 'from warp.jax_experimental import' nvalchemiops test \
+      | xargs --null sed --in-place --regexp-extended \
+        --expression 's/^from warp\.jax_experimental import GraphMode(.*)$/try:\n    from warp.jax_experimental import GraphMode\1\nexcept ImportError:\n    from warp import JaxCallableGraphMode as GraphMode\1/' \
+        --expression 's/^from warp\.jax_experimental import (.*)$/try:\n    from warp.jax_experimental import \1\nexcept ImportError:\n    from warp import \1/'
+
+    # This test checks that the PBC path never calls `torch.repeat_interleave`.
+    # It patches the function with a MagicMock, and `prepare_batch_idx_ptr` is
+    # `@torch.compile`, so dynamo traces past the mock.  torch 2.15's dynamo
+    # reads `__name__` from torch functions, and a MagicMock has none:
+    #
+    #     torch._dynamo.exc.InternalTorchDynamoError: AttributeError: __name__
+    #
+    # Naming the mock is enough.  The guard still works: with `batch_idx=None`
+    # the test fails on "unexpected repeat_interleave call", as it should.
+    substituteInPlace test/neighbors/bindings/torch/test_batch_naive.py \
+      --replace-fail \
+        'side_effect=AssertionError("unexpected repeat_interleave call"),' \
+        'side_effect=AssertionError("unexpected repeat_interleave call"), __name__="repeat_interleave",'
   '';
 
   build-system = [ hatchling ];

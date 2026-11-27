@@ -1002,6 +1002,117 @@ buildPythonPackage rec {
         "        list_repository_contents(folder_data, path=''', color=True)
             values = outstreams[0].getvalue()"
 
+    # click 8.4 costs sixteen tests in two clusters, and neither is an aiida
+    # bug.  The first is fifteen of tests/cmdline/params/options/
+    # test_interactive.py plus one RabbitMQ prompt test in test_profile.py:
+    #
+    #     AssertionError: assert 'Opt: TEST\nTEST\n' in
+    #       '...\x1b[93mOpt\x1b[0m: TEST\nTEST\n'
+    #
+    # InteractiveOption colours its prompt with click.style, and CliRunner's
+    # default `color=False` promises to strip that.  Up to 8.3 the promise
+    # held, because click.prompt wrote the prompt through `echo`, which
+    # CliRunner patches to strip.  8.4's `_readline_prompt` hands the whole
+    # styled string to `visible_prompt_func` instead, so that readline can
+    # place the cursor, and CliRunner's replacement for that function writes it
+    # out verbatim.  Unstyling the captured bytes in the runner restores what
+    # `color=False` says it does.  Nothing that goes through this runner asks
+    # for colour — the two tests that assert on ANSI codes call
+    # `runner.isolation(color=True)` or the formatter directly.
+    #
+    # The bytes round-trip through `surrogateescape` because not every command
+    # prints text.  `verdi node repo cat` on a `.gz` file writes gzip to stdout,
+    # and a strict `decode()` failed test_node_repo_cat with "can't decode byte
+    # 0x8b".  The escape handler hands every non-UTF-8 byte back unchanged.
+    #
+    # The second is click rewording its own error, from
+    # `No such option: --broker-port` to `No such option '--broker-port'.`.
+    # The test asserts that the option is rejected, so it checks both halves
+    # rather than either spelling.
+    substituteInPlace tests/conftest.py \
+      --replace-fail \
+        "stderr_bytes=result.stderr_bytes or b'''," \
+        "stderr_bytes=click.unstyle((result.stderr_bytes or b''').decode(errors='surrogateescape')).encode(errors='surrogateescape')," \
+      --replace-fail \
+        'stdout_bytes=result.stdout_bytes,' \
+        "stdout_bytes=click.unstyle(result.stdout_bytes.decode(errors='surrogateescape')).encode(errors='surrogateescape'),"
+    substituteInPlace tests/cmdline/commands/test_profile.py \
+      --replace-fail \
+        "assert 'No such option: --broker-port' in cli_result.output" \
+        "assert 'No such option' in cli_result.output and '--broker-port' in cli_result.output"
+
+    # Two timing failures that 128 xdist workers expose.
+    #
+    # test_change_workers_without_wait waits for the worker count to reach its
+    # target and then sends `decr`, which can come back `'error'`.  circus
+    # marks `incr` and `decr` as exclusive commands, and a second exclusive
+    # command fails with "arbiter is already running watcher_incr command"
+    # (circus/util.py, `synchronized`).  Its `spawn_processes` sleeps through
+    # the warmup delay after it starts each process.  So the new worker is
+    # visible before `incr` lets go of the lock, which is the window that the
+    # test's own `await_workers` docstring describes but does not close.  The
+    # test now sends `decr` again while the reply is that conflict.  Every
+    # other reply, including any other error, still reaches the assertion.
+    #
+    # test_calc_job_monitors_process_poll_interval_integrated asserts that a
+    # monitor with a 5-second `minimum_poll_interval` runs exactly once during
+    # a job that sleeps for 1 second.  Under load the job can finish before
+    # the first monitor poll:
+    #
+    #     CalcJob<5> already marked as `CalcJobState.STASHING`, skipping
+    #       task_monitor_job
+    #     assert 0 == 1
+    #
+    # A 4-second job keeps the lower bound with much more margin.  It also
+    # keeps the upper bound: a second call needs 5 seconds after the first,
+    # and the job ends before then.
+    substituteInPlace tests/engine/daemon/test_client.py \
+      --replace-fail 'import pathlib' 'import pathlib
+    import time' \
+      --replace-fail \
+        "    response = client.decrease_workers(1)
+        assert response['status'] == 'ok'" \
+        "    response = client.decrease_workers(1)
+        for _ in range(100):
+            if 'already running' not in str(response.get('reason')):
+                break
+            time.sleep(0.1)
+            response = client.decrease_workers(1)
+        assert response['status'] == 'ok'"
+    substituteInPlace tests/engine/processes/calcjobs/test_monitors.py \
+      --replace-fail \
+        "builder.metadata = {'options': {'sleep': 1, 'resources': {'num_machines': 1}}}" \
+        "builder.metadata = {'options': {'sleep': 4, 'resources': {'num_machines': 1}}}"
+
+    # Another leaked row, and this one is a computer.  tests/static/calcjob/
+    # arithmetic.add.aiida carries a computer labelled `localhost` whose
+    # transport is `local`, the entry-point name from before the `core.`
+    # prefix.  test_import_archive and test_import_to_group import that archive
+    # into the shared profile and leave the row behind.  Any later test on the
+    # same worker that asks for `aiida_localhost` then fails in setup: the
+    # fixture looks for label, hostname, scheduler *and* transport, misses the
+    # stale row, and its store hits the label constraint alone:
+    #
+    #     ERROR tests/orm/data/code/test_portable.py::test_can_run_on_computer
+    #       UniqueViolation: duplicate key value violates unique constraint
+    #       "uq_db_dbcomputer_label"
+    #
+    # Hundreds of tests ask for `aiida_localhost`, so guarding victims is not
+    # an option, and `aiida_profile_clean` cleans at setup, which cannot help
+    # the test that comes *after*.  Asking for `aiida_localhost` in the two
+    # importers fixes it at the source.  With a correct `localhost` already
+    # stored, the import relabels the archive's computer to `localhost
+    # (Imported #0)`, which is exactly what already happens in test_calcjob.py,
+    # whose fixture requests `aiida_localhost` before it imports the same
+    # archive.  Neither test asserts on computers.
+    substituteInPlace tests/cmdline/commands/test_archive_import.py \
+      --replace-fail \
+        'def test_import_archive(run_cli_command, newest_archive):' \
+        'def test_import_archive(run_cli_command, newest_archive, aiida_localhost):' \
+      --replace-fail \
+        'def test_import_to_group(run_cli_command, newest_archive):' \
+        'def test_import_to_group(run_cli_command, newest_archive, aiida_localhost):'
+
     substituteInPlace src/aiida/tools/pytest_fixtures/storage.py \
       --replace-fail \
         "import pathlib
@@ -1164,9 +1275,17 @@ buildPythonPackage rec {
   # 9.6.2 and `pamqp~=3.2` against 4.0.1.  They were never checked here before,
   # because as transitive dependencies of kiwipy no metadata check of this
   # package's own ever looked at them.
+  #
+  # click-spinner~=0.1.8 against 0.2.0.  aiida-core imports `spinner` alone,
+  # in three places, and only ever as a bare `with spinner():`; 0.2.0 still has
+  # that function, with the same keywords, returning a context manager.  Safe to
+  # list by name despite the `click` trap described above `postPatch`: that one
+  # is `click` matching the *prefix* of `click-spinner`, and nothing here starts
+  # with `click-spinner`.
   pythonRelaxDeps = [
     "aio-pika"
     "asyncssh"
+    "click-spinner"
     "importlib-metadata"
     "jedi"
     "pamqp"

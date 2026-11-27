@@ -62,13 +62,6 @@ buildPythonPackage (finalAttrs: {
 
   build-system = [ setuptools ];
 
-  # `phonopy >= 4.2` is a hard requirement in the wheel metadata, and
-  # nixos-26.05 carries phonopy 3.5.1 — `pythonRuntimeDepsCheckHook` fails there
-  # before anything runs.  matcalc's phonopy use is version-agnostic (`import
-  # phonopy`, `phonopy.file_IO.write_FORCE_CONSTANTS`, `pymatgen.io.phonopy`),
-  # the same stable surface ../aiida-phonopy relaxes for the same reason.
-  pythonRelaxDeps = [ "phonopy" ];
-
   dependencies = [
     ase
     huggingface-hub
@@ -82,11 +75,13 @@ buildPythonPackage (finalAttrs: {
   # `mace-torch` is (unstable, not 26.05); `fairchem` only where `e3nn` is,
   # which is the same two channels — ../../overlays/default.nix nulls
   # fairchem-core where it is not, and the note there says why that has to be
-  # a null rather than a `meta.broken`; `phonon3` only where phonopy is 4.x,
-  # since ../phono3py needs `phonopy >= 4.4` and 26.05 has 3.5.1.  Still
-  # missing: `mattersim` / `orb` / `petmad`, which need NVIDIA's
-  # `nvalchemi-toolkit-ops` the way torch-sim does — and with `fairchem` here
-  # that is now the *only* thing keeping any matcalc backend out.
+  # a null rather than a `meta.broken`.  `phonon3` is unconditional: it used to
+  # be gated on phonopy being 4.x, for 26.05's 3.5.1, but the materials overlay
+  # now carries ../phonopy wherever the channel is behind ../phono3py's pin, so
+  # the gate could no longer be false.  Still missing: `mattersim` / `orb` /
+  # `petmad`, which need NVIDIA's `nvalchemi-toolkit-ops` the way torch-sim
+  # does — and with `fairchem` here that is now the *only* thing keeping any
+  # matcalc backend out.
   #
   # `deepmd` and `fairchem` were both on that list until ../deepmd-kit and
   # ../fairchem-core landed, and neither belonged there: each was recorded as
@@ -114,6 +109,7 @@ buildPythonPackage (finalAttrs: {
   # evaluation cannot see and only a build reports.
   optional-dependencies = {
     phonon = [ seekpath ];
+    phonon3 = [ phono3py ];
     benchmark = [ matminer ];
     maml = [ maml ];
     matgl = [ matgl ];
@@ -132,9 +128,6 @@ buildPythonPackage (finalAttrs: {
   }
   // lib.optionalAttrs (mace-torch != null) {
     mace = [ mace-torch ];
-  }
-  // lib.optionalAttrs (lib.versionAtLeast phonopy.version "4") {
-    phonon3 = [ phono3py ];
   };
 
   preBuild = ''

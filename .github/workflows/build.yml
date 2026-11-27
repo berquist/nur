@@ -66,7 +66,9 @@ jobs:
     - name: Check evaluation
       run: nix shell -f '<nixpkgs>' just -c just ci-eval
     - name: Build nix packages
-      run: nix shell -f '<nixpkgs>' just -c just ci-build
+      # `true` drops the packages too large for a hosted runner; see
+      # `tooHeavyForHostedRunners` in ci.nix.
+      run: nix shell -f '<nixpkgs>' just -c just ci-build true
     - name: Trigger NUR update
       # Don't replace <YOUR_REPO_NAME> here!
       if: ${{ matrix.nurRepo != '<YOUR_REPO_NAME>' }}
